@@ -421,5 +421,12 @@
   "Zoom": "变焦",
   "Zoom Ring Rotate": "变焦环旋转",
   "Zoom Setting": "变焦设置",
-  "e-Front Curtain Shut.": "电子前帘快门"
+  "e-Front Curtain Shut.": "电子前帘快门",
+  "Base style": "基础风格",
+  "Contrast": "对比度",
+  "Saturation": "饱和度",
+  "Sharpness": "锐度",
+  "UI prototype - image processing not connected": "界面原型 · 尚未接通成像处理",
+  "Picture Profile / Picture Effect: Off": "图片配置文件／照片效果：关",
+  "Enter: apply in QEMU / Esc: cancel": "确认：应用到模拟器　返回：取消"
 }

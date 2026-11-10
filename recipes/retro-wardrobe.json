@@ -1,0 +1,13 @@
+{
+  "name": "Retro Wardrobe",
+  "name_zh": "复古衣橱",
+  "base_style": "Neutral",
+  "contrast": 1,
+  "saturation": -1,
+  "sharpness": -1,
+  "white_balance": "Daylight",
+  "picture_profile": "Off",
+  "picture_effect": "Off",
+  "implementation": "qemu_ui_prototype",
+  "native_integration_verified": false
+}

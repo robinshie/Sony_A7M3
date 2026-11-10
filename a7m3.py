@@ -54,7 +54,7 @@ def main():
         ("serial-check", "检查 UTM 专用串口，不访问相机"),
         ("status", "检查 UTM 是否看到一台目标相机"),
         ("backup", "从真机读取 BK4 设置和完整 /usr 分区"),
-        ("flash", "烧录改版扇区并回读"),
+        ("flash", "仅烧录菜单标题补丁并回读；不包含创意风格"),
         ("verify", "重启后读取扇区和菜单，校验改版"),
         ("restore", "写回原始扇区并回读"),
         ("verify-original", "重启后读取扇区和菜单，校验原版"),
@@ -78,6 +78,7 @@ def main():
             else:
                 if args.action in ("flash", "restore"):
                     print(f"真机写入操作：{args.action}；请保持电量和 USB 连接。", flush=True)
+                    print("范围：菜单标题资源扇区；不包含创意风格或成像处理修改。", flush=True)
                 device("write" if args.action == "flash" else args.action)
                 if args.action in ("flash", "restore"):
                     print("写入已回读。请关机、断开 USB、重新开机后运行对应的校验命令。")

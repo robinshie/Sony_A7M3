@@ -30,7 +30,7 @@ typedef struct { const uint8_t *ink; uint8_t width, height; } Icon;
 #include "fonts.h"
 #include "firmware_ui.h"
 
-enum Screen { SHOOT, MENU, FN, PLAY, INDEX, OPTION, QUICK };
+enum Screen { SHOOT, MENU, FN, PLAY, INDEX, OPTION, QUICK, PRESET };
 enum Key { NONE, UP, DOWN, LEFT, RIGHT, CONFIRM, BACK, MENUKEY, FNKEY,
            PLAYKEY, DISPKEY, PAGEUP, PAGEDOWN, SHUTTER, MOVIE, INDEXKEY,
            ZOOMKEY, DELETEKEY, LANGUAGEKEY, TAB1, TAB2, TAB3, TAB4, TAB5, TAB6 };
@@ -44,6 +44,8 @@ static int tab, page_no, row, option, option_id, fn_slot, disp, mode;
 static bool adding, zoomed, recording, movie_frame, deleting;
 static int shots, playback;
 static int remembered[6];
+static int creative_contrast, creative_saturation, creative_sharpness;
+static const char *creative_base_style="Standard";
 static const int fn_items[] = {
     ITEM_DRIVE_MODE, ITEM_FLASH_MODE, ITEM_FLASH_COMP_, ITEM_FOCUS_MODE,
     ITEM_FOCUS_AREA, ITEM_EXPOSURE_COMP_, ITEM_ISO, ITEM_METERING_MODE,
@@ -483,6 +485,27 @@ static void draw_options(void)
     }
     footer(0,0);
 }
+static void draw_preset(void)
+{
+#if RETRO_STYLE_INDEX >= 0
+    fill(0,0,W,H,0);
+    center(&title,320,64,RETRO_NAME,FG);
+    center(&small,320,100,"UI prototype - image processing not connected",DIM);
+    fill(18,116,604,1,0x737373);
+    const char *names[]={"Base style", "Contrast", "Saturation", "Sharpness", "White Balance"};
+    static const char cv[3]={RETRO_CONTRAST<0?'-':'+','0'+(RETRO_CONTRAST<0?-RETRO_CONTRAST:RETRO_CONTRAST),0};
+    static const char sv[3]={RETRO_SATURATION<0?'-':'+','0'+(RETRO_SATURATION<0?-RETRO_SATURATION:RETRO_SATURATION),0};
+    static const char hv[3]={RETRO_SHARPNESS<0?'-':'+','0'+(RETRO_SHARPNESS<0?-RETRO_SHARPNESS:RETRO_SHARPNESS),0};
+    const char *values[]={RETRO_BASE_STYLE,cv,sv,hv,RETRO_WHITE_BALANCE};
+    for(int i=0;i<5;i++) {
+        label(&body,34,155+i*43,names[i],FG);
+        right(&body,604,155+i*43,values[i],FG);
+    }
+    center(&small,320,370,"Picture Profile / Picture Effect: Off",DIM);
+    center(&small,320,409,"Enter: apply in QEMU / Esc: cancel",FG);
+    footer(0,0);
+#endif
+}
 static void uart(const char *s)
 {
     for (;*s;s++) {
@@ -492,7 +515,7 @@ static void uart(const char *s)
 }
 static void report(void)
 {
-    static const char *const labels[]={"shoot","menu","fn","play","index","option","quick"};
+    static const char *const labels[]={"shoot","menu","fn","play","index","option","quick","preset"};
     char b[12];
     uart(labels[screen]); uart(" ");
     if (screen==MENU) {
@@ -506,6 +529,18 @@ static void report(void)
         nstr(b,fn_slot+1); uart(b);
     } else if(screen==PLAY || screen==INDEX) {
         nstr(b,shots); uart(b);
+    }
+    if (screen==OPTION && option_id==ITEM_CREATIVE_STYLE) {
+        const int values[]={creative_contrast,creative_saturation,creative_sharpness};
+        const char *names[]={" C="," S="," H="};
+        for(int i=0;i<3;i++) {
+            uart(names[i]); if(values[i]<0) uart("-");
+            nstr(b,values[i]<0?-values[i]:values[i]); uart(b);
+        }
+        uart(" WB="); uart(value_of(ITEM_WHITE_BALANCE));
+        uart(" PP="); uart(value_of(ITEM_PICTURE_PROFILE));
+        uart(" FX="); uart(value_of(ITEM_PICTURE_EFFECT));
+        uart(" BASE="); uart(creative_base_style);
     }
     uart(use_chinese()?" [zh-CN]\n":" [en]\n");
 }
@@ -521,6 +556,7 @@ static void paint(void)
     case QUICK: draw_fn(true); break;
     case PLAY: case INDEX: draw_play(); break;
     case OPTION: draw_options(); break;
+    case PRESET: draw_preset(); break;
     }
     __asm__ volatile("dsb sy" ::: "memory");
     LCD[4]=(uint32_t)(uintptr_t)pixels;
@@ -529,7 +565,27 @@ static void paint(void)
 static void reset_choices(void)
 {
     for (unsigned i=0;i<COUNT(items);i++) selected[i]=items[i].initial;
+    creative_contrast=creative_saturation=creative_sharpness=0;
+    creative_base_style="Standard";
 }
+#if RETRO_STYLE_INDEX >= 0
+static void choose_value(int id, const char *value)
+{
+    for(int i=0;i<items[id].count;i++)
+        if(!compare(choices[items[id].first+i],value)) { selected[id]=i; return; }
+}
+static void apply_preset(void)
+{
+    selected[ITEM_CREATIVE_STYLE]=RETRO_STYLE_INDEX;
+    creative_contrast=RETRO_CONTRAST;
+    creative_saturation=RETRO_SATURATION;
+    creative_sharpness=RETRO_SHARPNESS;
+    creative_base_style=RETRO_BASE_STYLE;
+    choose_value(ITEM_WHITE_BALANCE,RETRO_WHITE_BALANCE);
+    choose_value(ITEM_PICTURE_PROFILE,RETRO_PICTURE_PROFILE);
+    choose_value(ITEM_PICTURE_EFFECT,RETRO_PICTURE_EFFECT);
+}
+#endif
 static void choose_tab(int t)
 {
     remembered[tab]=page_no;
@@ -577,9 +633,16 @@ static void handle(enum Key k)
         if (screen==OPTION && option_id==ITEM_LANGUAGE) option=selected[ITEM_LANGUAGE];
         return;
     }
-    if (screen!=OPTION && k>=TAB1 && k<=TAB6) {
+    if (screen!=OPTION && screen!=PRESET && k>=TAB1 && k<=TAB6) {
         if(screen!=MENU) open_menu();
         choose_tab(k-TAB1); page_no=0; row=0;
+        return;
+    }
+    if(screen==PRESET) {
+#if RETRO_STYLE_INDEX >= 0
+        if(k==CONFIRM) { apply_preset(); screen=parent; }
+        else if(k==BACK||k==MENUKEY) screen=OPTION;
+#endif
         return;
     }
     if (screen==OPTION) {
@@ -588,7 +651,20 @@ static void handle(enum Key k)
         if(k==UP||k==DOWN||k==LEFT||k==RIGHT) {
             if(count) option=wrap(option+((k==UP||k==LEFT)?-1:1),count);
         } else if(k==CONFIRM) {
+            if(option_id==ITEM_CREATIVE_STYLE && option==RETRO_STYLE_INDEX) {
+                screen=PRESET;
+                return;
+            }
             if(a->count) selected[option_id]=option;
+            if(option_id==ITEM_CREATIVE_STYLE) {
+                creative_contrast=creative_saturation=creative_sharpness=0;
+                creative_base_style=choices[a->first+option];
+            }
+            if((option_id==ITEM_PICTURE_PROFILE || option_id==ITEM_PICTURE_EFFECT) && option!=0) {
+                selected[ITEM_CREATIVE_STYLE]=0;
+                creative_contrast=creative_saturation=creative_sharpness=0;
+                creative_base_style="Standard";
+            }
             if(option_id==ITEM_SETTING_RESET) { reset_choices(); if(option==1) my_count=0; }
             if(option_id==ITEM_FORMAT && option==1) clear_shots();
             screen=parent;

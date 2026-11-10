@@ -126,7 +126,7 @@ def normalize(value):
 def cstr(value):
     return json.dumps(normalize(value), ensure_ascii=False)
 
-def make_tables():
+def make_tables(recipe=None):
     tabs, pages, names = [], [], []
     for line in read_lines(HERE / "pages.txt"):
         if line.startswith("@"):
@@ -143,6 +143,14 @@ def make_tables():
     default = json.loads((HERE / "defaults.json").read_text())
     options = {k: v.split(";") for k, v in
                (line.split("|") for line in read_lines(HERE / "choices.txt"))}
+    if recipe:
+        if recipe["name"] in options["Creative Style"]:
+            raise ValueError("Recipe name conflicts with an original style")
+        for field, item in (("base_style", "Creative Style"), ("white_balance", "White Balance"),
+                            ("picture_profile", "Picture Profile"), ("picture_effect", "Picture Effect")):
+            if recipe[field] not in options[item]:
+                raise ValueError(f"Unknown {field}: {recipe[field]}")
+        options["Creative Style"].append(recipe["name"])
     visible = {
         "Movie Exposure Mode": "Exposure Mode",
         "S&Q Exposure Mode": "Exposure Mode",
@@ -167,6 +175,12 @@ def make_tables():
     for label in groups:
         key = "".join(c.upper() if c.isalnum() else "_" for c in label)
         write("#define ITEM_", key, " ", names.index(label))
+    write("#define RETRO_STYLE_INDEX ", len(options["Creative Style"])-1 if recipe else -1)
+    if recipe:
+        for key in ("name", "base_style", "white_balance", "picture_profile", "picture_effect"):
+            write("#define RETRO_", key.upper(), " ", cstr(recipe[key]))
+        for key in ("contrast", "saturation", "sharpness"):
+            write("#define RETRO_", key.upper(), " (", recipe[key], ")")
     strings = []
     rows = []
     for item in names:
@@ -227,21 +241,34 @@ def make_font(size, id, codes, latin_ttf, chinese_ttf):
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--playground", action="store_true", help="build the separate playground variant")
+    cli.add_argument("--retro-wardrobe", action="store_true", help="build the unflashed creative-style UI prototype")
     args = cli.parse_args()
     os.chdir(HERE)
     out = HERE / "build"
     chinese_blob, accent = None, 0xe64c00
+    recipe = None
+    if args.retro_wardrobe:
+        recipe = json.loads((HERE.parent / "recipes/retro-wardrobe.json").read_text())
+        for key in ("contrast", "saturation", "sharpness"):
+            if type(recipe[key]) is not int or not -3 <= recipe[key] <= 3:
+                cli.error(f"{key} must be an integer between -3 and 3")
+        if recipe["implementation"] != "qemu_ui_prototype" or recipe["native_integration_verified"] is not False:
+            cli.error("This build only supports the unverified UI prototype")
     if args.playground:
         out /= "playground"
         try:
             chinese_blob, accent = playground_settings(HERE / "playground.json")
         except (OSError, ValueError) as error:
             cli.error(str(error))
+    if recipe:
+        out /= "retro-wardrobe"
     out.mkdir(parents=True, exist_ok=True)
-    data = make_tables()
+    data = make_tables(recipe)
     dictionary = {normalize(k): normalize(v) for k, v in
                   json.loads((HERE / "zh-cn.json").read_text()).items()}
     dictionary.update(native_headings(chinese_blob))
+    if recipe:
+        dictionary[recipe["name"]] = recipe["name_zh"]
     translated = "static const Translation zh_strings[] = {\n" + "".join(
         f"    {{{cstr(k)},{cstr(v)}}},\n" for k, v in sorted(dictionary.items())) + "};\n"
     (out / "menu_data.h").write_text(data + translated)
