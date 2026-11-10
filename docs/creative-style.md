@@ -1,6 +1,6 @@
 # 「复古衣橱」创意风格实验
 
-**状态：QEMU 界面原型已验证，原厂固件功能尚未实现，未烧录此功能。** 已完成的真机菜单标题补丁是另一项修改，不能证明新增创意风格或 JPEG 成像链路已经接通。`a7m3.py flash` 仍只写标题补丁。
+**状态：QEMU 界面原型已验证；机身手动设置的配方已在重启后回读确认；新增固件菜单项尚未实现，未烧录此功能。** 已完成的真机菜单标题补丁是另一项修改，不能证明新增创意风格或 JPEG 成像链路已经接通。`a7m3.py flash` 仍只写标题补丁。
 
 目标是在「创意风格」中新增「复古衣橱」，保留原有选项，并在机身中实际应用、保存以下设置。配方在 [`recipes/retro-wardrobe.json`](../recipes/retro-wardrobe.json)。这是基于 Sony 现有调节项的实验配方，尚无实拍对比，不声称复现某款富士胶片模拟。
 
@@ -54,9 +54,39 @@ python research/creative_dispatch.py --usr \
 - 因此，单纯追加新编号并沿用当前转换函数不能完成新增风格。返回 14 的下游语义尚未验证，不能仅凭数值将其当作可用的第十四种风格。
 - 这只验证一个 UI 编号转换函数，不是原厂界面启动测试，也不验证 ISP 或图像输出。
 
-静态分析还定位到 `CautionConfig.so` 中的 `CmnViewSettingNodeCreativeStyle::_getSubNode()`（`0x0069335c`）。它读取设置 ID `0x01070316`，再选择不同的节点数组。已有机身备份中此值为 `0x3e`，按静态分支对应 `cmnViewSettingNodesCreativeStyleTypeEmnt`，含 91 个节点引用。该结论来自既有备份与二进制分析，本轮没有重新读取或改写机身设置。
+静态分析还定位到 `CautionConfig.so` 中的 `CmnViewSettingNodeCreativeStyle::_getSubNode()`（`0x0069335c`）。它读取设置 ID `0x01070316`，再选择不同的节点数组。已有机身备份中此值为 `0x3e`，按静态分支对应 `cmnViewSettingNodesCreativeStyleTypeEmnt`，含 91 个节点引用。之后的运行进程只读检查确认：根节点的子节点指针和计数与此数组一致；Neutral 节点已连接到根节点，Real 节点尚未连接。
 
 报告包含 99 份导出的 CreativeStyle 属性表及各节点数组的重定位名称。属性表中的数字键、UI 编号、底层风格值和设置备份 ID 不能互相混用。库里出现 `CreativeStyleReal` 名称，也不能据此认定有可直接启用的隐藏风格。
+
+## 真机设置与运行进程的只读验证
+
+2026-11-10，用户在机身中手动选择中性、调整参数，并关机再开机后重新连接。多份独立 BK4 快照通过长度及校验和检查；最终读到以下字段。此过程未通过 USB 写入这些设置，也没有添加新的风格条目。
+
+| BK4 属性 ID | 原厂 `libObj.so` 注册名称 | 最终值 |
+| --- | --- | --- |
+| `0x01070175` | `COLOR_MODE_TYPE` | `03`，与本次机身选择中性对应 |
+| `0x01070178` | `CONTRAST_LEVEL` | `01`，+1 |
+| `0x01070187` | `SATURATION_LEVEL` | `ff`，有符号单字节 −1 |
+| `0x0107018a` | `SHARPNESS_LEVEL` | `ff`，有符号单字节 −1 |
+
+原厂注册位置在 `libObj.so` 的 `0x004ba91e`、`0x004ba93a`、`0x004ba956`、`0x004ba972`，相邻字符串分别给出上述名称。对比度测试中先读到 `02`，恢复配方后为 `01`；饱和度及锐度从 `00` 变为 `ff`。同次保存还改变了其他字段，因此不能把上述四个地址当作完整的风格保存协议。初次未重启的快照没有体现手动调整，后续测试明确要求关机再开机。
+
+沿用[真机操作手册](updater.md)中的环境配置：
+
+```sh
+python a7m3.py settings-snapshot
+python research/settings_diff.py --pmca .lab/Sony-PMCA-RE \
+  .lab/settings-snapshots/settings-BEFORE.bin \
+  .lab/settings-snapshots/settings-AFTER.bin
+```
+
+快照每次创建新文件，不覆盖最初备份。差异工具默认只输出属性 ID、长度、散列及属性/重置值是否变化；`--show-small-values` 可在本地显示不超过 8 字节的变化值。这些结果只是参数候选，工具不提供据此自动写回的功能。快照包含机身私有信息，均保存在忽略目录。
+
+`settings-runtime-snapshot` 还会在维护进程 RAM 内临时加载 `a7-runtime-probe.c` 编译的探针。它顺序读取 `/proc/self/maps` 和 `cmdline`，按映射权限检查范围后读取几个已知节点；只创建维护临时目录里的报告，读回后清理。它不改节点、固件或设置。运行前必须完成 `a7m3.py qemu-test`，工具校验被加载载荷的 SHA-256 与测试记录一致。
+
+运行检查确认维护入口位于 `/usr/bin/im.elf` 进程，`libObj.so`、`viewUnified2.so` 与 `CautionConfig.so` 均已加载。这个结果说明可以进一步研究同一进程中的接口，**不证明**新增节点或调用设置服务已经成功。
+
+探针的 QEMU 检查包含：目标库未加载时不解引用；加载合成节点库时读取已知标记；前后磁盘测试扇区一致。合成库只含测试整数，不分发原厂库。原有备份、错误前置镜像拒绝、写入及恢复测试也通过。
 
 ## 真机烧录尚缺的实现
 

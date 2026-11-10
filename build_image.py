@@ -104,7 +104,8 @@ def compile_payloads(include_write):
     flags = ["-mcpu=cortex-a9", "-marm", "-mfloat-abi=soft", "-Os", "-fPIC",
              "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
              "-fno-unwind-tables", "-fno-asynchronous-unwind-tables"]
-    jobs = {"readback": ("a7-readback-probe.c", []), "backup": ("a7-partition-backup.c", [])}
+    jobs = {"readback": ("a7-readback-probe.c", []), "backup": ("a7-partition-backup.c", []),
+            "runtime": ("a7-runtime-probe.c", [])}
     with tempfile.TemporaryDirectory(dir=LAB) as work:
         tmp = Path(work)
         if include_write:

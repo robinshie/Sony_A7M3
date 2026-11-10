@@ -22,6 +22,29 @@ $b dd if="$stage/a7rdo.bin" of=/sector bs=1 skip=2088 count=512 2>/dev/null
 $b cmp /sector /before.bin
 echo QEMU_READBACK_OK
 
+run runtime
+test "$($b wc -c < "$stage/a7rt.bin")" = 66204
+test "$(word "$stage/a7rt.bin" 0)" = 41375254
+test "$(word "$stage/a7rt.bin" 4)" != 00000000
+$b grep -aq '/bin/busybox' "$stage/a7rt.bin"
+test "$(word "$stage/a7rt.bin" 66060)" = 00000000
+test "$(word "$stage/a7rt.bin" 66064)" = 00000000
+echo QEMU_RUNTIME_ABSENT_OK
+$b rm "$stage/a7rt.bin"
+$b cp /payloads/runtime.so "$stage/libJit.so"
+$b chroot /sony /bin/busybox sh -c 'LD_PRELOAD=/usr/lib/CautionConfig.so:/tmp/jiritsu/libJit.so /bin/busybox true'
+test ! -e "$stage/libJit.so"
+echo "QEMU_RUNTIME_NODE_STATUS=$(word "$stage/a7rt.bin" 66064)"
+test "$(word "$stage/a7rt.bin" 66064)" = 00000002
+test "$(word "$stage/a7rt.bin" 66068)" = 00005000
+test "$(word "$stage/a7rt.bin" 66108)" = 00001000
+test "$(word "$stage/a7rt.bin" 66148)" = 00003000
+test "$(word "$stage/a7rt.bin" 66188)" = 00004000
+test "$(word "$stage/a7rt.bin" 66196)" = 00002000
+capture
+$b cmp /sector /before.bin
+echo QEMU_RUNTIME_OK
+
 run backup
 test "$(word "$stage/a7ram/tag.bin" 0)" = 41375342
 printf '\0\0\0\0' > "$stage/a7ram/req.bin"

@@ -23,7 +23,10 @@ def device(action):
                 "请用 A7M3_PMCA_DIR 指向本地 Sony-PMCA-RE 源码目录。")
         sys.path.insert(0, str(pmca))
         from camera.service import settings_ok
-        if action == "backup":
+        if action in ("settings-snapshot", "settings-runtime-snapshot"):
+            if action == "settings-runtime-snapshot":
+                payload("runtime")
+        elif action == "backup":
             require(not BACKUP.exists() and not BACKUP.with_suffix(".partial").exists(),
                     "已有完整或部分备份；请归档，工具不会覆盖。")
             payload("backup")
@@ -54,6 +57,8 @@ def main():
         ("serial-check", "检查 UTM 专用串口，不访问相机"),
         ("status", "检查 UTM 是否看到一台目标相机"),
         ("backup", "从真机读取 BK4 设置和完整 /usr 分区"),
+        ("settings-snapshot", "只读获取新的 BK4 设置快照，不覆盖初始备份"),
+        ("settings-runtime-snapshot", "只读获取 BK4 和维护进程库布局，供原厂设置调用研究"),
         ("flash", "仅烧录菜单标题补丁并回读；不包含创意风格"),
         ("verify", "重启后读取扇区和菜单，校验改版"),
         ("restore", "写回原始扇区并回读"),

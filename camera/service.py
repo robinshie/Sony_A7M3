@@ -1,5 +1,6 @@
 """Host-side Sony maintenance transport. Only the write/restore payloads touch /usr."""
 import io
+import json
 import os
 import struct
 import time
@@ -88,6 +89,37 @@ def perform(camera, action):
     factory = Factory(camera)
     require(factory.contents("/version.txt") == BUILD_ID, "机身内部版本与已验证的 4.04 不符。")
     print("LIVE_FIRMWARE_BUILD_MATCH", flush=True)
+    if action in ("settings-snapshot", "settings-runtime-snapshot"):
+        data = camera.getBackupPresetData(True)
+        settings_ok(data)
+        directory = LAB / "settings-snapshots"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination = directory / f"settings-{time.time_ns()}.bin"
+        with destination.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        settings_ok(destination.read_bytes())
+        print(f"LIVE_SETTINGS_SNAPSHOT {destination} bytes={len(data)} sha256={sha(data)}", flush=True)
+        if action == "settings-runtime-snapshot":
+            raw = factory.run(payload("runtime"), "a7rt.bin")
+            require(len(raw) == 66204, "进程布局报告长度异常。")
+            magic, maps_n, cmdline_n = struct.unpack_from("<Iii", raw)
+            require(magic == 0x41375254 and 0 < maps_n < 65536 and 0 < cmdline_n < 512,
+                    f"进程布局读取失败或被截断：{maps_n}, {cmdline_n}")
+            for suffix, contents in ((".maps", raw[12:12+maps_n]),
+                                     (".cmdline", raw[65548:65548+cmdline_n])):
+                with destination.with_suffix(suffix).open("xb") as stream:
+                    stream.write(contents)
+            print(f"LIVE_RUNTIME_LAYOUT_READ maps={maps_n} cmdline={cmdline_n}", flush=True)
+            values=struct.unpack_from("<36I",raw,66060)
+            state={"caution_base":values[0],"node_status":values[1],
+                   "root":values[2:12],"neutral":values[12:22],"real":values[22:32],
+                   "neutral_properties":values[32:34],"real_properties":values[34:36]}
+            with destination.with_suffix(".nodes.json").open("x") as stream:
+                json.dump(state,stream,indent=2)
+            print(f"LIVE_CREATIVE_NODES_READ status={values[1]}",flush=True)
+        return
     if action == "backup":
         if not SETTINGS.exists():
             data = camera.getBackupPresetData(True)
@@ -161,7 +193,7 @@ def connect(action):
 
     try:
         driver = GenericUsbDriver(ClaimedBackend(device))
-        device.default_timeout = 12000 if action == "backup" else 2500
+        device.default_timeout = 12000 if action in ("backup", "settings-snapshot", "settings-runtime-snapshot") else 2500
         auth = SonySenserAuthDevice(driver)
         auth.start()
         try:

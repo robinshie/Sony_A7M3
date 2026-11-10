@@ -11,7 +11,7 @@ from build_image import compile_payloads
 from local import LAB, ROOT, OFFSET, atomic, file_sha, require, sha
 
 MARKERS = {"readback": "QEMU_READBACK_OK", "backup": "QEMU_BACKUP_OK",
-           "write": "QEMU_WRITE_OK", "restore": "QEMU_RESTORE_OK"}
+           "runtime": "QEMU_RUNTIME_OK", "write": "QEMU_WRITE_OK", "restore": "QEMU_RESTORE_OK"}
 LIBS = {"ld-linux.so.3": "ld-2.11.2.so", "libc.so.6": "libc-2.11.2.so",
         "libcrypt.so.1": "libcrypt-2.11.2.so", "librt.so.1": "librt-2.11.2.so",
         "libpthread.so.0": "libpthread-2.11.2.so"}
@@ -34,7 +34,7 @@ def payload(name):
 
 def test(kernel, busybox, sony_root, read_only):
     compile_payloads(not read_only)
-    enabled = ("readback", "backup") if read_only else tuple(MARKERS)
+    enabled = ("readback", "backup", "runtime") if read_only else tuple(MARKERS)
     patch_digest = None if read_only else file_sha(LAB / "patch.json")
     with tempfile.TemporaryDirectory(dir=LAB) as temporary:
         tmp = Path(temporary)
@@ -70,6 +70,23 @@ def test(kernel, busybox, sony_root, read_only):
             path = fs / "payloads" / f"{name}.so"
             shutil.copyfile(LAB / path.name, path)
             witnesses[name] = file_sha(path)
+        # Synthetic library exercises readable mapped nodes without Sony UI
+        # dependencies. It contains only labeled integer fixtures, no Sony code.
+        fixture = tmp / "runtime-fixture.S"
+        blocks = ((0x9ee0a0, 10, 0x1000), (0x9f8308, 2, 0x2000),
+                  (0xa03560, 10, 0x3000), (0xa16c68, 2, 0x4000), (0xa75ff4, 10, 0x5000))
+        fixture.write_text('.syntax unified\n.arm\n.text\n.global synthetic_caution_return\n'
+                           'synthetic_caution_return:\nbx lr\n'
+                           '.section .fixture,"aw",%progbits\n.global synthetic_caution_anchor\n'
+                           'synthetic_caution_anchor:\n' + ''.join(
+                           f'.org {address-0x9ee0a0}\n.word ' + ','.join(str(value+i) for i in range(count)) + '\n'
+                           for address,count,value in blocks))
+        subprocess.run([os.environ.get("A7M3_ARM_CC", "arm-none-eabi-gcc"), "-mcpu=cortex-a9", "-marm",
+                        "-c", str(fixture), "-o", str(tmp/"runtime-fixture.o")], check=True)
+        (fs/"sony/usr/lib").mkdir(parents=True)
+        subprocess.run([os.environ.get("A7M3_ARM_LD", "arm-none-eabi-ld"), "-shared", "-z", "noexecstack",
+                        "--section-start=.fixture=0x9ee0a0", "-soname", "CautionConfig.so",
+                        str(tmp/"runtime-fixture.o"), "-o", str(fs/"sony/usr/lib/CautionConfig.so")], check=True)
         initrd = tmp / "initrd.cpio"
         with initrd.open("wb") as out:
             subprocess.run([shutil.which("bsdtar") or "tar", "-c", "--format=newc", "-f", "-", "."], cwd=fs, stdout=out, check=True,
