@@ -13,6 +13,7 @@ static struct {
     char maps[65536],cmdline[512];
     uint32_t caution_base, node_status;
     uint32_t root[10],neutral[10],real[10],neutral_properties[2],real_properties[2];
+    uint32_t view_base,view_status,mdt_root[10],mdt_entries[190],manager[2],element[6];
 } report;
 static uint32_t hex(const char **p) {
     uint32_t v=0;
@@ -44,12 +45,33 @@ static int readable(uint32_t address,uint32_t size) {
     }
     return 0;
 }
-static int copy_words(uint32_t offset,uint32_t *to,uint32_t words) {
-    uint32_t address=report.caution_base+offset;
+static int copy_address(uint32_t address,uint32_t *to,uint32_t words) {
     if(!readable(address,words*4)) return 0;
     const volatile uint32_t *from=(const volatile uint32_t *)(uintptr_t)address;
     for(uint32_t i=0;i<words;i++) to[i]=from[i];
     return 1;
+}
+static int copy_words(uint32_t offset,uint32_t *to,uint32_t words) {
+    return copy_address(report.caution_base+offset,to,words);
+}
+static void inspect_view(void) {
+    if(report.maps_n<=0) return;
+    for(const char *p=report.maps;*p;) {
+        if(contains(p,"r-xp 00000000")&&contains(p,"/usr/lib/viewUnified2.so")) {
+            report.view_base=hex(&p);break;
+        }
+        while(*p&&*p!='\n') p++;
+        if(*p) p++;
+    }
+    if(!report.view_base) return;
+    report.view_status=1;
+    uint32_t base=report.view_base;
+    if(!copy_address(base+0xa60c90,report.mdt_root,10)) return;
+    /* Refuse an unexpected or already modified root before following its pointer. */
+    if(report.mdt_root[0]!=base+0xa60998||report.mdt_root[1]!=19||report.mdt_root[2]!=97) return;
+    if(copy_address(report.mdt_root[0],report.mdt_entries,190)&&
+       copy_address(base+0xa61c18,report.manager,2)&&copy_address(base+0xa87ce0,report.element,6))
+        report.view_status=2;
 }
 static void inspect_nodes(void) {
     if(report.maps_n<=0) return;
@@ -82,6 +104,7 @@ __attribute__((constructor)) static void capture(void) {
     report.maps_n=read_proc("/proc/self/maps",report.maps,sizeof report.maps);
     report.cmdline_n=read_proc("/proc/self/cmdline",report.cmdline,sizeof report.cmdline);
     inspect_nodes();
+    inspect_view();
     sc3(10,(long)"/tmp/jiritsu/libJit.so",0,0);
     long fd=sc3(5,(long)"/tmp/jiritsu/a7rt.bin",1|64|128,0600);
     if(fd>=0) {

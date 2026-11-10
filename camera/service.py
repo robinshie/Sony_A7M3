@@ -103,7 +103,7 @@ def perform(camera, action):
         print(f"LIVE_SETTINGS_SNAPSHOT {destination} bytes={len(data)} sha256={sha(data)}", flush=True)
         if action == "settings-runtime-snapshot":
             raw = factory.run(payload("runtime"), "a7rt.bin")
-            require(len(raw) == 66204, "进程布局报告长度异常。")
+            require(len(raw) == 67044, "进程布局报告长度异常。")
             magic, maps_n, cmdline_n = struct.unpack_from("<Iii", raw)
             require(magic == 0x41375254 and 0 < maps_n < 65536 and 0 < cmdline_n < 512,
                     f"进程布局读取失败或被截断：{maps_n}, {cmdline_n}")
@@ -116,9 +116,14 @@ def perform(camera, action):
             state={"caution_base":values[0],"node_status":values[1],
                    "root":values[2:12],"neutral":values[12:22],"real":values[22:32],
                    "neutral_properties":values[32:34],"real_properties":values[34:36]}
+            view=struct.unpack_from("<210I",raw,66204)
+            state.update(view_base=view[0],view_status=view[1],mdt_root=view[2:12],
+                         mdt_entries=[view[i:i+10] for i in range(12,202,10)],
+                         manager=view[202:204],element=view[204:210])
             with destination.with_suffix(".nodes.json").open("x") as stream:
                 json.dump(state,stream,indent=2)
             print(f"LIVE_CREATIVE_NODES_READ status={values[1]}",flush=True)
+            print(f"LIVE_CREATIVE_MENU_TABLE_READ status={view[1]}",flush=True)
         return
     if action == "backup":
         if not SETTINGS.exists():

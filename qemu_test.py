@@ -88,6 +88,19 @@ def test(kernel, busybox, sony_root, read_only):
                         "--section-start=.fixture=0x9ee0a0", "-soname", "CautionConfig.so",
                         str(tmp/"runtime-fixture.o"), "-o", str(fs/"sony/usr/lib/CautionConfig.so")], check=True)
         initrd = tmp / "initrd.cpio"
+        view_fixture=tmp / "view-fixture.S"
+        view_fixture.write_text('.syntax unified\n.arm\n.text\n.global synthetic_view_return\n'
+            'synthetic_view_return:\nbx lr\n.section .fixture,"aw",%progbits\n'
+            '.global synthetic_menu_entries\nsynthetic_menu_entries:\n.word '+
+            ','.join(str(0x6000+i) for i in range(190))+'\n'
+            '.word synthetic_menu_entries,19,97,0,0,0,0,0,0,0\n'
+            '.org 0xa61c18-0xa60998\n.word 0x7000,0x7001\n'
+            '.org 0xa87ce0-0xa60998\n.word 0x8000,0x8001,0x8002,0x8003,0x8004,0x8005\n')
+        subprocess.run([os.environ.get("A7M3_ARM_CC", "arm-none-eabi-gcc"), "-mcpu=cortex-a9", "-marm",
+                        "-c", str(view_fixture), "-o", str(tmp/"view-fixture.o")], check=True)
+        subprocess.run([os.environ.get("A7M3_ARM_LD", "arm-none-eabi-ld"), "-shared", "-z", "noexecstack",
+                        "--section-start=.fixture=0xa60998", "-soname", "viewUnified2.so",
+                        str(tmp/"view-fixture.o"), "-o", str(fs/"sony/usr/lib/viewUnified2.so")], check=True)
         with initrd.open("wb") as out:
             subprocess.run([shutil.which("bsdtar") or "tar", "-c", "--format=newc", "-f", "-", "."], cwd=fs, stdout=out, check=True,
                            env={**os.environ, "COPYFILE_DISABLE": "1"})

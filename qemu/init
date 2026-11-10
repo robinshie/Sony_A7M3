@@ -23,12 +23,13 @@ $b cmp /sector /before.bin
 echo QEMU_READBACK_OK
 
 run runtime
-test "$($b wc -c < "$stage/a7rt.bin")" = 66204
+test "$($b wc -c < "$stage/a7rt.bin")" = 67044
 test "$(word "$stage/a7rt.bin" 0)" = 41375254
 test "$(word "$stage/a7rt.bin" 4)" != 00000000
 $b grep -aq '/bin/busybox' "$stage/a7rt.bin"
 test "$(word "$stage/a7rt.bin" 66060)" = 00000000
 test "$(word "$stage/a7rt.bin" 66064)" = 00000000
+test "$(word "$stage/a7rt.bin" 66208)" = 00000000
 echo QEMU_RUNTIME_ABSENT_OK
 $b rm "$stage/a7rt.bin"
 $b cp /payloads/runtime.so "$stage/libJit.so"
@@ -41,6 +42,17 @@ test "$(word "$stage/a7rt.bin" 66108)" = 00001000
 test "$(word "$stage/a7rt.bin" 66148)" = 00003000
 test "$(word "$stage/a7rt.bin" 66188)" = 00004000
 test "$(word "$stage/a7rt.bin" 66196)" = 00002000
+$b rm "$stage/a7rt.bin"
+$b cp /payloads/runtime.so "$stage/libJit.so"
+$b chroot /sony /bin/busybox sh -c 'LD_PRELOAD=/usr/lib/CautionConfig.so:/usr/lib/viewUnified2.so:/tmp/jiritsu/libJit.so /bin/busybox true'
+test ! -e "$stage/libJit.so"
+test "$(word "$stage/a7rt.bin" 66208)" = 00000002
+test "$(word "$stage/a7rt.bin" 66216)" = 00000013
+test "$(word "$stage/a7rt.bin" 66220)" = 00000061
+test "$(word "$stage/a7rt.bin" 66252)" = 00006000
+test "$(word "$stage/a7rt.bin" 67012)" = 00007000
+test "$(word "$stage/a7rt.bin" 67020)" = 00008000
+echo QEMU_RUNTIME_MENU_TABLE_OK
 capture
 $b cmp /sector /before.bin
 echo QEMU_RUNTIME_OK
