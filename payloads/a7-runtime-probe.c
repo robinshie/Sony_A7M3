@@ -99,6 +99,7 @@ static long read_proc(const char *name,char *data,long capacity) {
     sc3(6,fd,0,0);
     return n==capacity?-75:n;
 }
+#ifndef A7_RUNTIME_LIBRARY_ONLY
 __attribute__((constructor)) static void capture(void) {
     report.magic=0x41375254;
     report.maps_n=read_proc("/proc/self/maps",report.maps,sizeof report.maps);
@@ -118,3 +119,4 @@ __attribute__((constructor)) static void capture(void) {
         sc3(6,fd,0,0);
     }
 }
+#endif

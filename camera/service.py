@@ -89,6 +89,10 @@ def perform(camera, action):
     factory = Factory(camera)
     require(factory.contents("/version.txt") == BUILD_ID, "机身内部版本与已验证的 4.04 不符。")
     print("LIVE_FIRMWARE_BUILD_MATCH", flush=True)
+    if action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
+        from camera.menu_ram import perform as menu_experiment
+        menu_experiment(camera, factory, action.removeprefix("menu-ram-"))
+        return
     if action in ("settings-snapshot", "settings-runtime-snapshot"):
         data = camera.getBackupPresetData(True)
         settings_ok(data)
@@ -198,7 +202,8 @@ def connect(action):
 
     try:
         driver = GenericUsbDriver(ClaimedBackend(device))
-        device.default_timeout = 12000 if action in ("backup", "settings-snapshot", "settings-runtime-snapshot") else 2500
+        device.default_timeout = 12000 if action in ("backup", "settings-snapshot", "settings-runtime-snapshot",
+                                                     "menu-ram-install", "menu-ram-inspect", "menu-ram-restore") else 2500
         auth = SonySenserAuthDevice(driver)
         auth.start()
         try:

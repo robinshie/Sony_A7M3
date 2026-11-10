@@ -23,7 +23,10 @@ def device(action):
                 "请用 A7M3_PMCA_DIR 指向本地 Sony-PMCA-RE 源码目录。")
         sys.path.insert(0, str(pmca))
         from camera.service import settings_ok
-        if action in ("settings-snapshot", "settings-runtime-snapshot"):
+        if action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
+            from camera.menu_ram import payload as menu_payload
+            menu_payload(action.removeprefix("menu-ram-"))
+        elif action in ("settings-snapshot", "settings-runtime-snapshot"):
             if action == "settings-runtime-snapshot":
                 payload("runtime")
         elif action == "backup":
@@ -59,6 +62,9 @@ def main():
         ("backup", "从真机读取 BK4 设置和完整 /usr 分区"),
         ("settings-snapshot", "只读获取新的 BK4 设置快照，不覆盖初始备份"),
         ("settings-runtime-snapshot", "只读获取 BK4 和维护进程库布局，供原厂设置调用研究"),
+        ("menu-ram-install", "临时添加原厂菜单入口，仅修改运行内存，引用已有风格槽 3"),
+        ("menu-ram-inspect", "读取临时菜单入口及调用计数"),
+        ("menu-ram-restore", "恢复内存中的原厂菜单入口及分派函数"),
         ("flash", "仅烧录菜单标题补丁并回读；不包含创意风格"),
         ("verify", "重启后读取扇区和菜单，校验改版"),
         ("restore", "写回原始扇区并回读"),
