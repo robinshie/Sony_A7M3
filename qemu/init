@@ -1,0 +1,61 @@
+#!/bin/busybox sh
+set -eu
+b=/bin/busybox
+stage=/sony/tmp/jiritsu
+disk=/sony/dev/nflasha15
+run() {
+    $b cp "/payloads/$1.so" "$stage/libJit.so"
+    $b chroot /sony /bin/busybox sh -c 'LD_PRELOAD=/tmp/jiritsu/libJit.so /bin/busybox true'
+    test ! -e "$stage/libJit.so"
+}
+capture() { $b dd if="$disk" of=/sector bs=512 skip=36431 count=1 2>/dev/null; }
+word() { $b od -A n -j "$2" -N 4 -t x4 "$1" | $b tr -d ' \n'; }
+
+$b mount -t proc proc /sony/proc
+$b truncate -s 314572800 "$disk"
+$b dd if=/header.bin of="$disk" conv=notrunc 2>/dev/null
+$b dd if=/before.bin of="$disk" bs=512 seek=36431 conv=notrunc 2>/dev/null
+run readback
+test "$($b wc -c < "$stage/a7rdo.bin")" = 6696
+test "$(word "$stage/a7rdo.bin" 0)" = 41523731
+$b dd if="$stage/a7rdo.bin" of=/sector bs=1 skip=2088 count=512 2>/dev/null
+$b cmp /sector /before.bin
+echo QEMU_READBACK_OK
+
+run backup
+test "$(word "$stage/a7ram/tag.bin" 0)" = 41375342
+printf '\0\0\0\0' > "$stage/a7ram/req.bin"
+run backup
+test "$(word "$stage/a7ram/data.bin" 0)" = 41375342
+test "$(word "$stage/a7ram/data.bin" 4)" = 00000000
+test "$($b wc -c < "$stage/a7ram/data.bin")" = 4194316
+$b tail -c +13 "$stage/a7ram/data.bin" > /data
+$b dd if="$disk" of=/original bs=4194304 count=1 2>/dev/null
+$b cmp /data /original
+test "$(word "$stage/a7ram/data.bin" 8)" = "$($b cat /crc.txt)"
+printf '\377\377\377\377' > "$stage/a7ram/req.bin"
+run backup
+test ! -e "$stage/a7ram"
+echo QEMU_BACKUP_OK
+
+if [ -f /payloads/write.so ]; then
+    run restore
+    test "$(word "$stage/a7wr.bin" 12)" = 00000000
+    capture
+    $b cmp /sector /before.bin
+    echo QEMU_WRONG_PREIMAGE_REFUSED
+    $b rm "$stage/a7wr.bin"
+    run write
+    test "$(word "$stage/a7wr.bin" 24)" = 00000001
+    capture
+    $b cmp /sector /after.bin
+    echo QEMU_WRITE_OK
+    $b rm "$stage/a7wr.bin"
+    run restore
+    test "$(word "$stage/a7wr.bin" 24)" = 00000001
+    capture
+    $b cmp /sector /before.bin
+    echo QEMU_RESTORE_OK
+fi
+echo QEMU_ALL_TESTS_PASSED
+$b poweroff -f

@@ -1,0 +1,53 @@
+# Verified/common choice lists. Options without a list remain entry-only.
+File Format|RAW;RAW & JPEG;JPEG
+RAW File Type|Compressed;Uncompressed
+JPEG Quality|Extra Fine;Fine;Standard
+JPEG Image Size|L: 24M;M: 10M;S: 6.0M
+Aspect Ratio|3:2;16:9
+High ISO NR|Normal;Low;Off
+Color Space|sRGB;AdobeRGB
+Drive Mode|Single Shooting;Cont. Shooting;Self-timer;Self-timer(Cont.);Cont. Bracket;Single Bracket;WB bracket;DRO Bracket
+Focus Mode|Single-shot AF;Automatic AF;Continuous AF;DMF;Manual Focus
+Focus Area|Wide;Zone;Center;Flexible Spot;Expand Flexible Spot;Lock-on AF
+Priority Set in AF-S|AF;Release;Balanced Emphasis
+Priority Set in AF-C|AF;Release;Balanced Emphasis
+ISO|ISO AUTO;50;100;125;160;200;250;320;400;500;640;800;1000;1250;1600;2000;2500;3200;4000;5000;6400;8000;10000;12800;16000;20000;25600;32000;40000;51200;64000;80000;102400;128000;160000;204800
+Metering Mode|Multi;Center;Spot;Entire Screen Avg.;Highlight
+White Balance|Auto;Daylight;Shade;Cloudy;Incandescent;Fluor.: Warm White;Fluor.: Cool White;Fluor.: Day White;Fluor.: Daylight;Flash;Underwater Auto;C.Temp./Filter;Custom 1;Custom 2;Custom 3
+Picture Profile|Off;PP1;PP2;PP3;PP4;PP5;PP6;PP7;PP8;PP9;PP10
+Movie File Format|XAVC S 4K;XAVC S HD;AVCHD
+Movie Exposure Mode|Program Auto;Aperture Priority;Shutter Priority;Manual Exposure
+S&Q Exposure Mode|Program Auto;Aperture Priority;Shutter Priority;Manual Exposure
+AF drive speed|Fast;Normal;Slow
+Movie AF Track Sens|Responsive;Standard
+Audio Out Timing|Live;Lip Sync
+Release w/o Lens|Enable;Disable
+Release w/o Card|Enable;Disable
+FINDER/MONITOR|Auto;Viewfinder(Manual);Monitor(Manual)
+Grid Line|Rule of 3rds Grid;Square Grid;Diag. + Square Grid;Off
+Live View Display|Setting Effect ON;Setting Effect OFF
+Auto Review|10 Sec;5 Sec;2 Sec;Off
+Select Media|Slot 1;Slot 2
+Select PB Media|Slot 1;Slot 2
+View Mode|Date View;Folder View(Still);AVCHD View;XAVC S HD View;XAVC S 4K View
+Image Index|9 Images;25 Images
+Display Rotation|Auto;Manual;Off
+Monitor Brightness|Manual;Sunny Weather
+Viewfinder Bright.|Auto;Manual
+Display Quality|High;Standard
+Pwr Save Start Time|30 Min;5 Min;2 Min;1 Min;10 Sec
+Auto Pwr OFF Temp.|Standard;High
+Touch Panel/Pad|Touch Panel+Pad;Touch Panel Only;Touch Pad Only
+USB Connection|Auto;Mass Storage;MTP;PC Remote
+USB LUN Setting|Multi;Single
+File Number|Series;Reset
+Folder Name|Standard Form;Date Form
+APS-C/Super 35mm|Auto;On;Off
+Flash Mode|Flash Off;Autoflash;Fill-flash;Slow Sync.;Rear Sync.
+Flash Comp.|+/-0.0;-3.0;-2.0;-1.0;+1.0;+2.0;+3.0
+Exposure Comp.|+/-0.0;-3.0;-2.0;-1.0;+1.0;+2.0;+3.0
+Creative Style|Standard;Vivid;Neutral;Clear;Deep;Light;Portrait;Landscape;Sunset;Night Scene;Autumn leaves;Black & White;Sepia
+Picture Effect|Off;Toy Camera;Pop Color;Posterization;Retro Photo;Soft High-key;Partial Color;High Contrast Mono.
+Record Setting|60p 50M;30p 50M;24p 50M;120p 100M;120p 60M
+
+Language|简体中文;English

@@ -1,0 +1,266 @@
+--- a/hw/arm/realview.c
++++ b/hw/arm/realview.c
+@@ -24,6 +24,9 @@
+ #include "hw/core/boards.h"
+ #include "hw/i2c/i2c.h"
+ #include "qemu/error-report.h"
++#include "qemu/host-utils.h"
++#include "qemu/timer.h"
++#include "qemu/units.h"
+ #include "hw/char/pl011.h"
+ #include "hw/cpu/a9mpcore.h"
+ #include "hw/intc/realview_gic.h"
+@@ -496,13 +499,253 @@
+     .class_init = realview_pbx_a9_class_init,
+     .interfaces = arm_machine_interfaces,
+ };
++
++/*
++ * Minimal CXD900X0 boot lab board. Only RAM, Cortex-A9 private peripherals,
++ * four PL011s, the timers used by the Linux boot path, and an optional
++ * PL111 test display unrelated to the Sony display hardware.
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#define A7M3_GIC_BASE 0xf8000000
++#define A7M3_GIC_IRQS 256
++#define A7M3_UART_BASE 0xf2000000
++#define A7M3_TIMER_BASE 0xf2403000
++#define A7M3_TIMER_IRQ 153
++#define A7M3_TIMER_COUNT 5
++#define A7M3_LAB_LCD_BASE 0x50000000
++
++#define CXD_RUN (1u << 12)
++#define CXD_INT (1u << 8)
++#define CXD_RESET (1u << 31)
++#define CXD_MODE 0x30
++#define CXD_ONESHOT 0x10
++#define CXD_FREERUN 0x30
++
++typedef struct CxdTimer {
++    QEMUTimer *event;
++    qemu_irq irq;
++    int64_t epoch;
++    uint32_t control;
++    uint32_t compare;
++    uint32_t counter;
++} CxdTimer;
+ 
++typedef struct CxdTimerBank {
++    MemoryRegion mmio;
++    CxdTimer timers[A7M3_TIMER_COUNT];
++} CxdTimerBank;
++
++static unsigned cxd_timer_rate(CxdTimer *timer)
++{
++    return 4000000u >> (timer->control & 7);
++}
++
++static uint32_t cxd_timer_value(CxdTimer *timer, int64_t now)
++{
++    if (!(timer->control & CXD_RUN)) {
++        return timer->counter;
++    }
++    return timer->counter +
++        muldiv64(now - timer->epoch, cxd_timer_rate(timer), NANOSECONDS_PER_SECOND);
++}
++
++static void cxd_timer_schedule(CxdTimer *timer, int64_t now)
++{
++    uint64_t ticks;
++    unsigned hz;
++
++    timer_del(timer->event);
++    if (!(timer->control & CXD_RUN) || (timer->control & CXD_MODE) == CXD_FREERUN) {
++        return;
++    }
++    hz = cxd_timer_rate(timer);
++    ticks = (uint32_t)(timer->compare - cxd_timer_value(timer, now));
++    timer_mod(timer->event, now + MAX(1, (ticks * NANOSECONDS_PER_SECOND + hz - 1) / hz));
++}
++
++static void cxd_timer_expired(void *opaque)
++{
++    CxdTimer *timer = opaque;
++    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++
++    if (timer->control & CXD_INT) {
++        qemu_irq_raise(timer->irq);
++    }
++    if ((timer->control & CXD_MODE) == CXD_ONESHOT) {
++        timer->control &= ~CXD_RUN;
++        timer->counter = timer->compare;
++    } else {
++        timer->counter = 0;
++        timer->epoch = now;
++        cxd_timer_schedule(timer, now);
++    }
++}
++
++static uint64_t cxd_timer_read(void *opaque, hwaddr address, unsigned size)
++{
++    CxdTimerBank *bank = opaque;
++    CxdTimer *timer;
++
++    if ((address >> 8) >= A7M3_TIMER_COUNT) {
++        return 0;
++    }
++    timer = &bank->timers[address >> 8];
++    switch (address & 0xff) {
++    case 0x00: return timer->control;
++    case 0x08: return timer->compare;
++    case 0x0c:
++    case 0x10:
++    case 0x14: return cxd_timer_value(timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
++    default: return 0;
++    }
++}
++
++static void cxd_timer_write(void *opaque, hwaddr address, uint64_t value,
++                            unsigned size)
++{
++    CxdTimerBank *bank = opaque;
++    CxdTimer *timer;
++    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++
++    if ((address >> 8) >= A7M3_TIMER_COUNT) {
++        return;
++    }
++    timer = &bank->timers[address >> 8];
++    switch (address & 0xff) {
++    case 0x00:
++        timer->counter = cxd_timer_value(timer, now);
++        timer->epoch = now;
++        timer->control = value & ~CXD_RESET;
++        if (value & CXD_RESET) {
++            timer->counter = timer->control = timer->compare = 0;
++            qemu_irq_lower(timer->irq);
++        }
++        break;
++    case 0x04:
++        if (value & 0x10) {
++            timer->counter = 0;
++            timer->epoch = now;
++        }
++        if (value & 1) {
++            qemu_irq_lower(timer->irq);
++        }
++        if (!(value & 0x10)) {
++            return;
++        }
++        break;
++    case 0x08:
++        timer->compare = value;
++        break;
++    case 0x10:
++        timer->counter = value;
++        timer->epoch = now;
++        break;
++    default:
++        return;
++    }
++    cxd_timer_schedule(timer, now);
++}
++
++static const MemoryRegionOps cxd_timer_ops = {
++    .read = cxd_timer_read,
++    .write = cxd_timer_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid = { .min_access_size = 4, .max_access_size = 4 },
++    .impl = { .min_access_size = 4, .max_access_size = 4 },
++};
++
++typedef struct A7M3LabState {
++    MachineState parent_obj;
++    bool lab_lcd;
++} A7M3LabState;
++
++#define TYPE_A7M3_LAB MACHINE_TYPE_NAME("a7m3-lab")
++OBJECT_DECLARE_SIMPLE_TYPE(A7M3LabState, A7M3_LAB)
++
++static bool a7m3_get_lab_lcd(Object *obj, Error **errp)
++{
++    return A7M3_LAB(obj)->lab_lcd;
++}
++
++static void a7m3_set_lab_lcd(Object *obj, bool value, Error **errp)
++{
++    A7M3_LAB(obj)->lab_lcd = value;
++}
++
++static void a7m3_lab_init(MachineState *machine)
++{
++    MemoryRegion *sysmem = get_system_memory();
++    Object *cpu = object_new(machine->cpu_type);
++    DeviceState *priv = qdev_new(TYPE_A9MPCORE_PRIV);
++    SysBusDevice *bus = SYS_BUS_DEVICE(priv);
++    CxdTimerBank *bank = g_new0(CxdTimerBank, 1);
++    const unsigned uart_irq[] = { 150, 151, 152, 120 };
++
++    object_property_set_bool(cpu, "has_el3", false, &error_fatal);
++    object_property_set_int(cpu, "reset-cbar", A7M3_GIC_BASE, &error_fatal);
++    qdev_realize(DEVICE(cpu), NULL, &error_fatal);
++    memory_region_add_subregion(sysmem, 0, machine->ram);
++
++    qdev_prop_set_uint32(priv, "num-cpu", 1);
++    qdev_prop_set_uint32(priv, "num-irq", A7M3_GIC_IRQS);
++    sysbus_realize_and_unref(bus, &error_fatal);
++    sysbus_mmio_map(bus, 0, A7M3_GIC_BASE);
++    sysbus_connect_irq(bus, 0, qdev_get_gpio_in(DEVICE(cpu), ARM_CPU_IRQ));
++    for (unsigned i = 0; i < G_N_ELEMENTS(uart_irq); i++) {
++        pl011_create(A7M3_UART_BASE + 0x1000 * i,
++                     qdev_get_gpio_in(priv, uart_irq[i] - GIC_INTERNAL), serial_hd(i));
++    }
++    for (unsigned i = 0; i < A7M3_TIMER_COUNT; i++) {
++        CxdTimer *timer = &bank->timers[i];
++        timer->irq = qdev_get_gpio_in(priv, A7M3_TIMER_IRQ + i - GIC_INTERNAL);
++        timer->event = timer_new_ns(QEMU_CLOCK_VIRTUAL, cxd_timer_expired, timer);
++    }
++    memory_region_init_io(&bank->mmio, OBJECT(machine), &cxd_timer_ops, bank,
++                          "cxd4115-timers", 0x1000);
++    memory_region_add_subregion(sysmem, A7M3_TIMER_BASE, &bank->mmio);
++    if (A7M3_LAB(machine)->lab_lcd) {
++        DeviceState *lcd = qdev_new("pl111");
++
++        object_property_set_link(OBJECT(lcd), "framebuffer-memory",
++                                 OBJECT(sysmem), &error_fatal);
++        sysbus_realize_and_unref(SYS_BUS_DEVICE(lcd), &error_fatal);
++        sysbus_mmio_map(SYS_BUS_DEVICE(lcd), 0, A7M3_LAB_LCD_BASE);
++    }
++}
++
++static void a7m3_lab_class_init(ObjectClass *oc, const void *data)
++{
++    MachineClass *mc = MACHINE_CLASS(oc);
++
++    mc->desc = "Sony A7M3 experimental boot lab (no camera peripherals)";
++    mc->init = a7m3_lab_init;
++    mc->default_cpu_type = ARM_CPU_TYPE_NAME("cortex-a9");
++    mc->max_cpus = 1;
++    mc->default_ram_size = 256 * MiB;
++    mc->default_ram_id = "a7m3.ram";
++    mc->ignore_memory_transaction_failures = true;
++    object_class_property_add_bool(oc, "lab-lcd", a7m3_get_lab_lcd,
++                                   a7m3_set_lab_lcd);
++    object_class_property_set_description(oc, "lab-lcd",
++        "Add a diagnostic PL111 LCD at 0x50000000 (not a Sony peripheral)");
++}
++
++static const TypeInfo a7m3_lab_type = {
++    .name = TYPE_A7M3_LAB,
++    .parent = TYPE_MACHINE,
++    .instance_size = sizeof(A7M3LabState),
++    .class_init = a7m3_lab_class_init,
++    .interfaces = arm_machine_interfaces,
++};
++
+ static void realview_machine_init(void)
+ {
+     type_register_static(&realview_eb_type);
+     type_register_static(&realview_eb_mpcore_type);
+     type_register_static(&realview_pb_a8_type);
+     type_register_static(&realview_pbx_a9_type);
++    type_register_static(&a7m3_lab_type);
+ }
+ 
+ type_init(realview_machine_init)

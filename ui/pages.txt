@@ -1,0 +1,45 @@
+# Group titles and rows follow the ILCE-7M3 help/instruction guides.
+@Camera Settings1
+Quality/Image Size1|File Format;RAW File Type;JPEG Quality;JPEG Image Size;Aspect Ratio;APS-C/Super 35mm
+Quality/Image Size2|Long Exposure NR;High ISO NR;Color Space;Lens Comp.
+Shoot Mode/Drive1|Scene Selection;Drive Mode;Bracket Settings;Recall;Memory;Select Media
+Shoot Mode/Drive2|Reg Cust Shoot Set;Intvl. Shoot. Func.
+AF1|Focus Mode;Priority Set in AF-S;Priority Set in AF-C;Focus Area;Focus Settings;Swt. V/H AF Area
+AF2|AF Illuminator;Center Lock-on AF;Face/Eye AF Set.;AF Track Sens;AF System;Aperture Drive in AF
+AF3|AF w/ shutter;Pre-AF;Eye-Start AF;AF Area Regist.;Del. Reg. AF Area;AF Area Auto Clear
+AF4|Disp. cont. AF area;AF Micro Adj.
+Exposure1|Exposure Comp.;Reset EV Comp.;ISO;ISO AUTO Min. SS;Metering Mode;Face Prty in Mlti Mtr
+Exposure2|Spot Metering Point;Exposure step;AEL w/ shutter;Exposure Std. Adjust
+Flash|Flash Mode;Flash Comp.;Exp.comp.set;Wireless Flash;Red Eye Reduction;External Flash Set.
+Color/WB/Img. Processing|White Balance;Priority Set in AWB;DRO/Auto HDR;Creative Style;Picture Effect;Picture Profile
+Focus Assist|Focus Magnifier;Focus Magnif. Time;Initial Focus Mag.;AF in Focus Mag.;MF Assist;Peaking Setting
+Shooting Assist|Anti-flicker Shoot.;Face Registration;Regist. Faces Priority
+@Camera Settings2
+Movie1|Movie Exposure Mode;S&Q Exposure Mode;Movie File Format;Record Setting;S&Q Settings;Proxy Recording
+Movie2|AF drive speed;Movie AF Track Sens;Auto Slow Shut.;Audio Recording;Audio Rec Level;Audio Level Display
+Movie3|Audio Out Timing;Wind Noise Reduct.;Marker Display;Marker Settings;Video Light Mode;Movie w/ shutter
+Shutter/SteadyShot|Silent Shooting;e-Front Curtain Shut.;Release w/o Lens;Release w/o Card;SteadyShot;SteadyShot Settings
+Zoom|Zoom;Zoom Setting;Zoom Ring Rotate
+Display/Auto Review1|DISP Button;FINDER/MONITOR;Zebra Setting;Grid Line;Exposure Set. Guide;Live View Display
+Display/Auto Review2|Cont. Shoot. Length;Auto Review
+Custom Operation1|Still Custom Key;Movie Custom Key;Playback Custom Key;Function Menu Set.;Dial Setup;Av/Tv Rotate
+Custom Operation2|Dial Ev Comp;MOVIE Button;Lock Operation Parts;Audio signals;Function Ring(Lens)
+@Network
+Network1|Snd to Smrtphn Func;Send to Computer;FTP Transfer Func.;View on TV;Ctrl w/ Smartphone;Airplane Mode
+Network2|Wi-Fi Settings;Bluetooth Settings;Loc. Info. Link Set.;Bluetooth Rmt Ctrl;Edit Device Name;Imp Root Certificate
+Network3|Reset Network Set.
+@Playback
+Playback1|Protect;Rotate;Delete;Rating;Rating Set(Cust Key);Specify Printing
+Playback2|Copy;Photo Capture;Enlarge Image;Enlarge Init. Mag.;Enlarge Initial Pos.;Slide Show
+Playback3|Select PB Media;View Mode;Image Index;Display as Group;Display Rotation;Image Jump Setting
+Playback4|Cont. PB for Intvl.;PB Speed for Intvl
+@Setup
+Setup1|Monitor Brightness;Viewfinder Bright.;Finder Color Temp.;Gamma Disp. Assist;Volume Settings;Delete confirm.
+Setup2|Display Quality;Pwr Save Start Time;Auto Pwr OFF Temp.;NTSC/PAL Selector;Cleaning Mode;Touch Operation
+Setup3|Touch Panel/Pad;Touch Pad Settings;Demo Mode;TC/UB Settings;IR Remote Ctrl;HDMI Settings
+Setup4|4K Output Sel.;USB Connection;USB LUN Setting;USB Power Supply;PC Remote Settings;Language
+Setup5|Date/Time Setup;Area Setting;Copyright Info;Format;File Number;Set File Name
+Setup6|Rec. Media Settings;Select REC Folder;New Folder;Folder Name;Recover Image DB;Display Media Info.
+Setup7|Version;Setting Reset;Privacy Notice
+@My Menu
+My Menu Setting|Add Item;Sort Item;Delete Item;Delete Page;Delete All

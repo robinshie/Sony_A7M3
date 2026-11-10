@@ -1,0 +1,14 @@
+#!/bin/busybox sh
+set -eu
+b=/bin/busybox
+$b mount -t devtmpfs devtmpfs /dev
+$b mount -t proc proc /proc
+$b mount -t sysfs sysfs /sys
+$b modprobe xhci_pci 2>/dev/null || $b modprobe xhci_hcd 2>/dev/null || :
+/lab/apk.static --no-network --repositories-file /dev/null --force-non-repository --initdb add /lab/apks/*.apk
+PYTHONPATH=/lab/sony-pmca /usr/bin/python3 -c 'import usb, pmca.usb.sony'
+if [ -c /dev/hvc1 ]; then
+    ($b sh -i </dev/hvc1 >/dev/hvc1 2>&1) &
+fi
+echo 'USB_LAB_READY (no network or virtual disks)'
+exec $b sh -i

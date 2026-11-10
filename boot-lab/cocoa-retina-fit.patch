@@ -1,0 +1,71 @@
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -288,6 +288,12 @@
+ - (void) viewDidMoveToWindow
+ {
+     [self resizeWindow];
++    /*
++     * The initial Retina resize can happen before the window delegate is
++     * attached. Keep the view in guest coordinates even if the first
++     * framebuffer has the same dimensions as the initial view.
++     */
++    [self updateBounds];
+ }
+ 
+ - (void) selectConsoleLocked:(unsigned int)index
+@@ -1135,6 +1141,7 @@
+                                        <NSWindowDelegate, NSApplicationDelegate>
+ {
+ }
++- (id)initWithZoomToFit:(BOOL)zoomToFit;
+ - (void)doToggleFullScreen:(id)sender;
+ - (void)showQEMUDoc:(id)sender;
+ - (void)zoomToFit:(id) sender;
+@@ -1154,7 +1161,7 @@
+ @end
+ 
+ @implementation QemuCocoaAppController
+-- (id) init
++- (id)initWithZoomToFit:(BOOL)zoomToFit
+ {
+     NSWindow *window;
+ 
+@@ -1170,9 +1177,15 @@
+             exit(1);
+         }
+ 
+-        // create a window
++        // Apply zoom to fit before attaching the view and sizing the window.
++        NSWindowStyleMask styleMask = NSWindowStyleMaskTitled |
++                                      NSWindowStyleMaskMiniaturizable |
++                                      NSWindowStyleMaskClosable;
++        if (zoomToFit) {
++            styleMask |= NSWindowStyleMaskResizable;
++        }
+         window = [[NSWindow alloc] initWithContentRect:[cocoaView frame]
+-            styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
++            styleMask:styleMask
+             backing:NSBackingStoreBuffered defer:NO];
+         if(!window) {
+             error_report("(cocoa) can't create window");
+@@ -1975,7 +1988,8 @@
+     [QemuApplication sharedApplication];
+ 
+     // Create an Application controller
+-    QemuCocoaAppController *controller = [[QemuCocoaAppController alloc] init];
++    QemuCocoaAppController *controller = [[QemuCocoaAppController alloc]
++        initWithZoomToFit:opts->u.cocoa.has_zoom_to_fit && opts->u.cocoa.zoom_to_fit];
+     [NSApp setDelegate:controller];
+ 
+     /* if fullscreen mode is to be used */
+@@ -1997,10 +2011,6 @@
+         left_command_key_enabled = 0;
+     }
+ 
+-    if (opts->u.cocoa.has_zoom_to_fit && opts->u.cocoa.zoom_to_fit) {
+-        [cocoaView window].styleMask |= NSWindowStyleMaskResizable;
+-    }
+-
+     if (opts->u.cocoa.has_zoom_interpolation && opts->u.cocoa.zoom_interpolation) {
+         zoom_interpolation = kCGInterpolationLow;
+     }
