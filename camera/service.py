@@ -95,7 +95,8 @@ def perform(camera, action):
     require(factory.contents("/version.txt") == BUILD_ID, "机身内部版本与已验证的 4.04 不符。")
     print("LIVE_FIRMWARE_BUILD_MATCH", flush=True)
     if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
-                  "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix"):
+                  "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix",
+                  "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity"):
         from camera.creative_flash import perform as creative_update, configure
         creative_update(camera,factory,configure(action))
         return

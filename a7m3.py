@@ -24,11 +24,12 @@ def device(action):
         sys.path.insert(0, str(pmca))
         from camera.service import settings_ok
         if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
-                      "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix"):
+                      "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix",
+                      "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity"):
             from camera.creative_flash import payload as creative_payload, verified, configure
             operation=configure(action)
-            verified(check_image=operation in ("flash","fix"))
-            creative_payload("write" if operation in ("flash","fix") else "restore" if operation=="restore" else "read")
+            verified(check_image=operation in ("flash","fix","identity"))
+            creative_payload("write" if operation in ("flash","fix","identity") else "restore" if operation=="restore" else "read")
         elif action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
             from camera.menu_ram import payload as menu_payload
             menu_payload(action.removeprefix("menu-ram-"))
@@ -77,6 +78,10 @@ def main():
         ("creative-read-fix", "只读检查第二版补丁扇区"),
         ("creative-verify-fix", "重启后回读第二版补丁和三个文件"),
         ("creative-restore-fix", "恢复到第二版写入前的第一版文件"),
+        ("creative-identity", "在第二版基础上修复 Fn 名称及重新进入创意风格时的定位"),
+        ("creative-read-identity", "只读检查第三版补丁扇区"),
+        ("creative-verify-identity", "重启后验证第三版文件、运行代码与配方"),
+        ("creative-restore-identity", "恢复第三版写入前的第二版，保留新增入口与配方"),
         ("creative-flash", "烧录通过原厂组件测试的创意风格入口、配方和名称补丁"),
         ("creative-verify", "重启后回读创意风格扇区及三个完整文件"),
         ("creative-restore", "恢复创意风格补丁前的十个扇区，保留此前标题修改"),
@@ -86,7 +91,8 @@ def main():
         ("verify-original", "重启后读取扇区和菜单，校验原版"),
     ):
         action = actions.add_parser(name, help=help_text)
-        if name in ("flash", "restore", "creative-flash", "creative-restore", "creative-fix", "creative-restore-fix"):
+        if name in ("flash", "restore", "creative-flash", "creative-restore", "creative-fix", "creative-restore-fix",
+                    "creative-identity", "creative-restore-identity"):
             action.add_argument("--write-device", action="store_true", required=True)
     args = cli.parse_args()
     os.umask(0o077)

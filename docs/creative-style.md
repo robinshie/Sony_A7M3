@@ -1,6 +1,6 @@
 # 「复古衣橱」创意风格实验
 
-**状态：第二版已完成真机烧录、断电重启、菜单目视确认，以及重启后的扇区、完整文件、运行代码和保存参数回读。** 当前验收命令是 `a7m3.py creative-verify-fix`；原来的 `a7m3.py flash` 仍只写标题补丁。
+**状态：v3 已完成烧录、断电重启、屏幕验收及 USB 回读。** v2 已验证入口与参数持久化，但用户后续发现 Fn 名称仍显示基础风格、重新进入时未定位到新增项。当前验收命令改为 `a7m3.py creative-verify-identity`；`a7m3.py flash` 仍只写标题补丁。
 
 ## 日常精简流程
 
@@ -10,27 +10,69 @@
 
 | 步骤 | 当前实现 | 通过条件 |
 | --- | --- | --- |
-| 修改入口、选择参数 | `research/menu_lazy.S` | 原有编号行为保留，新项应用目标参数 |
-| 编译并测试原厂调用接口 | `research/menu_lazy.py` | `QEMU_LAZY_MENU_PASSED` |
-| 生成镜像与扇区前后数据 | `research/build_creative_fix.py` | 生成与前置镜像绑定的清单、镜像和恢复数据 |
-| 验证写入、恢复及文件结构 | `research/creative_fix_test.py`、`research/check_creative_image.py` | QEMU 写入/回滚通过；ext2 和导出文件散列一致 |
-| 重启后验收 | `a7m3.py creative-verify-fix` | 文件、运行代码、菜单及配方参数均一致 |
+| 修改显示与定位 | `research/menu_identity.S`、`research/menu_identity.py` | 第 3 槽中性配方识别为新增项，其他槽保持原名 |
+| 编译并测试原厂调用接口 | `research/menu_identity.py` | `QEMU_IDENTITY_PASSED`，418 条光标路径、91 条 Fn 名称路径 |
+| 生成镜像与扇区前后数据 | `research/build_creative_identity.py` | 生成与前置镜像绑定的清单、镜像和恢复数据 |
+| 验证写入、恢复及文件结构 | `research/creative_identity_test.py`、`research/check_creative_image.py` | QEMU 写入/回滚通过；ext2 和导出文件散列一致 |
+| 重启后验收 | `a7m3.py creative-verify-identity` | 四个文件、运行代码、名称属性及配方一致，屏幕名称/定位/切换验收通过 |
 
 构建脚本的固件、内核和运行库路径见后面的完整命令。QEMU 检查的是所改代码与写入逻辑；实际屏幕显示和拍摄效果仍在机身上确认。
 
-已经安装的本次 v2，只检查状态时无需重新 build。沿用本机环境变量、将相机接入 UTM 后，在仓库目录执行：
+已经安装本次 v3 后，只检查状态时无需重新 build。沿用本机环境变量、将相机接入 UTM 后，在仓库目录执行：
 
 ```sh
-# 快速读取本次修正涉及的扇区；报告 preimage=2 表示它们匹配 v2。
-python a7m3.py creative-read-fix
+# 快速读取本次修正涉及的扇区；报告 preimage=2 表示它们匹配 v3。
+python a7m3.py creative-read-identity
 
 # 完整检查前，先在机身打开创意风格并选择「复古衣橱」，再接回 USB/UTM。
-python a7m3.py creative-verify-fix
+python a7m3.py creative-verify-identity
 ```
 
-快速读取只覆盖修正包的目标扇区；完整检查还读取三个文件、运行内存和保存参数。只改文档无需重跑硬件测试；改补丁代码、资源或配方时，重建相关产物并重新生成验证记录。
+快速读取只覆盖修正包的目标扇区；完整检查还读取四个文件、运行内存和保存参数。只改文档无需重跑硬件测试；改补丁代码、资源或配方时，重建相关产物并重新生成验证记录。
 
-**下次开发新版本的两个约束：** `recipes/retro-wardrobe.json` 当前用于配方说明和独立 UI 模型，原生代码及其测试仍有固定参数，只改 JSON 不会改变真机配方。现有 `build_creative_fix.py` / `creative-fix` 固定面向 v1 → v2；机身已是 v2，下一版应以已验证的 v2 镜像为前置状态生成新的增量包，并同步更新验收参数。名称目前也由构建代码和既有中文资源控制，尚未统一为配置驱动。
+**下次开发新版本的两个约束：** `recipes/retro-wardrobe.json` 当前用于配方说明和独立 UI 模型，原生代码及其测试仍有固定参数，只改 JSON 不会改变真机配方。现有 `build_creative_identity.py` / `creative-identity` 固定面向 v2 → v3；安装 v3 后，下一版应以已验证的 v3 镜像为前置状态生成新的增量包，并同步更新验收参数。不要反复套用旧包。名称目前也由构建代码和既有中文资源控制，尚未统一为配置驱动。
+
+## v3：选中名称与重新进入时的定位
+
+v2 的新增入口能应用配方，但保存的是原厂「中性 + 第 3 样式框」。原厂反向转换会恢复成旧子项；Fn 主页面通过另一份 `CautionConfig.so` 属性表获取名称，所以新增入口的中文名称不会自动传播到 Fn。
+
+v3 在已验证 v2 基础上增加以下修正：
+
+- `viewUnified2.so` 的 `0x005bb18e`（记忆选择）和 `0x005bb9de`（重新进入）调用新辅助函数。基础值 3、样式框 3 时，定位到根 97 下的新增项 98；其余输入沿用原函数。六个样式框的初始化循环保持原函数。
+- 辅助函数共 28 字节，放在 v2 已腾出的 NOP 区域 `0x005b9a60`。保留 v2 的入口安装与参数处理。
+- `CautionConfig.so` 的 `CreativeStyleCNeutralBox_3` 名称属性由 `0x0204e08d` 改为已存在的 `0x0204ed84`，即「复古衣橱」。其他样式框的中性名称保留。
+
+**识别方式是「第 3 槽 + 中性」，没有额外的风格身份字段。** 手动在第 3 槽选择中性也会显示这个名称；在此槽调整对比度等参数不会取消该名称。其他原厂基础风格与槽位仍可选择。当前自定义中文资源仅支持简体中文。
+
+组件测试执行原始逆向映射、Fn 编号转换和 Fn 节点选择机器码。UI 存储和节点虚函数使用测试替身；这能检查代码路由与名称解析，不能代替实际屏幕验收。写入载荷另外验证错误前置内容拒绝、重复写入拒绝、故障回滚、已知混合状态恢复及未涉及扇区不变。
+
+在仓库目录，沿用已配置的环境与本地固件文件：
+
+```sh
+python research/menu_identity.py \
+  --usr "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha15_unpacked" \
+  --kernel /path/to/vmlinuz-lts \
+  --busybox /path/to/alpine-root/bin/busybox \
+  --sony-root "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha7_unpacked"
+python research/build_creative_identity.py
+python research/creative_identity_test.py \
+  --kernel /path/to/vmlinuz-lts \
+  --busybox /path/to/alpine-root/bin/busybox \
+  --sony-root "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha7_unpacked"
+python research/check_creative_image.py .lab/creative-v3
+# 相机接入 UTM；仅适用于机身仍为 v2 的首次更新。
+python a7m3.py creative-identity --write-device
+# 完整断电重启，验收下列界面行为，再接回 USB/UTM。
+python a7m3.py creative-verify-identity
+```
+
+屏幕验收：选中「复古衣橱」→ 退出到 Fn 确认名称 → 再进入时直接停在该项 → 切到「标准」确认名称随之改变 → 最后选回配方并核对 +1、−1、−1。不能仅凭写入回读成功标记这一项通过。
+
+2026-11-10，用户完成断电重启后确认：名称和定位均正确，切换标准也正常。随后 `creative-verify-identity` 回读通过：4 个扇区与目标一致，四个完整文件散列匹配；运行中的两个定位调用、28 字节辅助函数及 Fn 名称属性已加载；菜单仍为 20 项，编号 98，原厂第 3 槽和当前参数均为 +1、−1、−1。此验证覆盖界面与配方保存，不包含实拍色彩效果比较。
+
+v3 相对 v2 改动 31 字节、4 个扇区。镜像 SHA-256：`d1666d072c6b8852c44b4b3e61a4d0efadc7f56d38c43fb3c30b2578cdd35959`。`viewUnified2.so`：`43c3f773a78be3311a37827bdaf8762b3c1d8203a80b072b4e18e704fcea5923`；`CautionConfig.so`：`be38cd21ffa9e1720cc910af10e3a526ecd4f580a418a56c8c1bd1009bf00567`。中英文资源沿用 v2。恢复到 v2 使用 `python a7m3.py creative-restore-identity --write-device`，完整断电后再使用 v2 的验收命令。所有镜像、精确恢复数据、机身备份及原厂机器码留在忽略目录 `.lab/`。
+
+以下保留 v1/v2 的实现与验证记录，相关旧版本命令不适用于直接覆盖已安装的 v3。
 
 目标是在「创意风格」中新增「复古衣橱」，保留原有选项，并在机身中实际应用、保存以下设置。配方在 [`recipes/retro-wardrobe.json`](../recipes/retro-wardrobe.json)。这是基于 Sony 现有调节项的实验配方，尚无实拍对比，不声称复现某款富士胶片模拟。
 
@@ -169,7 +211,7 @@ QEMU 运行 Linux、Sony 本地提取的 glibc 和一个按原地址排列的合
 
 ## 永久补丁与烧录
 
-最终版本使用 `research/menu_lazy.S`。原分派函数的 658 字节空间装入 388 字节的紧凑分派表、菜单创建处理和参数处理，其余填 Thumb NOP。`0x005bb266` 的调用改为先准备 20 项菜单，再沿用原厂 `CmnMenuTableUtil::initMenuData`，完整保留调用参数和返回路径。它在每次打开创意风格时执行；已有新增项时不会重复分配。最终版本保留原厂 `DT_INIT`、`.init_array` 和 ELF 装载段。
+v2 基础实现使用 `research/menu_lazy.S`。原分派函数的 658 字节空间装入 388 字节的紧凑分派表、菜单创建处理和参数处理，其余填 Thumb NOP。`0x005bb266` 的调用改为先准备 20 项菜单，再沿用原厂 `CmnMenuTableUtil::initMenuData`，完整保留调用参数和返回路径。它在每次打开创意风格时执行；已有新增项时不会重复分配。最终版本保留原厂 `DT_INIT`、`.init_array` 和 ELF 装载段。
 
 选择路径在 `0x005b9fba` 增加一个跳转：查询当前菜单编号，只有 98 才把原厂设置调用前的三个参数改为 +1、−1、−1；其他编号保留原值。中性基础值和样式框由已在真机验证的分派路径取得，提交仍经过原厂设置服务。Sony glibc/QEMU 测试覆盖 256 个分派输入、34,643 组参数组合、菜单创建时的原调用参数/返回值以及重复打开。
 
@@ -183,7 +225,7 @@ QEMU 运行 Linux、Sony 本地提取的 glibc 和一个按原地址排列的合
 
 ### 构建与检查
 
-`research/ext2_patch.py` 解析 ext2 目录和直接/间接块，只替换原有文件数据及必要的文件长度，不申请或释放块。最终镜像通过 `e2fsck -fn` 全部五项检查；用独立 `debugfs` 导出三个目标文件后，散列均与构建目标一致。文件数和占用块数与前置镜像相同。
+`research/ext2_patch.py` 解析 ext2 目录和直接/间接块，只替换原有文件数据及必要的文件长度，不申请或释放块。v2 镜像通过 `e2fsck -fn` 全部五项检查；用独立 `debugfs` 导出三个目标文件后，散列均与构建目标一致。文件数和占用块数与前置镜像相同。
 
 此项目记录本机两阶段实验。`build_creative_fix.py` 的前置镜像来自已归档的 `.lab/creative-v1/`，必须与其清单散列一致；不能对任意固件直接套用。保留第一版镜像和恢复载荷之后，第二版构建命令为：
 

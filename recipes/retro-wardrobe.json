@@ -25,8 +25,11 @@
     "picture_profile",
     "picture_effect"
   ],
-  "native_revision": "menu_creation_v2",
+  "native_revision": "menu_identity_v3",
   "supported_native_languages": [
     "zh-CN"
-  ]
+  ],
+  "selected_name_verified": true,
+  "reopened_selection_verified": true,
+  "style_switch_verified": true
 }

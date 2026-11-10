@@ -17,6 +17,11 @@ def configure(action):
     global OUT
     correction={'creative-fix':'fix','creative-read-fix':'read','creative-verify-fix':'verify',
                 'creative-restore-fix':'restore'}
+    identity={'creative-identity':'identity','creative-read-identity':'read',
+              'creative-verify-identity':'verify','creative-restore-identity':'restore'}
+    if action in identity:
+        OUT=LAB/'creative-v3'
+        return identity[action]
     OUT=LAB/('creative-v2' if action in correction else 'creative-flash')
     return correction.get(action,action.removeprefix('creative-'))
 
@@ -26,7 +31,7 @@ def verified(check_image=False):
     proof=json.loads((OUT/'qemu-proof.json').read_text())
     require(proof['manifest_sha256']==file_sha(OUT/'manifest.json'), '烧录测试与镜像清单不符。')
     native_directory=manifest.get('native_directory','menu-persistent')
-    require(native_directory in ('menu-persistent','menu-lazy'),'未知原厂补丁测试目录。')
+    require(native_directory in ('menu-persistent','menu-lazy','menu-identity'),'未知原厂补丁测试目录。')
     native=LAB/native_directory/'proof.json'
     require(file_sha(native)==manifest['native_proof_sha256'], '原厂菜单测试记录发生变化。')
     native_proof=json.loads(native.read_text())
@@ -77,6 +82,19 @@ def inspect_payload():
     return data
 
 
+def identity_inspect_payload():
+    directory=LAB/'identity-inspection'
+    directory.mkdir(mode=0o700,parents=True,exist_ok=True)
+    obj=directory/'inspect.o';target=directory/'inspect.so'
+    subprocess.run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-Os','-fPIC',
+                    '-ffreestanding','-fno-builtin','-fno-stack-protector','-fno-unwind-tables',
+                    '-fno-asynchronous-unwind-tables','-c',str(ROOT/'payloads/a7-identity-inspect.c'),'-o',str(obj)],check=True)
+    subprocess.run(['arm-none-eabi-ld','-shared','--no-undefined','-z','noexecstack',str(obj),'-o',str(target)],check=True)
+    data=target.read_bytes()
+    require(len(data)<=16384 and data[:7]==b'\x7fELF\x01\x01\x01','只读探针格式异常。')
+    return data
+
+
 def report(factory,name,stem):
     manifest,_=verified()
     raw=factory.run(payload(name),'a7creative.bin')
@@ -113,13 +131,31 @@ def perform(camera,factory,action):
         print(f'LIVE_CREATIVE_ENGLISH bytes={len(english)} sha256={sha(english)}',flush=True)
         print(f'LIVE_CREATIVE_INSPECTION_SAVED {stem}',flush=True)
         return
-    if action in ('flash','fix'):
+    if action in ('flash','fix','identity'):
         settings=camera.getBackupPresetData(True)
         backup=BackupFile(io.BytesIO(settings))
         require(backup.revision==4 and backup.size==len(settings), '设置备份不完整。')
         save(stem.with_suffix('.settings.bin'),settings)
         expected=EXPECTED if action=='flash' else {k:EXPECTED[k] for k in (0x0107075e,0x01070a11,0x01070a17,0x01070a1d)}
         require(all(backup.getProperty(k).data==v for k,v in expected.items()), '机身配方与实测配置不符。')
+        if action=='identity':
+            # Both full file preimages and the running v2 helper are required.
+            # The sector payload independently checks every changed sector again.
+            previous=None
+            for path in ('/lib/viewUnified2.so','/lib/CautionConfig.so'):
+                record=manifest['files'][path]
+                data=factory.contents('/usr'+path,maximum=record['before_bytes']+16)
+                require(len(data)==record['before_bytes'] and sha(data)==record['before_sha256'],
+                        '机身文件不是此修复需要的上一版：'+path)
+                save(stem.with_name(stem.name+'-'+path.rsplit('/',1)[-1]+'.before'),data)
+                if path.endswith('viewUnified2.so'):previous=data
+            native=factory.run(inspect_payload(),'a7inspect.bin')
+            save(stem.with_suffix('.memory-before.bin'),native)
+            require(len(native)==2556 and struct.unpack_from('<4I',native)[2:]==(3,20) and
+                    native[56:714]==previous[0x5b98dc:0x5b9b6e], '运行内存不是已验证的第二版。')
+            report(factory,'write',stem)
+            print(f'LIVE_CREATIVE_IDENTITY_READBACK_VERIFIED image_sha256={manifest["image_sha256"]}',flush=True)
+            return
         if action=='fix':
             native=factory.run(inspect_payload(),'a7inspect.bin')
             save(stem.with_suffix('.memory-before.bin'),native)
@@ -160,7 +196,7 @@ def perform(camera,factory,action):
                         f'重启后文件校验不符：{path}')
                 if path=='/lib/viewUnified2.so':view_bytes=contents
                 print(f'LIVE_CREATIVE_FILE_VERIFIED {path} sha256={sha(contents)}',flush=True)
-            if OUT.name=='creative-v2':
+            if OUT.name in ('creative-v2','creative-v3'):
                 native=factory.run(inspect_payload(),'a7inspect.bin')
                 save(stem.with_suffix('.memory.bin'),native)
                 require(len(native)==2556 and struct.unpack_from('<4I',native)[2:]==(3,20) and
@@ -175,4 +211,14 @@ def perform(camera,factory,action):
                 save(stem.with_suffix('.settings.bin'),settings)
                 require(all(backup.getProperty(k).data==v for k,v in EXPECTED.items()), '重启后配方保存参数不符。')
                 print('LIVE_CREATIVE_RUNTIME_MENU_AND_RECIPE_VERIFIED count=20 id=98 style_box=3 C=1 S=-1 H=-1',flush=True)
+                if OUT.name=='creative-v3':
+                    identity=factory.run(identity_inspect_payload(),'a7identity.bin')
+                    save(stem.with_suffix('.identity.bin'),identity)
+                    require(len(identity)==28 and struct.unpack_from('<I',identity)[0]==0x41374944 and
+                            struct.unpack_from('<I',identity,12)[0]==7 and
+                            identity[16:20]==view_bytes[0x5bb18e:0x5bb192] and
+                            identity[20:24]==view_bytes[0x5bb9de:0x5bb9e2] and
+                            struct.unpack_from('<I',identity,24)[0]==0x0204ed84,
+                            '名称或光标恢复逻辑尚未加载，请完整断电重启后再验证。')
+                    print('LIVE_CREATIVE_IDENTITY_RUNTIME_VERIFIED cursor_hooks=2 fn_resource=0x0204ed84',flush=True)
             print('LIVE_CREATIVE_REBOOT_VERIFIED',flush=True)
