@@ -23,7 +23,13 @@ def device(action):
                 "请用 A7M3_PMCA_DIR 指向本地 Sony-PMCA-RE 源码目录。")
         sys.path.insert(0, str(pmca))
         from camera.service import settings_ok
-        if action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
+        if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
+                      "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix"):
+            from camera.creative_flash import payload as creative_payload, verified, configure
+            operation=configure(action)
+            verified(check_image=operation in ("flash","fix"))
+            creative_payload("write" if operation in ("flash","fix") else "restore" if operation=="restore" else "read")
+        elif action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
             from camera.menu_ram import payload as menu_payload
             menu_payload(action.removeprefix("menu-ram-"))
         elif action in ("settings-snapshot", "settings-runtime-snapshot"):
@@ -65,13 +71,22 @@ def main():
         ("menu-ram-install", "临时添加原厂菜单入口，仅修改运行内存，引用已有风格槽 3"),
         ("menu-ram-inspect", "读取临时菜单入口及调用计数"),
         ("menu-ram-restore", "恢复内存中的原厂菜单入口及分派函数"),
+        ("creative-read", "只读检查创意风格补丁涉及的扇区"),
+        ("creative-inspect", "只读比较运行内存代码、菜单表和磁盘资源"),
+        ("creative-fix", "将已写入的第一版改为打开菜单时初始化，并恢复英文资源"),
+        ("creative-read-fix", "只读检查第二版补丁扇区"),
+        ("creative-verify-fix", "重启后回读第二版补丁和三个文件"),
+        ("creative-restore-fix", "恢复到第二版写入前的第一版文件"),
+        ("creative-flash", "烧录通过原厂组件测试的创意风格入口、配方和名称补丁"),
+        ("creative-verify", "重启后回读创意风格扇区及三个完整文件"),
+        ("creative-restore", "恢复创意风格补丁前的十个扇区，保留此前标题修改"),
         ("flash", "仅烧录菜单标题补丁并回读；不包含创意风格"),
         ("verify", "重启后读取扇区和菜单，校验改版"),
         ("restore", "写回原始扇区并回读"),
         ("verify-original", "重启后读取扇区和菜单，校验原版"),
     ):
         action = actions.add_parser(name, help=help_text)
-        if name in ("flash", "restore"):
+        if name in ("flash", "restore", "creative-flash", "creative-restore", "creative-fix", "creative-restore-fix"):
             action.add_argument("--write-device", action="store_true", required=True)
     args = cli.parse_args()
     os.umask(0o077)

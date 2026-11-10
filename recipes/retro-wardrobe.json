@@ -8,6 +8,25 @@
   "white_balance": "Daylight",
   "picture_profile": "Off",
   "picture_effect": "Off",
-  "implementation": "qemu_ui_prototype",
-  "native_integration_verified": false
+  "implementation": "native_menu_slot3",
+  "native_integration_verified": true,
+  "native_ram_selection_verified": true,
+  "flash_written_and_read_back": true,
+  "reboot_verified": true,
+  "native_style_box": 3,
+  "automatic_parameters": [
+    "base_style",
+    "contrast",
+    "saturation",
+    "sharpness"
+  ],
+  "manual_parameters": [
+    "white_balance",
+    "picture_profile",
+    "picture_effect"
+  ],
+  "native_revision": "menu_creation_v2",
+  "supported_native_languages": [
+    "zh-CN"
+  ]
 }

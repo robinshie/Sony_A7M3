@@ -241,7 +241,7 @@ def make_font(size, id, codes, latin_ttf, chinese_ttf):
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--playground", action="store_true", help="build the separate playground variant")
-    cli.add_argument("--retro-wardrobe", action="store_true", help="build the unflashed creative-style UI prototype")
+    cli.add_argument("--retro-wardrobe", action="store_true", help="build the independent creative-style UI prototype")
     args = cli.parse_args()
     os.chdir(HERE)
     out = HERE / "build"
@@ -252,8 +252,10 @@ def main():
         for key in ("contrast", "saturation", "sharpness"):
             if type(recipe[key]) is not int or not -3 <= recipe[key] <= 3:
                 cli.error(f"{key} must be an integer between -3 and 3")
-        if recipe["implementation"] != "qemu_ui_prototype" or recipe["native_integration_verified"] is not False:
-            cli.error("This build only supports the unverified UI prototype")
+        if recipe["implementation"] not in ("qemu_ui_prototype", "native_menu_slot3"):
+            cli.error("Unsupported recipe representation")
+        # The UI guest always remains an independent model, even when the
+        # same recipe has separately been implemented in the camera firmware.
     if args.playground:
         out /= "playground"
         try:

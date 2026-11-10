@@ -1,4 +1,4 @@
-"""Host-side Sony maintenance transport. Only the write/restore payloads touch /usr."""
+"""Host Sony maintenance transport for guarded title and creative-menu updates."""
 import io
 import json
 import os
@@ -26,8 +26,13 @@ class ClaimedBackend(UsbBackend):
 
 
 class Response(bytearray):
+    def __init__(self,maximum=1024*1024):
+        super().__init__()
+        require(0<maximum<=16*1024*1024, "维护响应上限异常。")
+        self.maximum=maximum
+
     def write(self, data):
-        require(len(self) + len(data) <= 1024 * 1024, "维护接口返回的数据过大。")
+        require(len(self) + len(data) <= self.maximum, "维护接口返回的数据过大。")
         self.extend(data)
 
 
@@ -38,8 +43,8 @@ class Factory:
     def __init__(self, camera):
         self.camera = camera
 
-    def call(self, code, data=b""):
-        reply = Response()
+    def call(self, code, data=b"", maximum=1024*1024):
+        reply = Response(maximum)
         result, _ = self.camera.dev.sendSenserPacket(0x40, struct.pack("<HH", 0x1001, code) + data, reply)
         status = struct.unpack_from("<I", reply)[0] if len(reply) >= 4 else None
         return (result, status), bytes(reply[4:])
@@ -49,11 +54,11 @@ class Factory:
         require(status == (0, 0), f"维护命令 {code:#06x} 失败：{status!r}")
         return contents
 
-    def read(self, path):
-        return self.call(0x4008, b"\x01\0\0/.." + path.encode("ascii") + b"\0")
+    def read(self, path, maximum=1024*1024):
+        return self.call(0x4008, b"\x01\0\0/.." + path.encode("ascii") + b"\0",maximum)
 
-    def contents(self, path):
-        status, result = self.read(path)
+    def contents(self, path, maximum=1024*1024):
+        status, result = self.read(path,maximum)
         require(status == (0, 0), f"无法读回 {path}：{status!r}")
         return result
 
@@ -89,6 +94,11 @@ def perform(camera, action):
     factory = Factory(camera)
     require(factory.contents("/version.txt") == BUILD_ID, "机身内部版本与已验证的 4.04 不符。")
     print("LIVE_FIRMWARE_BUILD_MATCH", flush=True)
+    if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
+                  "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix"):
+        from camera.creative_flash import perform as creative_update, configure
+        creative_update(camera,factory,configure(action))
+        return
     if action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
         from camera.menu_ram import perform as menu_experiment
         menu_experiment(camera, factory, action.removeprefix("menu-ram-"))
@@ -202,7 +212,7 @@ def connect(action):
 
     try:
         driver = GenericUsbDriver(ClaimedBackend(device))
-        device.default_timeout = 12000 if action in ("backup", "settings-snapshot", "settings-runtime-snapshot",
+        device.default_timeout = 12000 if action.startswith("creative-") or action in ("backup", "settings-snapshot", "settings-runtime-snapshot",
                                                      "menu-ram-install", "menu-ram-inspect", "menu-ram-restore") else 2500
         auth = SonySenserAuthDevice(driver)
         auth.start()
