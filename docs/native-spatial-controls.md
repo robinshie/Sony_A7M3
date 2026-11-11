@@ -85,7 +85,13 @@ v3 保留 v2 的记录布局，增加对这一明确懒绑定状态的支持：�
 
 新增 `research/yc_trace_probe_test.c` 在 QEMU 中执行生产检查器和原始 `dlsym` PLT，模拟映射、系统调用与符号查询。每种模式通过 19 个案例、111 项检查，覆盖未解析/已解析槽、查询失败、目标被替换、槽竞争、分配和保护失败、繁忙时停止、精确恢复，以及旧版本和代码被改动的拒绝路径。记录包装函数的 4,128 个案例继续通过。
 
-v3 两个探针均已加载：`.lab/yc-trace/1794399065129004000/` 中 metadata 和 jpeg 均为 `status=1, armed=1`，初始计数为 0。正在等待用户保持开机拍照、回放并接回 USB，随后读取并解除。此状态仅证明临时记录器安装成功；没有替换 r3，没有接入空间滤波，也没有证明实际拍照通路。
+v3 两个探针加载后，用户保持开机拍照并回放，已成功读取并解除，见 `.lab/yc-trace/1794399178947159000/`。metadata 记录 7 次成功调用，最大有效尺寸 1616×1080，另有 640×480；JPEG 编码入口调用计数为 0。两处均 `status=2, armed=0`。原来的大尺寸过滤会排除这些记录，现有尺寸不能当作完整照片亮度平面。
+
+v4 转向照片组装/写入接口：`libObj` 槽 `0x126cec0` → `MprIf::MakeWriteStillImage`（`libmpr:0x85ee14`），以及槽 `0x126cce0` → `MprIf::WriteStill`（`libmpr:0x85ed3a`）。两者均只复制调用者传入的 64 字节参数，保留原函数及四个寄存器参数；空指针不解引用。组装函数末尾的地址常量带有 `R_ARM_RELATIVE`，校验器依据 ELF 重定位与当前加载基址计算期望值，仍核对整个函数。错误重定位值会被拒绝。
+
+v4 记录器通过 6,196 个 ARM 案例、15,926,810 项检查；安装/恢复夹具分别通过 19/20 个案例和 111/114 项检查。首次加载停在组装函数的重定位校验，未附加任何探针；修正后加载成功。用户再次拍照并回放，`.lab/yc-trace/1794399813305066000/` 显示两处各成功调用一次，分别来自 `libObj:0x9c7031` 和 `0xc74b1d`。两处已解除并恢复原槽。参数包含日期、媒体及元数据引用；未解引用记录中的指针，尚未取得实际照片像素。
+
+USB 扩展机型查询曾再次返回 `Sense 0x9 0x81 0x83`。为避免重复卡在这一查询，跟踪工具增加可选 `--host-identity-check`：客体仍要求唯一 Sony `054c:0c02` 和 Sony SCSI 身份，维护通道再核对 `ILCE-7M3`、内部构建号及完整目标库，之后才允许执行负载。其他工具默认仍做原来的扩展查询。此路径已完成本轮加载和解除；`research/guest_identity_test.py` 的 13 个离线案例确认未知设备、错误机型/版本/库会被拒绝，维护身份核对失败之前不会运行相机负载。
 
 离线构建默认不接触相机。下面的 `--live` 命令用于已配置的 USB 交接环境；安装到停止之间保持相机开机，不能把它当作持久固件更新：
 
@@ -95,6 +101,9 @@ python3 research/yc_metadata_fixture.py --usr "$A7M3_USR"
 python3 research/yc_trace.py --usr "$A7M3_USR" --kind both --live --action install
 # 保持开机、拔 USB，正常拍照，然后重新连接。
 python3 research/yc_trace.py --usr "$A7M3_USR" --kind both --live --action stop
+# 拍照组装/写入接口（每轮安装到解除之间保持开机）
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind capture --live --action install --host-identity-check
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind capture --live --action stop --host-identity-check
 ```
 
 另一个候选为 `libmpr.so` 的 `MprIf::EncodeStill`，`libObj.so` 内存在两处调用，其中一处邻近 `ObjConverter`。尚未观察正常按快门是否经过该编码入口，不能据函数名称就注入照片处理算法。

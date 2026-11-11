@@ -46,6 +46,7 @@ static void reset(unsigned lazy){
  for(unsigned i=0;i<16384;i++)((unsigned char*)HEAP)[i]=0;
  copy((void*)OBJ,object_header,sizeof object_header);copy((void*)FLOW,flow_header,sizeof flow_header);
  copy((void*)(FLOW+A7YC_ORIGINAL),original_pin,sizeof original_pin);
+ for(unsigned i=0;i!=A7YC_RELOCATION_COUNT;i++)*(uint32_t*)(FLOW+A7YC_ORIGINAL+target_relocations[i])+=FLOW;
  copy((void*)(OBJ+A7YC_LAZY),lazy_pin,sizeof lazy_pin);
  copy((void*)(OBJ+A7YC_DLSYM),dlsym_pin,sizeof dlsym_pin);
  *(uint32_t*)(OBJ+0x126c750)=(uintptr_t)lookup;
@@ -62,7 +63,7 @@ void guest_main(void){
  reset(0);*import_slot=0x12345678;check(inspect()==-10&&allocations==0);
  for(unsigned lazy=0;lazy<=1;lazy++){
   reset(lazy);action=0;check(inspect()==1&&allocations==1&&*import_slot==HEAP&&state->original==ORIGINAL);
-  check(state->restore_slot==(lazy?OBJ+A7YC_LAZY:ORIGINAL)&&state->armed==1&&state->version==3);
+  check(state->restore_slot==(lazy?OBJ+A7YC_LAZY:ORIGINAL)&&state->armed==1&&state->version==4);
   action=1;check(inspect()==1&&*import_slot==HEAP&&state->lock==0);
   state->lock=1;check(inspect()==-14&&state->armed==1&&*import_slot==HEAP);
   action=2;check(inspect()==-14&&state->armed==0&&*import_slot==HEAP);
@@ -78,6 +79,7 @@ void guest_main(void){
  reset(1);*(unsigned char*)(OBJ+A7YC_DLSYM)^=1;check(inspect()==-4&&lookups==0&&allocations==0);
  reset(1);*(unsigned char*)(OBJ+A7YC_LAZY)^=1;check(inspect()==-4&&lookups==0&&allocations==0);
  reset(1);*(unsigned char*)(FLOW+A7YC_ORIGINAL)^=1;check(inspect()==-4&&lookups==0&&allocations==0);
+ for(unsigned i=0;i!=A7YC_RELOCATION_COUNT;i++){reset(1);*(uint32_t*)(FLOW+A7YC_ORIGINAL+target_relocations[i])^=1;check(inspect()==-4&&lookups==0&&allocations==0);}
  reset(1);bad_version=1;check(inspect()==-1&&lookups==0&&allocations==0);
  put("YC_TRACE_PROBE_PASSED cases=");number(cases);put(" checks=");number(checks);put("\n");stop();
 }

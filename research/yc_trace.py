@@ -30,6 +30,8 @@ GETTER='_ZN26C_DataflowInfra_StdData_YC22GetEntry_ImageSizeInfoEP35C_DataflowInf
 PROFILES={
     'metadata':(0,'dataflowInfraFramework.so',GETTER,0x126ce20,0x22301,12),
     'jpeg':(1,'libmpr.so','_ZN5MprIf11EncodeStillEPNS_16EncodeStillParamE',0x126b17c,0x85ecbd,30),
+    'write':(2,'libmpr.so','_ZN5MprIf10WriteStillEPNS_15WriteStillParamEPN3MPR9StillInfoEm',0x126cce0,0x85ed3b,48),
+    'make':(2,'libmpr.so','_ZN5MprIf19MakeWriteStillImageEPNS_20WriteStillImageParamEPN3MPR9StillInfoE',0x126cec0,0x85ee15,56),
 }
 def sha(data):return hashlib.sha256(data).hexdigest()
 def require(ok,message):
@@ -45,6 +47,9 @@ def build(usr,out,kind='metadata'):
     slots=[a for a,(reloc,s) in obj.relocations.items() if reloc==22 and s['name']==symbol]
     original=flow.symbols[symbol]
     require(slots==[expected_slot] and original['value']==expected_address and original['size']==expected_size,'Unexpected import ABI')
+    start=original['value']&~1
+    relocations=[(a,reloc,s) for a,(reloc,s) in flow.relocations.items() if start<=a<start+expected_size]
+    require(all(reloc==23 and (a-start)%4==0 and a+4<=start+expected_size for a,reloc,s in relocations),'Unsupported code relocation')
     out.mkdir(parents=True,exist_ok=True)
     (out/'hook.ld').write_text('ENTRY(a7yc_hook)\nSECTIONS { . = 0; .text : { *(.text*) } }\n')
     run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-nostdlib','-T',str(out/'hook.ld'),
@@ -77,6 +82,8 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
     header+=array('object_header',obj.data[:64])+array('flow_header',flow.data[:64])
     header+=array('original_pin',flow.read(original['value']&~1,original['size']))+array('hook_code',code)
     header+=array('lazy_pin',obj.read(0xffc24,20))+array('dlsym_pin',obj.read(0x104ae4,12))
+    header+=f'#define A7YC_RELOCATION_COUNT {len(relocations)}u\n'
+    header+='static const unsigned target_relocations[]={'+(','.join(str(a-start) for a,_,_ in relocations) or '0')+'};\n'
     (out/'yc-trace-pins.h').write_text('#ifndef A7YC_PINS_H\n#define A7YC_PINS_H\n'+header+'#endif\n')
     run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mno-unaligned-access','-O2',
          '-ffreestanding','-fno-builtin','-nostdlib','-Wall','-Wextra','-Werror',
@@ -96,7 +103,7 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
              '-Wno-unused-function','-Wno-misleading-indentation','-I',str(ROOT/'payloads'),'-I',str(out),
              f'-DACTION={index}',str(ROOT/'research/yc_trace_probe.c'),'-lgcc','-o',str(out/f'{action}.so')])
     (out/'proof.json').write_text(json.dumps(dict(source_sha256={n:sha((ROOT/n).read_bytes()) for n in SOURCES},
-        library_sha256={n:PINS[n] for n in elves},kind=kind,version=3,hook_sha256=sha(code),qemu_log_sha256=sha(log),
+        library_sha256={n:PINS[n] for n in elves},kind=kind,version=4,hook_sha256=sha(code),qemu_log_sha256=sha(log),
         probe_qemu_log_sha256=sha(probe_log),
         payload_sha256={a:sha((out/f'{a}.so').read_bytes()) for a in ('install','read','stop')},
         scope='Temporary bounded metadata import hook; no pixel writes or firmware replacement',
@@ -111,12 +118,12 @@ FIELDS={'attached':(0,1),'unit_type':(4,4),'unit_handle':(8,2),'unit_data_offset
 def decode(raw):
     require(len(raw)==10344,'Unexpected report length')
     h=struct.unpack_from('<3Ii6I',raw)
-    require(h[:2]==(0x41375950,3),'Unexpected report identity')
+    require(h[:2]==(0x41375950,4),'Unexpected report identity')
     state=struct.unpack_from('<16I',raw,40);rows=[]
     require(state[5]<=127,'Unexpected trace count')
     def record(i):
         at=104+i*80;caller,result,kind,_=struct.unpack_from('<IiII',raw,at);entry=raw[at+16:at+80]
-        row={name:int.from_bytes(entry[o:o+n],'little') for name,(o,n) in FIELDS.items()} if kind==0 else dict(region_words=list(struct.unpack('<16I',entry)))
+        row={name:int.from_bytes(entry[o:o+n],'little') for name,(o,n) in FIELDS.items()} if kind==0 else {('region_words' if kind==1 else 'parameter_words'):list(struct.unpack('<16I',entry))}
         row.update(caller=hex(caller),object_relative_return=hex(caller-h[4]),result=result,kind=kind,raw=entry.hex());return row
     for i in range(state[5]):
         rows.append(record(i))
@@ -153,13 +160,17 @@ def live(camera,out,action,kinds):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--usr',required=True,type=Path)
     p.add_argument('--live',action='store_true');p.add_argument('--action',choices=('install','read','stop'),default='read')
-    p.add_argument('--kind',choices=('metadata','jpeg','both'),default='metadata');a=p.parse_args()
-    kinds=('metadata','jpeg') if a.kind=='both' else (a.kind,)
+    p.add_argument('--host-identity-check',action='store_true',help='Avoid a stuck MSC extended-info query; verify the exact model/build through maintenance before any payload instead')
+    p.add_argument('--kind',choices=(*PROFILES,'both','capture'),default='metadata');a=p.parse_args()
+    kinds={'both':('metadata','jpeg'),'capture':('write','make')}.get(a.kind,(a.kind,))
     out=ROOT/'.lab/yc-trace'/str(time.time_ns())
     for kind in kinds:build(a.usr,out/kind,kind)
     if a.live:
         from camera import handoff,service
         service.perform=lambda cam,action:live(cam,out,a.action,kinds)
-        handoff.run('settings-snapshot')
+        previous=handoff.SWITCH
+        if a.host_identity_check:handoff.SWITCH+=' --host-identity-check'
+        try:handoff.run('settings-snapshot')
+        finally:handoff.SWITCH=previous
     print('EVIDENCE',out)
 if __name__=='__main__':main()

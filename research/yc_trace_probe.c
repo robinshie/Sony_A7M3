@@ -16,6 +16,15 @@ _Static_assert(sizeof(struct Trace)==10304,"trace ABI");
 _Static_assert(sizeof(struct Result)==10344,"result ABI");
 static int same(const void *a,const void *b,unsigned n){const volatile unsigned char *x=a;const unsigned char *y=b;for(unsigned i=0;i<n;i++)if(x[i]!=y[i])return 0;return 1;}
 static void copy(void *a,const void *b,unsigned n){unsigned char *x=a;const volatile unsigned char *y=b;for(unsigned i=0;i<n;i++)x[i]=y[i];}
+static int original_matches(uint32_t address,uint32_t load_base){
+ for(unsigned i=0;i<sizeof original_pin;){unsigned relocated=0;
+  for(unsigned j=0;j!=A7YC_RELOCATION_COUNT;j++)if(target_relocations[j]==i){
+   uint32_t word=(uint32_t)original_pin[i]|((uint32_t)original_pin[i+1]<<8)|((uint32_t)original_pin[i+2]<<16)|((uint32_t)original_pin[i+3]<<24);
+   if(*(volatile uint32_t*)(address+i)!=word+load_base)return 0;i+=4;relocated=1;break;
+  }
+  if(!relocated){if(*(volatile unsigned char*)(address+i)!=original_pin[i])return 0;i++;}
+ }return 1;
+}
 static int exact(const char *a,const char *b){while(*b&&*a==*b){a++;b++;}return !*b&&(!*a||*a=='\n');}
 struct Map {uint32_t lo,hi;const char *permissions,*name;};
 static int parse(const char *p,struct Map *m){const char *q=p;m->lo=hex(&q);if(*q++!='-')return 0;m->hi=hex(&q);if(m->hi<=m->lo||*q++!=' ')return 0;m->permissions=q;
@@ -44,7 +53,7 @@ static int inspect(void){
  if(!obj||!flow||obj>UINT32_MAX-A7YC_SLOT-4||flow>UINT32_MAX-A7YC_ORIGINAL-sizeof original_pin)return -3;
  if(!readable(obj,sizeof object_header)||!readable(flow,sizeof flow_header)||
     !same((void*)obj,object_header,sizeof object_header)||!same((void*)flow,flow_header,sizeof flow_header)||
-    !readable(flow+A7YC_ORIGINAL,sizeof original_pin)||!same((void*)(flow+A7YC_ORIGINAL),original_pin,sizeof original_pin)||
+    !readable(flow+A7YC_ORIGINAL,sizeof original_pin)||!original_matches(flow+A7YC_ORIGINAL,flow)||
     !readable(obj+A7YC_LAZY,sizeof lazy_pin)||!same((void*)(obj+A7YC_LAZY),lazy_pin,sizeof lazy_pin)||
     !readable(obj+A7YC_DLSYM,sizeof dlsym_pin)||!same((void*)(obj+A7YC_DLSYM),dlsym_pin,sizeof dlsym_pin))return -4;
  uint32_t *slot=(void*)(obj+A7YC_SLOT),original=flow+A7YC_ORIGINAL+1;
@@ -68,7 +77,7 @@ static int inspect(void){
   long allocation=allocate();if(!allocation||(uint32_t)allocation>=0xfffff001u)return -7;
   uint32_t code=(uint32_t)allocation;state=(void*)(code+4096);result.code=code;result.state=(uintptr_t)state;
   copy((void*)code,hook_code,sizeof hook_code);*(uint32_t*)(code+A7YC_STATE_LITERAL)=(uintptr_t)state;
-  state->magic=0x41375943;state->version=3;state->original=original;state->maximum=128;state->armed=1;state->mode=A7YC_KIND;state->restore_slot=current;
+  state->magic=0x41375943;state->version=4;state->original=original;state->maximum=128;state->armed=1;state->mode=A7YC_KIND;state->restore_slot=current;
   if(sc3(0xf0002,code,code+sizeof hook_code,0)||sc3(125,code,4096,5)){sc3(91,code,16384,0);return -8;}
   uint32_t expected=current;
   if(!__atomic_compare_exchange_n(slot,&expected,code,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)){sc3(91,code,16384,0);return -9;}
@@ -76,7 +85,7 @@ static int inspect(void){
   if((current&4095)||current>UINT32_MAX-16384||!range(current,4096,"r-xp",1)||!range(current+4096,12288,"rw-p",1))return -10;
   state=(void*)(current+4096);result.code=current;result.state=(uintptr_t)state;
   for(unsigned i=0;i<sizeof hook_code;i++)if((i<A7YC_STATE_LITERAL||i>=A7YC_STATE_LITERAL+4)&&((volatile unsigned char*)current)[i]!=hook_code[i])return -11;
-  if(*(uint32_t*)(current+A7YC_STATE_LITERAL)!=(uintptr_t)state||state->magic!=0x41375943||state->version!=3||state->original!=original||state->maximum!=128||state->mode!=A7YC_KIND||
+  if(*(uint32_t*)(current+A7YC_STATE_LITERAL)!=(uintptr_t)state||state->magic!=0x41375943||state->version!=4||state->original!=original||state->maximum!=128||state->mode!=A7YC_KIND||
      (state->restore_slot!=original&&state->restore_slot!=obj+A7YC_LAZY))return -12;
  }
  if(ACTION==2)__atomic_store_n(&state->armed,0,__ATOMIC_RELEASE);
@@ -93,7 +102,7 @@ static int inspect(void){
 }
 #ifndef A7YC_PROBE_TEST
 __attribute__((constructor)) static void constructor(void){
- result.magic=0x41375950;result.version=3;result.action=ACTION;result.status=inspect();
+ result.magic=0x41375950;result.version=4;result.action=ACTION;result.status=inspect();
  sc3(10,(long)"/tmp/jiritsu/libJit.so",0,0);long fd=sc3(5,(long)"/tmp/jiritsu/a7yc.bin",1|64|128|0x8000,0600);if(fd<0)return;
  unsigned done=0;while(done<sizeof result){long n=sc3(4,fd,(long)((unsigned char*)&result+done),sizeof result-done);if(n<=0||(unsigned)n>sizeof result-done)break;done+=(unsigned)n;}
  sc3(118,fd,0,0);sc3(6,fd,0,0);

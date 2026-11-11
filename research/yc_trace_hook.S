@@ -4,10 +4,11 @@
 .balign 4
 .global a7yc_hook
 .type a7yc_hook,%function
-/* v2: observe all calls (including unsuccessful and small-image calls).
+/* v4: observe all calls (including unsuccessful and small-image calls).
  * Keep first 127 successful records plus a separate largest YC example.
  * mode 0 = GetEntry_ImageSizeInfo: Entry object + 20, 60 bytes.
  * mode 1 = EncodeStill: parameter->RegionInfo, 64 bytes.
+ * mode 2 = WriteStill/MakeWriteStillImage: nonnull parameter itself, 64 bytes.
  * No I/O, allocation, blocking, pixel writes or changed return value.
  * Header is 64 bytes; each record is caller/result/mode/reserved + 64 data bytes.
  * Allocation remains alive after detach to protect in-flight calls. */
@@ -37,7 +38,10 @@ a7yc_hook:
     ldr r2,[r5,#48]
     cmp r2,#0
     addeq r4,r4,#20
-    ldrne r4,[r4]
+    cmp r2,#1
+    ldreq r4,[r4]
+    cmp r4,#0
+    beq .Lunlock
     /* Successful native calls retain caller-owned objects until return. */
     ldr r1,[r5,#20]
     cmp r1,#127
