@@ -12,10 +12,19 @@ static void check(int ok){checks++;if(!ok){put("FAIL YAP case=");number(cases);p
 void native_log(const char *format,unsigned api){(void)format;logs++;last_log_api=api;}
 static uint8_t small[2560],large[5120],input[0xa4],output[20];
 static uint32_t aperture[(0x15c20+32)/4],device[6];
+static uint8_t maker[6352+16];
+static uint32_t context[0x6260/4+1],tag_status,tag_calls;
+unsigned native_tag_lookup(unsigned handle,unsigned tag,void *entry){
+ check(handle==0x1234abcd&&tag==0x2010);tag_calls++;
+ if(!tag_status)((uint32_t*)entry)[2]=(uintptr_t)(maker+8);
+ return tag_status;
+}
 static uint8_t byte_at(unsigned at,unsigned seed){return (uint8_t)((at*37u)^(at>>4)^seed);}
 void guest_main(void){
  void (*calc)(void*,const void*)=(void*)(BASE+0x3f872d);
  void (*write)(void*,const void*)=(void*)(BASE+0x70fc21);
+ void (*record)(void*,const void*)=(void*)(BASE+0x3cbd29);
+ void (*read_record)(void*,const void*)=(void*)(BASE+0x3cc001);
  *(uint32_t*)(BASE+0x118d8b4+0x10ac)=(uintptr_t)small;
  *(uint32_t*)(BASE+0x118d8b4+0x7918)=(uintptr_t)large;
  for(unsigned seed=0;seed<4;seed++){
@@ -52,6 +61,35 @@ void guest_main(void){
   check(pair[0]==v&&pair[1]==(uint16_t)(v^0xa59c));
  }
  for(unsigned i=0;i<sizeof aperture/sizeof *aperture;i++)if(i!=4+0x15c1c/4)check(aperture[i]==0xa57e19c3);
+ /* Validate the separately derived JPEG tag offsets through original code.
+    The getter is original too; only the tag provider is a synthetic stub. */
+ context[0x625c/4]=0x1234abcd;
+ for(unsigned seed=0;seed<4;seed++)for(unsigned v=0;v<256;v++){
+  uint16_t pair[6]={0x55aa,0x55aa,(uint16_t)(v|(seed<<8)),(uint16_t)((v^0x9c)|(seed<<12)),0x55aa,0x55aa};
+  for(unsigned i=0;i<sizeof maker;i++)maker[i]=byte_at(i,seed);
+  tag_status=0;tag_calls=logs=0;cases++;
+  record(pair+2,context);
+  check(tag_calls==1&&logs==0);
+  for(unsigned i=0;i<sizeof maker;i++){
+   unsigned expected=byte_at(i,seed);
+   if(i==8+0x167d)expected=v;
+   if(i==8+0x167e)expected=v^0x9c;
+   check(maker[i]==expected);
+  }
+  check(pair[2]==(uint16_t)(v|(seed<<8))&&pair[3]==(uint16_t)((v^0x9c)|(seed<<12)));
+  pair[2]=pair[3]=0xa55a;
+  read_record(pair+2,context);
+  check(tag_calls==2&&logs==0&&pair[2]==v&&pair[3]==(v^0x9c));
+  check(pair[0]==0x55aa&&pair[1]==0x55aa&&pair[4]==0x55aa&&pair[5]==0x55aa);
+ }
+ for(unsigned fail=1;fail<=2;fail++){
+  uint16_t pair[2]={0x369a,0x5c72};
+  for(unsigned i=0;i<sizeof maker;i++)maker[i]=0xa5;
+  tag_status=fail;tag_calls=logs=0;cases++;
+  record(pair,context);read_record(pair,context);
+  check(tag_calls==2&&logs==2&&pair[0]==0x369a&&pair[1]==0x5c72);
+  for(unsigned i=0;i<sizeof maker;i++)check(maker[i]==0xa5);
+ }
 #ifdef A7YAP_PRIVATE
  for(unsigned bank=0;bank<2;bank++){
   for(unsigned i=0;i<sizeof small;i++)small[i]=private_table_0[i];

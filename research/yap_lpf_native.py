@@ -22,6 +22,9 @@ RANGES = {
     'device_dirty': (0x70d88e, 0x70d894),
     'write_lpf_word': (0x70fa24, 0x70fa30),
     'write_lpf': (0x70fc20, 0x70fc3c),
+    'maker_get': (0x7821ea, 0x782214),
+    'maker_write_lpf': (0x3cbd28, 0x3cbd58),
+    'maker_read_lpf': (0x3cc000, 0x3cc030),
 }
 TABLES = ((0x30032, 0x10557e6, 2560),
           (0x30033, 0x1058606, 5120),
@@ -89,6 +92,9 @@ def main():
             'ldr ip,1f\nbx ip\n.balign 4\n1: .word native_log\n'
             '.section .note.GNU-stack,"",%progbits\n')
     sections.append((BASE+0x3a4bc0, 'log_stub'))
+    asm += ('.section .tag_stub,"ax"\n.thumb\n'
+            'ldr ip,1f\nbx ip\n.balign 4\n1: .word native_tag_lookup\n')
+    sections.append((BASE+0x75fbe8, 'tag_stub'))
     (out/'native.S').write_text(asm)
     (out/'start.S').write_text('''.syntax unified
 .arm
@@ -142,6 +148,8 @@ _start:
         log=log.decode().splitlines(), private_backup=private,
         private_tables_executed=bool(private),
         scope='Original CalcLpf and LPF writer; table inputs and register aperture are guarded RAM',
+        maker_note_scope='Original Tag2010 lookup and LPF record read/write with a synthetic tag provider',
+        maker_note_offsets={'rawdev': '0x1364', 'vaplpf': '0x167d', 'haplpf': '0x167e'},
         hardware_value_range_known=False, filter_frequency_response_known=False,
         realtime_schedule_executed=False, camera_executed=False, flash_ready=False)
     (out/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
