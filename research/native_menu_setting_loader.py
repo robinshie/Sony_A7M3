@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Build and test a SettingMenu retarget over the deployed dual-loader image."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+from elf32 import ELF
+from creative_dispatch import VIEW_SHA
+
+ROOT=Path(__file__).resolve().parents[1]
+OUT=ROOT/'.lab/native-setting-loader'
+CURRENT_SHA='63cea3532ddb03d5e8351738cb88eaa65b95c7c6c3345e5fdd6574734724395a'
+HOOK=0x21464a
+SITES={'restore_global_hook':(0x20d068,4),'setting_hook':(HOOK,4),'boot_hook':(0x188aec,4),'menu_loader_a':(0x5b9a7c,52),'menu_loader_b':(0x5b9b1c,82)}
+def sha(b):return hashlib.sha256(b).hexdigest()
+def run(args,**kw):return subprocess.run(args,check=True,**kw)
+
+def main():
+ cli=argparse.ArgumentParser(description=__doc__)
+ cli.add_argument('--usr',type=Path,required=True)
+ cli.add_argument('--current-view',type=Path,default=ROOT/'.lab/native-menu-boot-loader/viewUnified2.so')
+ a=cli.parse_args();OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
+ original=ELF(a.usr/'lib/viewUnified2.so');before=a.current_view.read_bytes()
+ if sha(original.data)!=VIEW_SHA or sha(before)!=CURRENT_SHA:raise ValueError('Original/deployed loader firmware pin mismatch')
+ if before[HOOK:HOOK+4]!=original.read(HOOK,4):raise ValueError('Original factory hook changed')
+ run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-mthumb','-c',str(ROOT/'research/native_menu_setting_loader.S'),'-o','loader.o'],cwd=OUT)
+ run(['arm-none-eabi-ld',*[f'--section-start=.{n}={at:#x}' for n,(at,_) in SITES.items()],'-e','native_menu_loader','loader.o','-o','loader.elf'],cwd=OUT)
+ patch=ELF(OUT/'loader.elf');edited=bytearray(before);metadata={}
+ for name,(at,capacity) in SITES.items():
+  section=next(s for s in patch.sections if s[3]==at)
+  size=section[5]
+  if size>capacity:raise ValueError('Loader exceeds reserved NOP cave')
+  data=patch.read(at,size);edited[at:at+size]=data;(OUT/(name+'.bin')).write_bytes(data)
+  metadata[name]={'va':at,'size':size,'capacity':capacity,'before_hex':before[at:at+size].hex(),'after_hex':data.hex()}
+ # Complete bytewise exclusion proof: no old RW menu/icon bytes may change.
+ allowed={i for n,m in metadata.items() for i in range(m['va'],m['va']+m['size'])}
+ if any(i not in allowed for i,(x,y) in enumerate(zip(before,edited)) if x!=y):raise ValueError('Out-of-scope firmware change')
+ if edited[0x188aec:0x188af0]!=before[0x188aec:0x188af0]:raise ValueError('Boot hook changed')
+ if edited[0x5b9a7c:0x5b9aa8]!=before[0x5b9a7c:0x5b9aa8]:raise ValueError('Shared loader A changed')
+ if edited[0x5b9b2e:0x5b9b30]!=before[0x5b9b2e:0x5b9b30]:raise ValueError('Module caller PC changed')
+ if edited[0x20d068:0x20d06c]!=original.read(0x20d068,4):raise ValueError('Global factory not restored')
+ metadata={name:metadata[name] for name in ('menu_loader_a','menu_loader_b','restore_global_hook','setting_hook')}
+ (OUT/'viewUnified2.so').write_bytes(edited)
+ factory=bytearray(original.read(0x214638,0x24));factory[HOOK-0x214638:HOOK-0x214638+4]=patch.read(HOOK,4)
+ (OUT/'factory.bin').write_bytes(factory)
+ entry=bytearray(original.read(0x188aec,0x1e0));entry[:4]=patch.read(0x188aec,4)
+ (OUT/'entry.bin').write_bytes(entry)
+ table=b''.join(((original.word(0x8784e8+4*i)+0x40000000) if original.word(0x8784e8+4*i) else 0).to_bytes(4,'little') for i in range(10))
+ (OUT/'entry_table.bin').write_bytes(table)
+ (OUT/'entry_table.h').write_text('static const unsigned expected_trigger[10]={'+','.join(str(int.from_bytes(table[i:i+4], 'little')) for i in range(0,40,4))+'};\n')
+ (OUT/'entry_bytes.h').write_text('static const unsigned char prologue[4]={'+','.join(map(str,original.read(0x188aec,4)))+'};\nstatic const unsigned char branch[4]={'+','.join(map(str,patch.read(0x188aec,4)))+'};\n')
+ (OUT/'dlopen_plt.bin').write_bytes(original.read(0x15d958,12))
+ (OUT/'dlsym_plt.bin').write_bytes(original.read(0x15c8dc,12))
+ (OUT/'native.S').write_text('''.syntax unified
+.section .factory,"ax"
+.thumb
+.global stock_factory
+.thumb_func
+stock_factory: .incbin "factory.bin"
+.section .loader_a,"ax"
+.incbin "menu_loader_a.bin"
+.section .loader_b,"ax"
+.incbin "menu_loader_b.bin"
+.section .entry,"ax"
+.thumb
+.global stock_entry
+.thumb_func
+stock_entry: .incbin "entry.bin"
+.section .entry_table,"a"
+.incbin "entry_table.bin"
+.section .model_state,"ax"
+.thumb
+b.w mock_state
+.section .trigger,"ax"
+.arm
+b mock_trigger
+.section .allocate,"ax"
+.arm
+b mock_alloc
+.section .constructor,"ax"
+.thumb
+b.w mock_ctor
+.section .dlopen_plt,"ax"
+.arm
+.incbin "dlopen_plt.bin"
+.section .dlsym_plt,"ax"
+.arm
+.incbin "dlsym_plt.bin"
+.section .dlopen_got,"aw"
+.global dlopen_slot
+dlopen_slot: .word 0
+.section .dlsym_got,"aw"
+.global dlsym_slot
+dlsym_slot: .word 0
+.section .note.GNU-stack,"",%progbits
+''')
+ (OUT/'start.S').write_text('''.syntax unified
+.arm
+.section .text.start,"ax"
+.global _start
+_start:
+ cpsid if
+ ldr sp,=0x41000000
+ ldr r0,=__bss_start
+ ldr r1,=__bss_end
+ mov r2,#0
+1: cmp r0,r1
+ strlo r2,[r0],#4
+ blo 1b
+ bl guest_main
+2: wfi
+ b 2b
+.section .note.GNU-stack,"",%progbits
+''')
+ ld='ENTRY(_start)\nSECTIONS {\n. = 0x40200000;\n.text : { *(.text.start) *(.text*) }\n.rodata : { *(.rodata*) }\n.data : { *(.data*) }\n.bss (NOLOAD) : { __bss_start = .; *(.bss*) *(COMMON) . = ALIGN(8); __bss_end = .; }\n'
+ loc={'entry':0x188aec,'entry_table':0x8784e8,'model_state':0x1618f4,'trigger':0x1588a8,'factory':0x214638,'loader_a':SITES['menu_loader_a'][0],'loader_b':SITES['menu_loader_b'][0],
+      'allocate':0x15867c,'constructor':0x213ec4,'dlopen_got':0x8e54dc,'dlsym_got':0x8e4ff4,
+      'dlopen_plt':0x15d958,'dlsym_plt':0x15c8dc}
+ ld+=''.join(f'.{n} {at+0x40000000:#x} : {{ *(.{n}) }}\n' for n,at in sorted(loc.items(),key=lambda x:x[1]))+'}\n';(OUT/'guest.ld').write_text(ld)
+ run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-Os','-Wall','-Wextra','-Werror',
+      '-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
+      '-I',str(OUT),'-nostdlib','-T','guest.ld','start.S','native.S',str(ROOT/'research/native_menu_setting_loader_harness.c'),'-lgcc','-o','loader-test.elf'],cwd=OUT)
+ r=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-smp','1','-m','1024','-nodefaults','-audio','none','-nic','none',
+        '-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native',
+        '-device',f'loader,file={OUT}/loader-test.elf,cpu-num=0'],capture_output=True,timeout=30)
+ log=r.stdout+r.stderr;(OUT/'qemu.log').write_bytes(log);print(log.decode(),end='')
+ if b'NATIVE_SETTING_LOADER_PASSED' not in r.stdout or b'FAIL ' in log:raise ValueError('Loader test failed')
+ from native_menu_setting_lifecycle import test as lifecycle_test
+ lifecycle=lifecycle_test(original,OUT)
+ sources=['research/native_menu_setting_loader'+s for s in ('.S','.py','_harness.c')]
+ proof={'before_sha256':CURRENT_SHA,'after_sha256':sha(edited),'patches':metadata,
+        'source_sha256':{s:sha((ROOT/s).read_bytes()) for s in sources},'qemu_log_sha256':sha(log),
+        'scope':'Original native SettingMenu factory and complete original still-view UserEntry across 10 states; entry prologue and original caller LR preserved by B.W trampoline; dynamic loader/module mocked; no sensor/LCD emulation',
+        'module_path':'/usr/lib/a7fl.so','entry':'int a7_fl_install(uintptr_t view_base, void *view_manager_or_unused, unsigned mode)', 'mode':{'0':'SettingMenu factory','1':'Still-view entry; second argument ignored'}, 'module_call_return_va':0x5b9b30, 'module_call_lr_va':0x5b9b31,
+        'lifecycle':lifecycle,'constructor_original_va':0x213ec5,'native_display_rendered':False,'camera_integration':False,'flash_ready':False}
+ proof['source_sha256'].update(lifecycle['source_sha256'])
+ (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
+
+if __name__=='__main__':main()
