@@ -144,6 +144,12 @@ int native_adjust_add_save(NativeAdjustTree *t,uint32_t title) {
                                             t->specs[f].maximum-t->current[f]+1)) return 0;
     return 1;
 }
+int native_adjust_save_title(NativeAdjustTree*t,uint32_t title) {
+    if(!t||!title||t->save.properties!=&t->save_properties||
+       t->save_properties.list!=t->save_props||t->save_properties.last!=4||
+       t->save_props[0].key!=0||t->save_props[4].value!=NATIVE_ADJUST_SAVE_ID)return 0;
+    t->save_props[0].value=title;return 1;
+}
 int native_adjust_encode(const NativeAdjustTree*t,int id,int value,int*out) {
     if(!t||!out)return 0;
     if(id==0x7000) {if(value!=0&&value!=1)return 0;*out=value;return 1;}

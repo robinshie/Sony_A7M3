@@ -53,6 +53,9 @@ static a7_menu_node *look_row(a7_menu_node *look,unsigned index) {
     check(look&&look->count==2&&index<10,"look has two native pages and bounded row");
     return look->children[index/6]->children[index%6];
 }
+static int row_title(a7_menu_node *look,unsigned index) {
+    int value=0;check(((int(*)(void *,int,int *))0x40683297)(look_row(look,index),0,&value),"native row title lookup");return value;
+}
 void *mock_action_select(void *view) {check(view==action_view,"native action view ABI");return action_selected;}
 int mock_action_process(void *view,void *node) {
     check(view==action_view&&node==action_selected,"native selected action");
@@ -146,12 +149,16 @@ void guest_main(void) {
     *(uint32_t *)(action_view+0x130)=1;*(uintptr_t *)(action_view+0x150)=(uintptr_t)manager_words;*(int *)(action_view+0x158)=7;
     action_selected=look_row(look,9);original_action(action_view);
     test(slot_writes==2 && state->generation==2 && !state->dirty && action_flags==1 && action_fallbacks==0 && stock_actions==0,"original native Save action persists once");
+    test(row_title(look,9)==0x0204ef85,"successful durable Save visibly becomes Complete");
     uint8_t committed[1280];bytes(committed,data_guarded+1,1280);
     test(set_value(0x7001,6)==1 && state->parameters[0]==-3 && a7_fl_cancel()==0 && get_value(0x7001,&value)==1 && value==12 && same(data_guarded+1,committed,1280) && slot_writes==2,"cancel restores committed signed LUT and native enum cursor state");
     test(set_value(0x7001,8)==1 && get_value(0x7001,&value)==1 && value==8 && state->parameters[0]==-1 && a7_fl_cancel()==0,"backend minus one is representable without missing-value sentinel");
     test(set_value(0x7002,13)==1 && state->parameters[1]==4,"highlight enum preview");slot_failed=1;
-    test(a7_fl_confirm()==A7_FL_CONTROL_PERSIST && state->dirty && state->generation==2,"durable write failure never claims committed UI");slot_failed=0;
-    test(a7_fl_confirm()==0 && slot_writes==3 && state->generation==3,"explicit confirmation retry succeeds");
+    test(row_title(look,9)==0x0204eaab,"editing restores Save label");
+    original_action(action_view);
+    test(state->last_error==A7_FL_CONTROL_PERSIST && state->dirty && state->generation==2 && row_title(look,9)==0x0204ef87,"failed native Save shows Not Complete and retains unsaved state");slot_failed=0;
+    original_action(action_view);
+    test(slot_writes==3 && state->generation==3 && row_title(look,9)==0x0204ef85,"native Save retry visibly succeeds");
     test(set_value(0x7000,0)==1 && a7_fl_confirm()==0 && same(data_guarded+1,ORIGINAL,1280) && state->mode==0,"Off restores original and records Off preference");
     test(a7_fl_uninstall()==0 && parent.count==6 && parent.children==parent_children && parent.children[3]->index==4 && manager_words[0]==(uintptr_t)(manager_vtable_words+2),"uninstall restores native parent model and stock indices");
     test(saves==0,"module never requests calibration sync");

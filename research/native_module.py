@@ -18,6 +18,7 @@ import zlib
 from elf32 import ELF
 from native_adjust_fixture import PIECES, STUBS, SHA as CAUTION_SHA
 from creative_dispatch import VIEW_SHA
+from uxc_strings import Strings
 
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'.lab/native-module'
@@ -34,6 +35,12 @@ def main():
     ap.add_argument('--usr',type=Path,required=True);ap.add_argument('--bundle',type=Path,required=True)
     ap.add_argument('--with-bootstrap',action='store_true',help='Link and verify the actual Linux/platform bootstrap for staging')
     args=ap.parse_args();OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
+    locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
+    for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
+        name=f'string_{locale}.uxc';raw=(ROOT/'.lab/native-fl-strings'/name).read_bytes()
+        if sha(raw)!=locale_proof['files'][name]['after_sha256']:raise ValueError('Feedback locale identity differs')
+        strings=Strings(raw)
+        if tuple(strings.text(key) for key in (0x4eaab,0x4ef85,0x4ef87))!=labels:raise ValueError('Feedback resource text differs')
     run([sys.executable,str(ROOT/'research/native_fl_runtime.py'),'--usr',str(args.usr),'--bundle',str(args.bundle)])
     source=ROOT/'.lab/native-fl-runtime'
     for p in source.glob('*.bin'):shutil.copyfile(p,OUT/p.name)
@@ -148,7 +155,7 @@ call_kernel_writer:
     source_files=sources+['payloads/a7-fl-module.h','payloads/a7-fl-runtime.h','payloads/a7-fl-runtime-prefs.h',
         'payloads/a7-fl-runtime-control.h','payloads/a7-fl-runtime-recovery.h','payloads/a7-fl-color.h','payloads/a7-fl-store.h',
         'research/native_adjust.h','research/native_menu.h','research/native_module.py','research/native_module_harness.c',
-        'research/native_fl_runtime_harness.c','research/native_fl_runtime.py','research/native_adjust_fixture.py','research/native_adjust_harness.c','research/elf32.py']
+        'research/native_fl_runtime_harness.c','research/native_fl_runtime.py','research/native_adjust_fixture.py','research/native_adjust_harness.c','research/elf32.py','research/uxc_strings.py']
     if args.with_bootstrap:source_files+=['payloads/a7-fl-bootstrap.h','payloads/a7-fl-posix.h','research/native_bootstrap.py','research/native_bootstrap_test.py','research/native_bootstrap_test_harness.c']
     proof={'scope':'Original Sony generic nodes, process-manager dispatch and backup writer with modeled platform/OSAL/kernel/filesystem; resident FL integration',
            'original_caution_sha256':CAUTION_SHA,'original_view_sha256':VIEW_SHA,'original_ranges':ranges,

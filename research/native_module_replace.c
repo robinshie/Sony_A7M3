@@ -3,7 +3,17 @@
 enum {RD=3,WR=4,OPEN=5,CLOSE=6,MOUNT=21,UID=49,IOCTL=54,STATFS=99,SYNC=118,CAP=184,FSTAT=197,
       OPENAT=322,UNLINKAT=328,RENAMEAT=329,LINKAT=330};
 enum {NOFOLLOW=0x8000,NONBLOCK=0x800,DIRECTORY=0x4000,CREAT=64,EXCL=128};
-static const char current[]="a7fl.so",temporary[]=".a7fl-r1.new",backup[]=".a7fl-2478cec2.orig",logname[]="A7FLUP1.LOG";
+#ifndef NMR_REVISION
+#define NMR_REVISION 1
+#endif
+#if NMR_REVISION == 1
+static const char temporary[]=".a7fl-r1.new",backup[]=".a7fl-2478cec2.orig",logname[]="A7FLUP1.LOG";
+#elif NMR_REVISION == 2
+static const char temporary[]=".a7fl-r2.new",backup[]=".a7fl-e64867d2.orig",logname[]="A7FLUP2.LOG";
+#else
+#error Unsupported module replacement revision
+#endif
+static const char current[]="a7fl.so";
 static volatile unsigned busy;
 typedef struct {uint64_t dev,ino;uint32_t size,links,mode;} File;
 typedef struct {const NMRBundle*b;NMRCall call;void*ctx;NMRReport*r;int lib,setting,log,rw;unsigned sequence,temp_old;
@@ -89,7 +99,7 @@ int nmr_run(const NMRBundle*b,const unsigned char expected[32],NMRCall call,void
  if(!b||!expected||!call||!r)return -1;zero(r,sizeof*r);r->magic=0x41374652;r->version=1;r->status=-1;
  if(__sync_lock_test_and_set(&busy,1))return -2;Work w;zero(&w,sizeof w);w.b=b;w.call=call;w.ctx=ctx;w.r=r;w.lib=w.setting=w.log=-1;int success=0;
  nmr_binding(b,r->binding);unsigned char sum[32];Sha256 h;sha_init(&h);
- if(b->version!=1||(write!=0&&write!=1)||!b->new_bytes||b->old_size<52||b->old_size>1048576||b->new_size<52||b->new_size>1048576||
+ if(b->version!=NMR_REVISION||(write!=0&&write!=1)||!b->new_bytes||b->old_size<52||b->old_size>1048576||b->new_size<52||b->new_size>1048576||
     b->view_size<4096||b->view_size>16*1048576||!same(expected,r->binding,32)||same(b->old_sha,b->new_sha,32)||!any(b->new_proof_sha,32))goto done;
  sha_update(&h,b->new_bytes,b->new_size);sha_finish(&h,sum);
  if(!same(sum,b->new_sha,32)||!same(b->new_bytes,"\177ELF\1\1\1",7)||!same(b->new_bytes+16,"\3\0\50\0",4))goto done;

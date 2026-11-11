@@ -211,6 +211,11 @@ void guest_main(void) {
     check(copy->count==2&&copy->children[1]->count==4&&field_node(copy,9)!=&tree.save&&
           field_node(copy,9)->parent==copy->children[1]&&get(field_node(copy,9),0xe)==NATIVE_ADJUST_SAVE_ID,
           "deep cloned Save action has owned storage and original ancestry");
+    check(!native_adjust_save_title(&tree,0),"save feedback rejects missing resource");
+    check(native_adjust_save_title(&tree,0x0204ef85)&&get(&tree.save,0)==0x0204ef85&&
+          get(field_node(copy,9),0)==0x0204ef85,"Complete feedback reaches original embedded and cloned property readers");
+    check(native_adjust_save_title(&tree,0x0204eaab)&&get(field_node(copy,9),0)==0x0204eaab,
+          "new edits can restore Save label on existing clone");
     check(((GetSelected)0x682951)(field_node(copy,1),&selected)&&get(selected,0x10)==7&&
           ((GetSelected)0x682951)(field_node(copy,0),&selected)&&get(selected,0x10)==1,
           "late original Save graph clone preserves scalar and mode cursor");

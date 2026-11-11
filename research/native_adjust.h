@@ -72,6 +72,9 @@ int native_adjust_build(NativeAdjustTree *, uintptr_t caution_base,
  * setter; integration must handle its original execProc dispatch explicitly.
  * Rejects a second append or a tree already attached to a parent. */
 int native_adjust_add_save(NativeAdjustTree *, uint32_t title_resid);
+/* Shared property storage is also used by native clones. Existing locale
+ * resources provide Save, Complete and Not Complete without changing files. */
+int native_adjust_save_title(NativeAdjustTree *, uint32_t title_resid);
 /* Callbacks for the custom process-data IDs, not stock PP IDs. A successful
  * setter means the real backend accepted the change. Disabled fields reject.
  * Backend updates happen BEFORE state/cursor commits; errors preserve them.

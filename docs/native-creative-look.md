@@ -6,22 +6,23 @@
 
 首版目标入口：**MENU → 拍摄设置 1 → 第 14 页 → 创意外观**。它与创意风格同级，保留原页的防闪烁拍摄、人脸登记及登记人脸优先三个项目，也保留已有「复古衣橱」和 RW 图标修改。
 
-选择关或「FL（实验版）」；对比度、高光、阴影、褪色、饱和度直接生成机内 LUT 的变化。修正版分成两页：第一页为开关和五项色彩调节，第二页为三个尚未实现、保持置灰的空间调节项及「保存」。调节先预览，选择「保存」才提交自有配置。首版只接入静态拍摄菜单，使用已验证的表 0 通路；图片配置文件和照片效果应保持关闭。
+选择关或「FL（实验版）」；对比度、高光、阴影、褪色、饱和度直接生成机内 LUT 的变化。修正版分成两页：第一页为开关和五项色彩调节，第二页为三个尚未实现、保持置灰的空间调节项及「保存」。调节先预览，选择「保存」才提交自有配置。r3 在提交成功后把按钮文字变为「完成」，新修改产生未保存设置时恢复「保存」，提交失败显示「未完成」；使用现有中英文文字资源。首版只接入静态拍摄菜单，使用已验证的表 0 通路；图片配置文件和照片效果应保持关闭。
 
 这是自制近似 FL。原厂非线性色度编解码、节点格式及 LUT 写入路径已有验证；A7 IV 的完整色彩算法和 ISP 处理没有复现。菜单和参数的 ARM 组件测试，也不等于模拟了相机传感器或 ISP。
 
 ## 当前安装记录（2026-11-11）
 
-- 真机已更新 `/usr/lib/a7fl.so` 为 r2，大小 42,812 字节，SHA-256 `e64867d24764725dfaf621e2ab9611f6d389f15b21cf6dad7daacd1c618492e1`。旧版 42,208 字节模块（SHA-256 `2478cec27f88e838f03915da36ac09c66efff9d6a3bd53d59fc487f6cd345aac`）保存在 `/usr/lib/.a7fl-2478cec2.orig`。
+- 真机已更新 `/usr/lib/a7fl.so` 为 r3，大小 43,160 字节，SHA-256 `f3e2d657a83569f19ddafcd843a40601f1d953da0a20a8f8617c5e299e73a063`。r2 模块（42,812 字节，SHA-256 `e64867d24764725dfaf621e2ab9611f6d389f15b21cf6dad7daacd1c618492e1`）保存在 `/usr/lib/.a7fl-e64867d2.orig`，更早的 `/usr/lib/.a7fl-2478cec2.orig` 也保留。
 - 简体中文和英文资源已写入，原资源分别链接为 `.a7fl-zh.orig`、`.a7fl-en.orig`。启动快照曾带回旧目录缓存：raw 目录使用新 inode 16687/16688，VFS 却恢复旧 inode 16523/16411。按原厂升级步骤使旧 WBI 头失效后，用户断电重启，新目录与两份完整语言资源校验均通过。没有在旧缓存视图中重复安装文件。
 - 文件安装器完成阶段 100，三份文件均发布，两个原资源备份均存在，`/usr` 已恢复只读。安装日志位于 `/setting/A7FL.INSTALL`。
-- 配置文件 `/setting/A7FL0.CFG` 已通过真实 ARM 文件读写、同步和回读验证，当前为 generation 1、FL 关闭。四张 LUT 回读仍为原厂值。
-- 分页菜单修正版已写入：完整 `viewUnified2.so`（10,854,816 字节）SHA-256 为 `a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7`。修正日志 `/setting/A7FL.RETARGET` 完成阶段 100，3 个当前执行页面保留旧私有副本，`/usr` 恢复只读。保留已验证的启动钩子，恢复旧 GlobalMenu 调用，改接 SettingMenu 构造入口。新入口在下次冷启动生效。
+- r2 机身按键测试后只读确认：`/setting/A7FL1.CFG` 为 generation 2、FL 开启、对比度 +1，其余参数默认；运行状态 `dirty=0, fault=0, last_error=0`，与保存配置及实际 LUT 一致，另外三张 LUT 为原厂值。旧 generation 1 关闭配置仍保存在另一个槽位。
+- 分页菜单修正版已写入：完整 `viewUnified2.so`（10,854,816 字节）SHA-256 为 `a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7`。修正日志 `/setting/A7FL.RETARGET` 完成阶段 100，3 个当前执行页面保留旧私有副本，`/usr` 恢复只读。保留已验证的启动钩子，恢复旧 GlobalMenu 调用，改接 SettingMenu 构造入口。用户随后冷启动确认入口可见。
 - 首次 GlobalMenu 版本曾正常开机但未出现入口；只读状态确认模块加载和颜色初始化成功，配置为关闭、四张 LUT 保持原厂值。已据此改接实际分页 SettingMenu，并执行原始构造函数及初始化至菜单树深度初始化调用的 ARM 验证。
 - 用户已确认入口出现，但调节/保存无法使用，后续页面出现数值列表。回读为 `installed=1, fault=0, mode=0, dirty=0, generation=1`，LUT 仍为原厂。已定位缺少原厂子菜单 Page 层，以及负数不能直接作为界面枚举值。旧树经原厂分页函数会被解释为九页；旧 Save 节点经原厂选中行访问器得到空子项。
-- r2 新增 Page 层，原厂访问器与动作处理函数能派发第二页第四项 Save；界面使用非负枚举，后端参数与存储仍为有符号值。颜色算法、保存格式及 LUT 基表未变。单模块更新日志 `/setting/A7FLUP1.LOG` 已完成阶段 100，新模块及旧备份完整回读通过，加载器与 WBI 均不变，`/usr` 恢复只读；待用户冷启动验证交互。
+- r2 新增 Page 层，原厂访问器与动作处理函数能派发第二页第四项 Save；界面使用非负枚举，后端参数与存储仍为有符号值。颜色算法、保存格式及 LUT 基表未变。单模块更新日志 `/setting/A7FLUP1.LOG` 已完成阶段 100，新模块及旧备份完整回读通过，加载器与 WBI 均不变，`/usr` 恢复只读；后续调节及保存回读结果见下。
 - 更新器预检曾错误要求所有文件归 root 所有，因而在阶段 1006 拒绝原厂目录，没有开始写入。依据已有真机元数据修正为按路径核对所有者后，r1b 更新器通过预检并完成上述更新；没有修改相机文件权限。
-- **交互、保存及拍照验收尚未通过。入口可见、写入和回读成功不等于功能已可用。**
+- 用户对 r2 反馈「点保存没有反应，其它正常」。回读证实 Save 已成功写入配置，问题是没有显示反馈。r3 只补按钮反馈，不改变 LUT 算法或配置格式；`/setting/A7FLUP2.LOG` 完成阶段 100，新模块、r2 备份和原加载器完整回读通过，WBI 不变，`/usr` 恢复只读。
+- **r2 的调节及保存已获用户操作和回读证据；r3 的可见反馈及保存后冷启动恢复仍待机身验收。**
 
 ## 构建与验证顺序
 
@@ -60,13 +61,19 @@ python3 -m camera.native_activate --setting-menu activate --write-device
 python3 -m camera.native_status
 ```
 
-已完成入口和资源安装的这台相机，r2 使用单模块更新，不重复执行首次安装或入口激活：
+以下为已执行的 r2 单模块更新记录；保留用于追溯，不重复执行首次安装、入口激活或已完成的更新：
 
 ```sh
 python3 -m camera.native_module_replace replace --binding .lab/native-module-replace-bound-r1b --offline --write-device
 python3 -m camera.native_module_replace replace --binding .lab/native-module-replace-bound-r1b --write-device
-# 断电重启并试用菜单后，只读检查 r2；此 bundle 仅提供身份数据，不执行其中的安装负载
-python3 -m camera.native_status --bundle .lab/native-install-bound-r2 --module-proof .lab/native-module/proof.json
+```
+
+r3 使用已知 r2 模块作为原像，绑定 `--revision 2` 的更新器，保留上一轮日志与备份。以下写入已在本机完成，不要重复执行：
+
+```sh
+python3 -m camera.native_module_replace replace --binding .lab/native-module-replace-bound-r2 --write-device
+# r3 当前只读状态检查
+python3 -m camera.native_status --bundle .lab/native-install-bound-r3 --module-proof .lab/native-module/proof.json
 ```
 
 该更新固定匹配旧模块 `2478cec2…`、新模块 `e64867d2…` 和加载器 `a1c4d8e8…`。同一认证会话核对机型、版本、旧完整文件及 WBI 为零，再原子发布 `/usr/lib/a7fl.so`；旧模块保存在 `/usr/lib/.a7fl-2478cec2.orig`。更新完成要求 `/setting/A7FLUP1.LOG` 完整、全文件回读一致、`/usr` 恢复只读。原进程仍映射旧 inode，新版在冷启动后加载；工具不会自动重试已有更新日志。

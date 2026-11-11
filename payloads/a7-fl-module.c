@@ -84,6 +84,10 @@ int a7_fl_configure_menu(const struct a7_fl_platform *p) {
     return leave(0);
 }
 static int accept_applied(void *unused,unsigned field,int value) {(void)unused;(void)field;(void)value;return 1;}
+static void save_feedback(uint32_t title) {
+    for(unsigned j=0;j<module.platform.parent_count;j++)
+        (void)native_adjust_save_title(&module.trees[j],title);
+}
 static int synchronize(void) {
     for(unsigned j=0;j<module.platform.parent_count;j++) {
         if(!native_adjust_write(&module.trees[j],0x7000,module.control.preference.enabled,accept_applied,0))return 0;
@@ -107,6 +111,7 @@ static int model_write(void *unused,int id,int value) {
     int accepted=native_adjust_write(&module.trees[0],id,decoded,a7_fl_control_preview,&module.control);
     if(!accepted) {leave(module.control.last_error);return 0;}
     if(!synchronize()) {module.status.fault=1;leave(A7_FL_MODULE_NODES);return 0;}
+    if(module.control.dirty)save_feedback(0x0204eaab); /* Save */
     leave(0);return 1;
 }
 static int model_action(void *unused,int id) {
@@ -117,7 +122,11 @@ static int model_action(void *unused,int id) {
     /* This callback is bound only to the native execProc slot for our explicit
      * Save node. It is never reached by scalar preview setters. External confirm
      * remains separately witness-gated and may be disabled by the bootstrap. */
-    int rc=a7_fl_control_commit(&module.control);leave(rc);return rc==0;
+    int rc=a7_fl_control_commit(&module.control);
+    /* The native action handler marks the model changed and refreshes the row.
+     * Only a successful durable commit may show Complete; edits restore Save. */
+    save_feedback(rc?0x0204ef87:0x0204ef85); /* Not Complete / Complete */
+    leave(rc);return rc==0;
 }
 static int rollback(void) {
     int error=0;

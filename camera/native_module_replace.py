@@ -1,4 +1,4 @@
-"""Preflight or explicitly replace only the first native FL module revision.
+"""Preflight or explicitly replace a pinned native FL module revision.
 
 No loader/locales/WBI/LUT writes, journal resumption, or automatic device retry.
 The module already mapped in the running process stays unchanged until reboot.
@@ -9,8 +9,10 @@ from local import ROOT,LAB,BUILD_ID,file_sha,require,sha
 from camera.native_install import pin_sources,save,save_json
 from camera.native_wbi import capture
 OLD='2478cec27f88e838f03915da36ac09c66efff9d6a3bd53d59fc487f6cd345aac'
+REVISIONS={1:dict(old_sha=OLD,old_size=42208,temporary='.a7fl-r1.new',backup='.a7fl-2478cec2.orig',journal='A7FLUP1.LOG'),
+           2:dict(old_sha='e64867d24764725dfaf621e2ab9611f6d389f15b21cf6dad7daacd1c618492e1',old_size=42812,temporary='.a7fl-r2.new',backup='.a7fl-e64867d2.orig',journal='A7FLUP2.LOG')}
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
-MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so';BACKUP='/usr/lib/.a7fl-2478cec2.orig';TEMP='/usr/lib/.a7fl-r1.new';JOURNAL='/setting/A7FLUP1.LOG'
+MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def syncdir(p):
  fd=os.open(p,os.O_RDONLY)
@@ -19,17 +21,19 @@ def syncdir(p):
 class Bundle:
  def __init__(self,directory):
   self.directory=d=Path(directory).resolve();m=self.manifest=json.loads((d/'manifest.json').read_text());pin_sources(m)
-  require(m['version']==1 and m['kind']=='native-module-replace-r1','Foreign module replacement binding.')
-  require(m['old']==dict(sha256=OLD,size=42208) and m['view']==dict(sha256=VIEW_SHA,size=10854816),'Incorrect deployed baseline.')
+  revision=m['version'];require(revision in REVISIONS and m['kind']==f'native-module-replace-r{revision}','Foreign module replacement binding.');r=REVISIONS[revision]
+  self.temporary='/usr/lib/'+r['temporary'];self.backup='/usr/lib/'+r['backup'];self.journal='/setting/'+r['journal']
+  require(m['old']==dict(sha256=r['old_sha'],size=r['old_size']) and m['view']==dict(sha256=VIEW_SHA,size=10854816),'Incorrect deployed baseline.')
   proof=d/'module-proof.json';require(file_sha(proof)==m['module_proof_sha256'],'Module proof changed.');p=json.loads(proof.read_text());pin_sources(p)
   require(p.get('ready_for_staging') is True and p.get('placeholder') is False and p['module_sha256']==m['new']['sha256'],'Unattested module.')
   for n,h in p['dependency_proof_sha256'].items():
    path=(LAB/n).resolve();require(path.is_relative_to(LAB) and file_sha(path)==h,'Dependency changed: '+n);pin_sources(json.loads(path.read_text()))
-  for n,key in [('native-module-replace-test/proof.json','core_proof_sha256'),('native-menu-action-tree/proof.json','action_proof_sha256')]:
+  core_dir='native-module-replace-test'+('' if revision==1 else f'-r{revision}')
+  for n,key in [(core_dir+'/proof.json','core_proof_sha256'),('native-menu-action-tree/proof.json','action_proof_sha256')]:
    path=LAB/n;require(file_sha(path)==m[key],'Required proof changed: '+n);pin_sources(json.loads(path.read_text()))
   for name,key in [('entry.c','entry_sha256'),('data.S','data_sha256')]:require(file_sha(d/name)==m[key],'Bound source changed: '+name)
   for name,key in [('old-module.so','old'),('new-module.so','new')]:require(file_sha(d/name)==m[key]['sha256'] and (d/name).stat().st_size==m[key]['size'],'Bound module changed: '+name)
-  b=b'A7M3-single-module-r1\0'+struct.pack('<4I',1,m['old']['size'],m['new']['size'],m['view']['size'])+b''.join(bytes.fromhex(m[k]['sha256']) for k in ('old','new','view'))+bytes.fromhex(m['module_proof_sha256'])
+  b=b'A7M3-single-module-r1\0'+struct.pack('<4I',revision,m['old']['size'],m['new']['size'],m['view']['size'])+b''.join(bytes.fromhex(m[k]['sha256']) for k in ('old','new','view'))+bytes.fromhex(m['module_proof_sha256'])
   require(sha(b)==m['bundle_sha256'],'Binding digest differs.');self.payloads={}
   for mode in ('preflight','replace'):
    raw=(d/(mode+'.so')).read_bytes();r=m['payloads'][mode]
@@ -63,22 +67,22 @@ def operate(camera,b,operation,evidence,write_device=False):
  e=Path(evidence);e.mkdir(mode=0o700,parents=True,exist_ok=False);syncdir(e.parent);f=Factory(camera);m=b.manifest
  require(f.contents('/version.txt')==BUILD_ID and bytes(camera.readBackup(0x3e0005))==b'ILCE-7M3'+bytes(8),'Camera model/build mismatch.')
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
- for path in (TEMP,BACKUP,JOURNAL):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
+ for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,MODULE,m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
  before=native(f,b,'preflight',e);require(success(before),'Native module preflight rejected; no replacement payload sent.')
  if operation=='preflight':
   result=dict(operation=operation,verified=True,device_firmware_written=False,native_report=before,evidence=str(e));save_json(e/'verified.json',result);syncdir(e);return result
- save_json(e/'write-intent.json',dict(operation='replace-a7fl-module-r1',bundle=m['bundle_sha256'],old=m['old'],new=m['new'],no_auto_retry=True));syncdir(e);syncdir(e.parent)
+ save_json(e/'write-intent.json',dict(operation='replace-a7fl-module-r'+str(m['version']),bundle=m['bundle_sha256'],old=m['old'],new=m['new'],no_auto_retry=True));syncdir(e);syncdir(e.parent)
  written=native(f,b,'replace',e)
  # On reported failure still preserve a readable transaction journal, but do
  # not declare success, resume, or send a second writer.
- status,raw=f.read(JOURNAL,maximum=65536)
+ status,raw=f.read(b.journal,maximum=65536)
  if status==(0,0):save(e/'device-journal.bin',raw);j=journal(raw,m['bundle_sha256']);save_json(e/'device-journal.json',j)
  else:j=None
  syncdir(e);require(success(written,True),'Replacement did not fully verify; inspect retained report/journal, no automatic retry.')
  require(j is not None and j['complete'],'Incomplete replacement transaction journal.')
- require_file(f,MODULE,m['new'],e/'new-module-readback.so');require_file(f,BACKUP,m['old'],e/'old-backup-readback.so');require_file(f,VIEW,m['view'],e/'view-after.so')
- require(f.read(TEMP)[0]==f.missing,'Temporary candidate remains after replacement.')
+ require_file(f,MODULE,m['new'],e/'new-module-readback.so');require_file(f,b.backup,m['old'],e/'old-backup-readback.so');require_file(f,VIEW,m['view'],e/'view-after.so')
+ require(f.read(b.temporary)[0]==f.missing,'Temporary candidate remains after replacement.')
  after=zero_wbi(camera,e/'wbi-after')
  require((e/'wbi-before/neighbor.bin').read_bytes()==(e/'wbi-after/neighbor.bin').read_bytes(),'WBI neighbor unexpectedly differs.')
  result=dict(operation=operation,verified=True,old_sha256=m['old']['sha256'],new_sha256=m['new']['sha256'],view_unchanged=True,readonly_confirmed=True,wbi_unchanged=True,cold_boot_required=True,native_report=written,evidence=str(e));save_json(e/'verified.json',result);syncdir(e);return result

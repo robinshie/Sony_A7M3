@@ -41,3 +41,15 @@ header is already zero. It never clears WBI, resumes an existing journal, or
 automatically retries a failed writer. Full original/new module and unchanged
 view readbacks, the transaction journal, and durable host evidence are required
 before success is reported.
+
+The second replacement (`--revision 2`) pins deployed module `e64867d2…` and
+uses `.a7fl-r2.new`, `.a7fl-e64867d2.orig`, and `/setting/A7FLUP2.LOG`. Its
+separate paths preserve the first update's backup and journal. The revision is
+included in the bundle digest and must match the compiled native core; the
+host derives targets from a fixed revision profile. Its core regression passed
+8,169 checks with 126 fault points, including preservation of prior artifacts.
+
+The r3 feedback module `f3e2d657…` was published through this second replacement
+and fully read back; the original view and WBI stayed unchanged. Physical
+feedback and cold-boot preference restoration are still separate acceptance
+steps.

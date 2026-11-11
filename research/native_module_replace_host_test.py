@@ -33,7 +33,7 @@ class Factory:
   if path=='/version.txt':return BUILD_ID
   st,data=self.read(path,maximum);check(st==(0,0),'existing mock contents');return data
  def read(self,path,maximum=1048576):
-  values={host.MODULE:self.e.disk,host.VIEW:view,host.BACKUP:self.e.backup,host.JOURNAL:self.e.log,host.TEMP:None}
+  values={host.MODULE:self.e.disk,host.VIEW:view,bundle.backup:self.e.backup,bundle.journal:self.e.log,bundle.temporary:None}
   check(path in values,'bounded file read path');v=values[path]
   if v is None:return self.missing,b''
   check(len(v)<=maximum,'bounded read size');return (0,0),v
