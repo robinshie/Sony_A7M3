@@ -4,11 +4,13 @@
 .balign 4
 .global a7yc_hook
 .type a7yc_hook,%function
-/* v4: observe all calls (including unsuccessful and small-image calls).
+/* v5: observe all calls (including unsuccessful and small-image calls).
  * Keep first 127 successful records plus a separate largest YC example.
  * mode 0 = GetEntry_ImageSizeInfo: Entry object + 20, 60 bytes.
  * mode 1 = EncodeStill: parameter->RegionInfo, 64 bytes.
  * mode 2 = WriteStill/MakeWriteStillImage: nonnull parameter itself, 64 bytes.
+ * mode 3 = their r2 StillInfo descriptor, 3400 bytes; first two records only,
+ *          each at a 4096-byte stride within the same bounded allocation.
  * No I/O, allocation, blocking, pixel writes or changed return value.
  * Header is 64 bytes; each record is caller/result/mode/reserved + 64 data bytes.
  * Allocation remains alive after detach to protect in-flight calls. */
@@ -16,6 +18,9 @@ a7yc_hook:
     push {r4-r8,lr}
     mov r4,r1
     ldr r5,a7yc_state
+    ldr ip,[r5,#48]
+    cmp ip,#3
+    moveq r4,r2
     ldr ip,[r5,#8]
     blx ip
     ldr r1,[r5,#16]
@@ -44,11 +49,16 @@ a7yc_hook:
     beq .Lunlock
     /* Successful native calls retain caller-owned objects until return. */
     ldr r1,[r5,#20]
-    cmp r1,#127
+    cmp r2,#3
+    moveq r3,#2
+    movne r3,#127
+    cmp r1,r3
     bhs .Lfull
     add r7,r5,#64
-    add r7,r7,r1,lsl #6
-    add r7,r7,r1,lsl #4
+    cmp r2,#3
+    addeq r7,r7,r1,lsl #12
+    addne r7,r7,r1,lsl #6
+    addne r7,r7,r1,lsl #4
     add r1,r1,#1
     str r1,[r5,#20]
     bl .Lrecord
@@ -99,6 +109,8 @@ a7yc_hook:
     cmp r2,#0
     moveq r8,#15
     movne r8,#16
+    cmp r2,#3
+    movweq r8,#850
     mov ip,r4
 .Lcopy:
     ldr r1,[ip],#4

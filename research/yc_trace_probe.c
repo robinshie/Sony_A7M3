@@ -77,7 +77,7 @@ static int inspect(void){
   long allocation=allocate();if(!allocation||(uint32_t)allocation>=0xfffff001u)return -7;
   uint32_t code=(uint32_t)allocation;state=(void*)(code+4096);result.code=code;result.state=(uintptr_t)state;
   copy((void*)code,hook_code,sizeof hook_code);*(uint32_t*)(code+A7YC_STATE_LITERAL)=(uintptr_t)state;
-  state->magic=0x41375943;state->version=4;state->original=original;state->maximum=128;state->armed=1;state->mode=A7YC_KIND;state->restore_slot=current;
+  state->magic=0x41375943;state->version=5;state->original=original;state->maximum=128;state->armed=1;state->mode=A7YC_KIND;state->restore_slot=current;
   if(sc3(0xf0002,code,code+sizeof hook_code,0)||sc3(125,code,4096,5)){sc3(91,code,16384,0);return -8;}
   uint32_t expected=current;
   if(!__atomic_compare_exchange_n(slot,&expected,code,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)){sc3(91,code,16384,0);return -9;}
@@ -85,7 +85,7 @@ static int inspect(void){
   if((current&4095)||current>UINT32_MAX-16384||!range(current,4096,"r-xp",1)||!range(current+4096,12288,"rw-p",1))return -10;
   state=(void*)(current+4096);result.code=current;result.state=(uintptr_t)state;
   for(unsigned i=0;i<sizeof hook_code;i++)if((i<A7YC_STATE_LITERAL||i>=A7YC_STATE_LITERAL+4)&&((volatile unsigned char*)current)[i]!=hook_code[i])return -11;
-  if(*(uint32_t*)(current+A7YC_STATE_LITERAL)!=(uintptr_t)state||state->magic!=0x41375943||state->version!=4||state->original!=original||state->maximum!=128||state->mode!=A7YC_KIND||
+  if(*(uint32_t*)(current+A7YC_STATE_LITERAL)!=(uintptr_t)state||state->magic!=0x41375943||state->version!=5||state->original!=original||state->maximum!=128||state->mode!=A7YC_KIND||
      (state->restore_slot!=original&&state->restore_slot!=obj+A7YC_LAZY))return -12;
  }
  if(ACTION==2)__atomic_store_n(&state->armed,0,__ATOMIC_RELEASE);
@@ -102,7 +102,7 @@ static int inspect(void){
 }
 #ifndef A7YC_PROBE_TEST
 __attribute__((constructor)) static void constructor(void){
- result.magic=0x41375950;result.version=4;result.action=ACTION;result.status=inspect();
+ result.magic=0x41375950;result.version=5;result.action=ACTION;result.status=inspect();
  sc3(10,(long)"/tmp/jiritsu/libJit.so",0,0);long fd=sc3(5,(long)"/tmp/jiritsu/a7yc.bin",1|64|128|0x8000,0600);if(fd<0)return;
  unsigned done=0;while(done<sizeof result){long n=sc3(4,fd,(long)((unsigned char*)&result+done),sizeof result-done);if(n<=0||(unsigned)n>sizeof result-done)break;done+=(unsigned)n;}
  sc3(118,fd,0,0);sc3(6,fd,0,0);

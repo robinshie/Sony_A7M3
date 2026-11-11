@@ -32,6 +32,8 @@ PROFILES={
     'jpeg':(1,'libmpr.so','_ZN5MprIf11EncodeStillEPNS_16EncodeStillParamE',0x126b17c,0x85ecbd,30),
     'write':(2,'libmpr.so','_ZN5MprIf10WriteStillEPNS_15WriteStillParamEPN3MPR9StillInfoEm',0x126cce0,0x85ed3b,48),
     'make':(2,'libmpr.so','_ZN5MprIf19MakeWriteStillImageEPNS_20WriteStillImageParamEPN3MPR9StillInfoE',0x126cec0,0x85ee15,56),
+    'write_info':(3,'libmpr.so','_ZN5MprIf10WriteStillEPNS_15WriteStillParamEPN3MPR9StillInfoEm',0x126cce0,0x85ed3b,48),
+    'make_info':(3,'libmpr.so','_ZN5MprIf19MakeWriteStillImageEPNS_20WriteStillImageParamEPN3MPR9StillInfoE',0x126cec0,0x85ee15,56),
 }
 def sha(data):return hashlib.sha256(data).hexdigest()
 def require(ok,message):
@@ -103,7 +105,7 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
              '-Wno-unused-function','-Wno-misleading-indentation','-I',str(ROOT/'payloads'),'-I',str(out),
              f'-DACTION={index}',str(ROOT/'research/yc_trace_probe.c'),'-lgcc','-o',str(out/f'{action}.so')])
     (out/'proof.json').write_text(json.dumps(dict(source_sha256={n:sha((ROOT/n).read_bytes()) for n in SOURCES},
-        library_sha256={n:PINS[n] for n in elves},kind=kind,version=4,hook_sha256=sha(code),qemu_log_sha256=sha(log),
+        library_sha256={n:PINS[n] for n in elves},kind=kind,version=5,hook_sha256=sha(code),qemu_log_sha256=sha(log),
         probe_qemu_log_sha256=sha(probe_log),
         payload_sha256={a:sha((out/f'{a}.so').read_bytes()) for a in ('install','read','stop')},
         scope='Temporary bounded metadata import hook; no pixel writes or firmware replacement',
@@ -118,12 +120,12 @@ FIELDS={'attached':(0,1),'unit_type':(4,4),'unit_handle':(8,2),'unit_data_offset
 def decode(raw):
     require(len(raw)==10344,'Unexpected report length')
     h=struct.unpack_from('<3Ii6I',raw)
-    require(h[:2]==(0x41375950,4),'Unexpected report identity')
+    require(h[:2]==(0x41375950,5),'Unexpected report identity')
     state=struct.unpack_from('<16I',raw,40);rows=[]
-    require(state[5]<=127,'Unexpected trace count')
+    require(state[5]<=(2 if state[12]==3 else 127),'Unexpected trace count')
     def record(i):
-        at=104+i*80;caller,result,kind,_=struct.unpack_from('<IiII',raw,at);entry=raw[at+16:at+80]
-        row={name:int.from_bytes(entry[o:o+n],'little') for name,(o,n) in FIELDS.items()} if kind==0 else {('region_words' if kind==1 else 'parameter_words'):list(struct.unpack('<16I',entry))}
+        at=104+i*(4096 if state[12]==3 else 80);caller,result,kind,_=struct.unpack_from('<IiII',raw,at);entry=raw[at+16:at+16+(3400 if kind==3 else 64)]
+        row={name:int.from_bytes(entry[o:o+n],'little') for name,(o,n) in FIELDS.items()} if kind==0 else {('region_words' if kind==1 else 'still_info_words' if kind==3 else 'parameter_words'):list(struct.unpack('<'+str(len(entry)//4)+'I',entry))}
         row.update(caller=hex(caller),object_relative_return=hex(caller-h[4]),result=result,kind=kind,raw=entry.hex());return row
     for i in range(state[5]):
         rows.append(record(i))
@@ -161,8 +163,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--usr',required=True,type=Path)
     p.add_argument('--live',action='store_true');p.add_argument('--action',choices=('install','read','stop'),default='read')
     p.add_argument('--host-identity-check',action='store_true',help='Avoid a stuck MSC extended-info query; verify the exact model/build through maintenance before any payload instead')
-    p.add_argument('--kind',choices=(*PROFILES,'both','capture'),default='metadata');a=p.parse_args()
-    kinds={'both':('metadata','jpeg'),'capture':('write','make')}.get(a.kind,(a.kind,))
+    p.add_argument('--kind',choices=(*PROFILES,'both','capture','buffers'),default='metadata');a=p.parse_args()
+    kinds={'both':('metadata','jpeg'),'capture':('write','make'),'buffers':('write_info','make_info')}.get(a.kind,(a.kind,))
     out=ROOT/'.lab/yc-trace'/str(time.time_ns())
     for kind in kinds:build(a.usr,out/kind,kind)
     if a.live:

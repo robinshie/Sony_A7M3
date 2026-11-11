@@ -93,6 +93,10 @@ v4 记录器通过 6,196 个 ARM 案例、15,926,810 项检查；安装/恢复�
 
 USB 扩展机型查询曾再次返回 `Sense 0x9 0x81 0x83`。为避免重复卡在这一查询，跟踪工具增加可选 `--host-identity-check`：客体仍要求唯一 Sony `054c:0c02` 和 Sony SCSI 身份，维护通道再核对 `ILCE-7M3`、内部构建号及完整目标库，之后才允许执行负载。其他工具默认仍做原来的扩展查询。此路径已完成本轮加载和解除；`research/guest_identity_test.py` 的 13 个离线案例确认未知设备、错误机型/版本/库会被拒绝，维护身份核对失败之前不会运行相机负载。
 
+v5 增加 `--kind buffers`，在相同两处接口复制 r2 指向的 `MPR::StillInfo`，不解引用其内部缓冲区地址。原厂 `write_still_info_dumper::extract_write_still_info`（`libmpr:0x8835d8`）明确复制 `0xd48`（3400）字节；记录器保留最多两份描述，每份使用 4096 字节跨度，仍装入原有 16 KiB 匿名分配。模式 0–2 的原有记录方式保留。空指针、失败返回、禁用、锁竞争及容量耗尽均有测试；四个寄存器参数和原返回值保持不变。
+
+v5 两种接口构建均通过 8,264 个 ARM 案例、21,250,858 项检查，安装/恢复夹具分别为 19/20 案例。Python 解码也验证了两份完整 3400 字节记录、4096 字节跨度及超量计数拒绝。`.lab/yc-trace/1794400227408679000/` 显示两处均已加载，`status=1, armed=1, count=0`；正在等待用户保持开机拍照、回放和接回，之后必须用 **v5** 读取并解除。当前没有替换 r3 功能模块，剩余三项仍未完成机内集成。
+
 离线构建默认不接触相机。下面的 `--live` 命令用于已配置的 USB 交接环境；安装到停止之间保持相机开机，不能把它当作持久固件更新：
 
 ```sh
@@ -104,6 +108,9 @@ python3 research/yc_trace.py --usr "$A7M3_USR" --kind both --live --action stop
 # 拍照组装/写入接口（每轮安装到解除之间保持开机）
 python3 research/yc_trace.py --usr "$A7M3_USR" --kind capture --live --action install --host-identity-check
 python3 research/yc_trace.py --usr "$A7M3_USR" --kind capture --live --action stop --host-identity-check
+# 完整 StillInfo 描述（同一导入槽，不能与 capture 同时安装）
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind buffers --live --action install --host-identity-check
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind buffers --live --action stop --host-identity-check
 ```
 
 另一个候选为 `libmpr.so` 的 `MprIf::EncodeStill`，`libObj.so` 内存在两处调用，其中一处邻近 `ObjConverter`。尚未观察正常按快门是否经过该编码入口，不能据函数名称就注入照片处理算法。
