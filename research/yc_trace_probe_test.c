@@ -63,7 +63,7 @@ void guest_main(void){
  reset(0);*import_slot=0x12345678;check(inspect()==-10&&allocations==0);
  for(unsigned lazy=0;lazy<=1;lazy++){
   reset(lazy);action=0;check(inspect()==1&&allocations==1&&*import_slot==HEAP&&state->original==ORIGINAL);
-  check(state->restore_slot==(lazy?OBJ+A7YC_LAZY:ORIGINAL)&&state->armed==1&&state->version==5);
+  check(state->restore_slot==(lazy?OBJ+A7YC_LAZY:ORIGINAL)&&state->armed==1&&state->version==6);
   action=1;check(inspect()==1&&*import_slot==HEAP&&state->lock==0);
   state->lock=1;check(inspect()==-14&&state->armed==1&&*import_slot==HEAP);
   action=2;check(inspect()==-14&&state->armed==0&&*import_slot==HEAP);

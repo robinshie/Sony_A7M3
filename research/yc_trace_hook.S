@@ -4,14 +4,16 @@
 .balign 4
 .global a7yc_hook
 .type a7yc_hook,%function
-/* v5: observe all calls (including unsuccessful and small-image calls).
+/* v6: observe all calls (including unsuccessful and small-image calls).
  * Keep first 127 successful records plus a separate largest YC example.
  * mode 0 = GetEntry_ImageSizeInfo: Entry object + 20, 60 bytes.
  * mode 1 = EncodeStill: parameter->RegionInfo, 64 bytes.
  * mode 2 = WriteStill/MakeWriteStillImage: nonnull parameter itself, 64 bytes.
  * mode 3 = their r2 StillInfo descriptor, 3400 bytes; first two records only,
  *          each at a 4096-byte stride within the same bounded allocation.
- * No I/O, allocation, blocking, pixel writes or changed return value.
+ * mode 4 = one StillInfo plus 12 bounded samples through /proc/self/mem.
+ * Modes 0-3 have no I/O. Mode 4 opens/reads/closes only /proc/self/mem.
+ * No heap allocation, pixel writes or changed native return value.
  * Header is 64 bytes; each record is caller/result/mode/reserved + 64 data bytes.
  * Allocation remains alive after detach to protect in-flight calls. */
 a7yc_hook:
@@ -20,7 +22,7 @@ a7yc_hook:
     ldr r5,a7yc_state
     ldr ip,[r5,#48]
     cmp ip,#3
-    moveq r4,r2
+    movhs r4,r2
     ldr ip,[r5,#8]
     blx ip
     ldr r1,[r5,#16]
@@ -35,6 +37,9 @@ a7yc_hook:
     cmp r2,#0
     bne .Ldone
     dmb ish
+    ldr r1,[r5,#16]
+    cmp r1,#1
+    bne .Lunlock
     ldr r1,[r5,#32]
     adds r1,r1,#1
     strcc r1,[r5,#32]
@@ -52,13 +57,15 @@ a7yc_hook:
     cmp r2,#3
     moveq r3,#2
     movne r3,#127
+    cmp r2,#4
+    moveq r3,#1
     cmp r1,r3
     bhs .Lfull
     add r7,r5,#64
     cmp r2,#3
-    addeq r7,r7,r1,lsl #12
-    addne r7,r7,r1,lsl #6
-    addne r7,r7,r1,lsl #4
+    addhs r7,r7,r1,lsl #12 /* mode 4 only records index 0 */
+    addlo r7,r7,r1,lsl #6
+    addlo r7,r7,r1,lsl #4
     add r1,r1,#1
     str r1,[r5,#20]
     bl .Lrecord
@@ -110,24 +117,31 @@ a7yc_hook:
     moveq r8,#15
     movne r8,#16
     cmp r2,#3
-    movweq r8,#850
+    movwhs r8,#850
+    mov r6,r7
     mov ip,r4
 .Lcopy:
     ldr r1,[ip],#4
     str r1,[r7],#4
     subs r8,r8,#1
     bne .Lcopy
+    cmp r2,#4
+    beq .Lsample
     cmp r2,#0
     moveq r1,#0
     streq r1,[r7]
     bx lr
+.Lsample:
+    push {r0,lr}
+    mov r0,r6
+    mov r1,r7
+    bl a7yc_sample
+    pop {r0,pc}
 .balign 4
 .global a7yc_state
 .hidden a7yc_state
 .type a7yc_state,%object
 a7yc_state: .word 0
 .size a7yc_state,4
-.global a7yc_hook_end
-a7yc_hook_end:
 .size a7yc_hook,.-a7yc_hook
 .section .note.GNU-stack,"",%progbits
