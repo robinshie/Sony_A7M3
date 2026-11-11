@@ -16,6 +16,7 @@ def main():
     p.add_argument("--qmp", type=Path)
     p.add_argument("--headless", action="store_true")
     p.add_argument("--display", default="cocoa,zoom-to-fit=on")
+    p.add_argument("--name", default="Sony A7 III - 界面验证 (简体中文 / English)")
     a = p.parse_args()
     qemu = shutil.which(str(a.qemu.expanduser()))
     if not qemu:
@@ -23,7 +24,7 @@ def main():
     if not a.guest.is_file():
         p.error("Guest image missing; build with python3 build.py first.")
     cmd = [
-        qemu, "-name", "Sony A7 III - 界面验证 (简体中文 / English)",
+        qemu, "-name", a.name,
         "-M", "realview-pbx-a9", "-smp", "1", "-m", "256",
         "-nodefaults", "-audio", "none", "-nic", "none", "-monitor", "none",
         "-display", "none" if a.headless else a.display,

@@ -94,6 +94,18 @@ def perform(camera, action):
     factory = Factory(camera)
     require(factory.contents("/version.txt") == BUILD_ID, "机身内部版本与已验证的 4.04 不符。")
     print("LIVE_FIRMWARE_BUILD_MATCH", flush=True)
+    if action in ("fl-apply", "fl-status", "fl-restore"):
+        from camera.native_fl import perform as apply_fl
+        apply_fl(camera, action.removeprefix("fl-"))
+        return
+    if action in ("lut-probe-apply", "lut-probe-status", "lut-probe-restore"):
+        from camera.lut_probe import perform as probe_lut
+        probe_lut(camera, action.removeprefix("lut-probe-"))
+        return
+    if action == "lut-snapshot":
+        from camera.lut_snapshot import perform as snapshot_lut
+        snapshot_lut(camera)
+        return
     if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
                   "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix",
                   "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity",
@@ -217,7 +229,7 @@ def connect(action):
 
     try:
         driver = GenericUsbDriver(ClaimedBackend(device))
-        device.default_timeout = 12000 if action.startswith("creative-") or action in ("backup", "settings-snapshot", "settings-runtime-snapshot",
+        device.default_timeout = 12000 if action.startswith(("creative-", "lut-probe-", "fl-")) or action in ("backup", "settings-snapshot", "settings-runtime-snapshot", "lut-snapshot",
                                                      "menu-ram-install", "menu-ram-inspect", "menu-ram-restore") else 2500
         auth = SonySenserAuthDevice(driver)
         auth.start()

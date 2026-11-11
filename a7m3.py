@@ -37,7 +37,13 @@ def device(action):
         elif action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
             from camera.menu_ram import payload as menu_payload
             menu_payload(action.removeprefix("menu-ram-"))
-        elif action in ("settings-snapshot", "settings-runtime-snapshot"):
+        elif action in ("fl-apply", "fl-status", "fl-restore"):
+            from camera.native_fl import configured
+            configured(apply=action == "fl-apply")
+        elif action in ("lut-probe-apply", "lut-probe-status", "lut-probe-restore"):
+            from camera.lut_probe import configured
+            configured(apply=action == "lut-probe-apply")
+        elif action in ("settings-snapshot", "settings-runtime-snapshot", "lut-snapshot"):
             if action == "settings-runtime-snapshot":
                 payload("runtime")
         elif action == "backup":
@@ -72,6 +78,13 @@ def main():
         ("status", "检查 UTM 是否看到一台目标相机"),
         ("backup", "从真机读取 BK4 设置和完整 /usr 分区"),
         ("settings-snapshot", "只读获取新的 BK4 设置快照，不覆盖初始备份"),
+        ("lut-snapshot", "只读核对四份原厂 LUT 属性与完整 BK4 快照，不写入色彩表"),
+        ("lut-probe-apply", "写入已通过原厂函数测试的 27 字节 LUT 诊断变化；不是 FL"),
+        ("lut-probe-status", "只读检查 LUT 诊断状态"),
+        ("lut-probe-restore", "恢复准备包保存的原厂 LUT 并回读"),
+        ("fl-apply", "加载实验 FL 近似色彩表并回读；由 Mac 开关，尚无机内菜单"),
+        ("fl-status", "只读检查机内实验 FL 色彩表"),
+        ("fl-restore", "恢复实验 FL 之前的原厂色彩表并回读"),
         ("settings-runtime-snapshot", "只读获取 BK4 和维护进程库布局，供原厂设置调用研究"),
         ("menu-ram-install", "临时添加原厂菜单入口，仅修改运行内存，引用已有风格槽 3"),
         ("menu-ram-inspect", "读取临时菜单入口及调用计数"),
@@ -115,7 +128,8 @@ def main():
                     "creative-identity", "creative-restore-identity", "creative-icons", "creative-restore-icons",
                     "creative-icons-list", "creative-restore-icons-list",
                     "creative-icons-display", "creative-restore-icons-display",
-                    "creative-icons-belt", "creative-restore-icons-belt"):
+                    "creative-icons-belt", "creative-restore-icons-belt",
+                    "lut-probe-apply", "lut-probe-restore", "fl-apply", "fl-restore"):
             action.add_argument("--write-device", action="store_true", required=True)
     args = cli.parse_args()
     os.umask(0o077)

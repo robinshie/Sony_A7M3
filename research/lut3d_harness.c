@@ -3,7 +3,7 @@
 #define BASE 0x635c6000u
 #define FN(off, type) ((type)(uintptr_t)(BASE+(off)+1))
 #define GUARD 0xa5a5a5a5u
-static unsigned pack_cases, table_cases, selector_cases, bank_calls;
+static unsigned pack_cases, table_cases, selector_cases, bank_calls, coordinate_cases;
 static uint32_t mock_registers[0x18000/4];
 static const unsigned starts[8]={0,75,135,195,243,293,333,373};
 static const unsigned counts[8]={75,60,60,48,50,40,40,32};
@@ -47,6 +47,19 @@ static unsigned index_of(unsigned a,unsigned b,unsigned c) {
 }
 static uint32_t word(int a,int b,int c) {
     return ((a&127)<<16)|((b&127)<<8)|(c&127);
+}
+static void coordinate_test(void) {
+    const uint16_t *expand=(const uint16_t *)(BASE+0x8a999e);
+    const unsigned char *compress=(const unsigned char *)(BASE+0x9b5921);
+    for(int input=-2048;input<=2048;input++) {
+        unsigned magnitude=(unsigned)(input<0?-input:input);
+        int expected_expand=expand[magnitude>128?128:magnitude];
+        int expected_compress=compress[magnitude>512?512:magnitude];
+        if(input<0) {expected_expand=-expected_expand;expected_compress=-expected_compress;}
+        check(FN(0x522d68,int (*)(int))(input)==expected_expand,"native chroma expansion");
+        check(FN(0x522d2c,int (*)(int))(input)==expected_compress,"native chroma compression");
+        coordinate_cases+=2;
+    }
 }
 static void pack_test(void) {
     static uint32_t out[407];
@@ -184,9 +197,10 @@ static void writer_test(void) {
     check(bank_calls==8,"invalid bank rejected");
 }
 void guest_main(void) {
-    pack_test();table_test();selector_test();writer_test();
-    check(pack_cases==103680 && table_cases==180 && selector_cases==512,"coverage");
+    coordinate_test();pack_test();table_test();selector_test();writer_test();
+    check(pack_cases==103680 && table_cases==180 && selector_cases==512 && coordinate_cases==8194,"coverage");
     put("QEMU_NATIVE_3DLUT_PASSED: 103680 pack cases; 180 table cases; 512 selector cases; 8 bank writes\n");
+    put("ORIGINAL_CHROMA_CODEC_PASSED: 8194 signed expansion/compression cases\n");
     put("ORIGINAL_PACK_CREATE_COPY_WRITER; MMIO_REPLACED_WITH_RAM; MEMCPY_MEMSET_MOCKED\n");
     put("NO_ISP_PIXEL_TEST; COLOR_ENCODING_UNPROVEN; NO_CAMERA_WRITE; NOT_FLASH_READY\n");
     finish();

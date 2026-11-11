@@ -9,6 +9,7 @@ import re
 import shutil
 from struct import unpack
 import subprocess
+import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -126,7 +127,7 @@ def normalize(value):
 def cstr(value):
     return json.dumps(normalize(value), ensure_ascii=False)
 
-def make_tables(recipe=None):
+def make_tables(recipe=None, fl=False):
     tabs, pages, names = [], [], []
     for line in read_lines(HERE / "pages.txt"):
         if line.startswith("@"):
@@ -134,15 +135,21 @@ def make_tables(recipe=None):
         else:
             title, rows = line.split("|")
             labels = rows.split(";")
-            assert 1 <= len(labels) <= 6
-            assert len(names) + len(labels) < 256
-            pages.append((title, len(names), len(labels)))
-            names.extend(labels)
-    assert len(tabs) == 6 and len(pages) == 38
+            entries = [(title, labels)]
+            if fl and title == "Color/WB/Img. Processing":
+                labels.insert(labels.index("Creative Style") + 1, "Creative Look")
+                entries = [(title+"1", labels[:6]), (title+"2", labels[6:])]
+            for heading, page_labels in entries:
+                assert 1 <= len(page_labels) <= 6
+                assert len(names) + len(page_labels) < 256
+                pages.append((heading, len(names), len(page_labels)))
+                names.extend(page_labels)
+    assert len(tabs) == 6 and len(pages) == 38 + int(fl)
     assert len(set(names)) == len(names)
     default = json.loads((HERE / "defaults.json").read_text())
     options = {k: v.split(";") for k, v in
                (line.split("|") for line in read_lines(HERE / "choices.txt"))}
+    retro_index = -1
     if recipe:
         if recipe["name"] in options["Creative Style"]:
             raise ValueError("Recipe name conflicts with an original style")
@@ -150,7 +157,12 @@ def make_tables(recipe=None):
                             ("picture_profile", "Picture Profile"), ("picture_effect", "Picture Effect")):
             if recipe[field] not in options[item]:
                 raise ValueError(f"Unknown {field}: {recipe[field]}")
+        retro_index = len(options["Creative Style"])
         options["Creative Style"].append(recipe["name"])
+    fl_index = 1 if fl else -1
+    if fl:
+        options["Creative Look"] = ["Off", "FL (Experimental)"]
+        default["Creative Look"] = "Off"
     visible = {
         "Movie Exposure Mode": "Exposure Mode",
         "S&Q Exposure Mode": "Exposure Mode",
@@ -175,7 +187,10 @@ def make_tables(recipe=None):
     for label in groups:
         key = "".join(c.upper() if c.isalnum() else "_" for c in label)
         write("#define ITEM_", key, " ", names.index(label))
-    write("#define RETRO_STYLE_INDEX ", len(options["Creative Style"])-1 if recipe else -1)
+    write("#define RETRO_STYLE_INDEX ", retro_index)
+    write("#define ITEM_CREATIVE_LOOK ", names.index("Creative Look") if fl else -1)
+    write("#define FL_LOOK_INDEX ", fl_index)
+    write('#define FL_NAME "FL (Experimental)"')
     if recipe:
         for key in ("name", "base_style", "white_balance", "picture_profile", "picture_effect"):
             write("#define RETRO_", key.upper(), " ", cstr(recipe[key]))
@@ -242,12 +257,13 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--playground", action="store_true", help="build the separate playground variant")
     cli.add_argument("--retro-wardrobe", action="store_true", help="build the independent creative-style UI prototype")
+    cli.add_argument("--fl", action="store_true", help="include the experimental RGB LUT and FL preview in the QEMU model")
     args = cli.parse_args()
     os.chdir(HERE)
     out = HERE / "build"
     chinese_blob, accent = None, 0xe64c00
     recipe = None
-    if args.retro_wardrobe:
+    if args.retro_wardrobe or args.fl:
         recipe = json.loads((HERE.parent / "recipes/retro-wardrobe.json").read_text())
         for key in ("contrast", "saturation", "sharpness"):
             if type(recipe[key]) is not int or not -3 <= recipe[key] <= 3:
@@ -262,10 +278,16 @@ def main():
             chinese_blob, accent = playground_settings(HERE / "playground.json")
         except (OSError, ValueError) as error:
             cli.error(str(error))
-    if recipe:
+    if args.fl:
+        out /= "fl-demo"
+    elif recipe:
         out /= "retro-wardrobe"
     out.mkdir(parents=True, exist_ok=True)
-    data = make_tables(recipe)
+    data = make_tables(recipe, args.fl)
+    if args.fl:
+        sys.path.insert(0, str(HERE.parent / 'research'))
+        from fl_assets import generate
+        generate(out)
     dictionary = {normalize(k): normalize(v) for k, v in
                   json.loads((HERE / "zh-cn.json").read_text()).items()}
     dictionary.update(native_headings(chinese_blob))

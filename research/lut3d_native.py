@@ -19,6 +19,10 @@ from lut3d_format import packed_index, pack, unpack, BANK_COUNTS, BANK_REGISTERS
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '.lab/lut3d-native'
 RANGES = {
+    'chroma_compress': (0x522d2c, 0x522d68),
+    'chroma_expand': (0x522d68, 0x522da8),
+    'chroma_expansion_table': (0x8a999e, 0x8a9aa0),
+    'chroma_compression_table': (0x9b5921, 0x9b5b22),
     'pack': (0x522da8, 0x522dec),
     'create_copy': (0x5231fc, 0x523894),
     'permutation': (0x8a9658, 0x8a9982),
@@ -65,12 +69,15 @@ def verify_format(data):
 
 
 def main():
+    global OUT
     os.umask(0o077)
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--avcam', required=True, type=Path)
     cli.add_argument('--settings', type=Path, help='Optional existing private BK4 snapshot; read only')
     cli.add_argument('--pmca', type=Path, help='Local PMCA source needed to read --settings')
+    cli.add_argument('--out', type=Path, default=OUT, help='Private output directory for this fixture')
     args = cli.parse_args()
+    OUT = args.out.resolve()
     data = args.avcam.read_bytes()
     if sha(data) != SHA:
         cli.error('Requires the pinned ILCE-7M3 4.04 av-cam.bin')
@@ -174,6 +181,7 @@ _start:
         'bank_nodes': BANK_COUNTS, 'bank_register_offsets': [hex(x) for x in BANK_REGISTERS],
         'scope': 'Original pack/create/copy/writer; memcpy and memset mocked; logging trapped; register aperture is RAM',
         'pack_cases': 103680, 'table_cases': 180, 'selector_cases': 512, 'bank_copy_calls': 8,
+        'coordinate_codec_cases': 8194, 'coordinate_codec_functions_verified': True,
         'table_input_sha256': sha(fixture), 'private_backup': backup_record,
         'depth_adjustment_tested': False, 'sd_conversion_tested': False,
         'storage_layout_verified': True, 'native_selection_executed': True,

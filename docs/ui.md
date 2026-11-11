@@ -24,6 +24,31 @@ macOS 使用 Cocoa 的 Zoom to Fit。若启动窗口仍被 Retina 裁切，参�
 
 编辑 `ui/playground.json`，运行 `python ui/play.py`。标题使用「四个汉字/四个汉字」；高亮色只作用于 QEMU 里的模型。运行 `python ui/run-ui.py` 可回到普通版。
 
+FL 色彩模拟：运行 `python3 ui/play-fl.py`（可加 `--qemu /path/to/qemu-system-arm`），从与「创意风格」同级的「创意外观」进入，再选择「FL（实验版）」。Fn 也分别保留风格和外观入口。确认后模拟取景色块会经过 ARM 端 3D LUT，详情见 [FL 预览与代码位置](fl-look.md#启动可操作的-qemu-模拟)。FL 模型为容纳新增行拆分了色彩页，共 39 页；这是独立 UI 模型中的像素处理，不代表已接入 Sony ISP。
+
+FL 自动测试（另开一个 headless 模拟实例）：
+
+```sh
+python3 ui/play-fl.py --build-only
+python3 ui/run-ui.py --headless --guest ui/build/fl-demo/a7m3-ui.elf \
+  --qmp /tmp/a7m3-fl-test.sock --serial .lab/fl-test-serial.log
+# 另一终端：
+python3 ui/verify-fl.py /tmp/a7m3-fl-test.sock .lab/fl-test-serial.log .lab/fl-ui-shots
+```
+
+八项调节页面：左右切换项目，上下修改数值，C/Delete 重置，Enter 确认，Esc 取消。确认后的设置保留到本次 QEMU 退出，调节名称与范围见 [FL 调节说明](fl-look.md#八项调节与作用)。数值测试需要另一个刚启动的 FL 实例：
+
+```sh
+python3 ui/run-ui.py --headless --guest ui/build/fl-demo/a7m3-ui.elf \
+  --qmp /tmp/a7m3-adjust-test.sock --serial .lab/adjust-test-serial.log
+# 另一终端：
+python3 ui/verify-fl-adjust.py /tmp/a7m3-adjust-test.sock .lab/adjust-test-serial.log .lab/adjust-ui-shots
+# 可选：宿主内存和算法检查（需先 build --fl）
+clang -std=c11 -O1 -g -fsanitize=address,undefined -I ui/build/fl-demo \
+  ui/test_fl_adjust.c -o .lab/test-fl-adjust
+.lab/test-fl-adjust
+```
+
 自动测试：
 
 ```sh

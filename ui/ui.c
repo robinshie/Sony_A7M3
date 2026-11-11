@@ -29,8 +29,12 @@ typedef struct { const uint8_t *ink; uint8_t width, height; } Icon;
 #include "menu_data.h"
 #include "fonts.h"
 #include "firmware_ui.h"
+#if FL_LOOK_INDEX >= 0
+#include "fl_lut.h"
+#include "fl_adjust.h"
+#endif
 
-enum Screen { SHOOT, MENU, FN, PLAY, INDEX, OPTION, QUICK, PRESET };
+enum Screen { SHOOT, MENU, FN, PLAY, INDEX, OPTION, QUICK, PRESET, FLPREVIEW };
 enum Key { NONE, UP, DOWN, LEFT, RIGHT, CONFIRM, BACK, MENUKEY, FNKEY,
            PLAYKEY, DISPKEY, PAGEUP, PAGEDOWN, SHUTTER, MOVIE, INDEXKEY,
            ZOOMKEY, DELETEKEY, LANGUAGEKEY, TAB1, TAB2, TAB3, TAB4, TAB5, TAB6 };
@@ -46,10 +50,19 @@ static int shots, playback;
 static int remembered[6];
 static int creative_contrast, creative_saturation, creative_sharpness;
 static const char *creative_base_style="Standard";
+#if FL_LOOK_INDEX >= 0
+static FLAdjust fl_saved,fl_draft;
+static int fl_focus;
+#endif
 static const int fn_items[] = {
     ITEM_DRIVE_MODE, ITEM_FLASH_MODE, ITEM_FLASH_COMP_, ITEM_FOCUS_MODE,
     ITEM_FOCUS_AREA, ITEM_EXPOSURE_COMP_, ITEM_ISO, ITEM_METERING_MODE,
-    ITEM_WHITE_BALANCE, ITEM_DRO_AUTO_HDR, ITEM_CREATIVE_STYLE, ITEM_PICTURE_EFFECT
+    ITEM_WHITE_BALANCE, ITEM_DRO_AUTO_HDR, ITEM_CREATIVE_STYLE,
+#if FL_LOOK_INDEX >= 0
+    ITEM_CREATIVE_LOOK
+#else
+    ITEM_PICTURE_EFFECT
+#endif
 };
 static const char *const modes[] = {"AUTO", "P", "A", "S", "M", "1", "2", "SCN", "MOVIE", "S&Q"};
 static const uint32_t tab_colors[] = {0x981811, 0x70317d, 0x28583b, 0x204779, 0x9b6f19, 0x646464};
@@ -229,6 +242,12 @@ static int current_item(void)
 }
 static const char *value_of(int id)
 {
+#if FL_LOOK_INDEX >= 0
+    if(id==ITEM_CREATIVE_STYLE && selected[ITEM_CREATIVE_LOOK]==FL_LOOK_INDEX)
+        return "Look active";
+    if(id==ITEM_CREATIVE_LOOK && selected[id]==FL_LOOK_INDEX && fl_adjust_changed(&fl_saved))
+        return "FL (Experimental)*";
+#endif
     const Item *a=&items[id];
     return a->count ? choices[a->first+selected[id]] : a->value;
 }
@@ -304,6 +323,11 @@ static void test_target(int x,int y,int w,int h,int sample)
     for (int j=0;j<7;j++) fill(x+w*j/7,y+h/4,w*(j+1)/7-w*j/7,h/2,swatch[(j+sample)%7]);
     border(x+w/10,y+h/9,w*8/10,h*7/9,0x797c80);
     fill(x+w/2-16,y+h/2,32,1,0xededed); fill(x+w/2,y+h/2-16,1,32,0xededed);
+#if FL_LOOK_INDEX >= 0
+    if(selected[ITEM_CREATIVE_LOOK]==FL_LOOK_INDEX && (screen==SHOOT||screen==FN)) {
+        fl_process(pixels+y*W+x,W,w,h,&fl_saved);
+    }
+#endif
     if (w>250) center(&small,x+w/2,y+h*7/8,"SIMULATED TEST TARGET",0xc4c4c4);
 }
 static void battery(int x,int y)
@@ -324,6 +348,10 @@ static void draw_shoot(void)
     label(&small,375,30,value_of(ITEM_FILE_FORMAT),FG);
     battery(548,15);
     label(&small,589,29,"100%",FG);
+#if FL_LOOK_INDEX >= 0
+    if(selected[ITEM_CREATIVE_LOOK]==FL_LOOK_INDEX)
+        label(&small,18,66,value_of(ITEM_CREATIVE_LOOK),HIGHLIGHT);
+#endif
     if (disp==3) {
         int yy=376;
         fill(502,yy-77,122,78,0x151515); border(502,yy-77,122,78,DIM);
@@ -361,7 +389,13 @@ static const char *fn_value(int slot)
     return value_of(fn_items[slot]);
 }
 static const char *const fn_names[]={"Drive","Flash","Flash +/-","Focus","Focus Area","Exposure",
-        "ISO","Metering","White Bal.","DRO/HDR","Creative","Effect"};
+        "ISO","Metering","White Bal.","DRO/HDR","Creative",
+#if FL_LOOK_INDEX >= 0
+        "Look"
+#else
+        "Effect"
+#endif
+};
 static void fn_cell(int i,int x,int y,int w,int h,bool active)
 {
     fill(x,y,w,h,active?HIGHLIGHT:0x212121);
@@ -506,6 +540,57 @@ static void draw_preset(void)
     footer(0,0);
 #endif
 }
+static void draw_fl_preview(void)
+{
+#if FL_LOOK_INDEX >= 0
+    fill(0,0,W,H,0);
+    center(&menu_text,320,38,fl_adjust_changed(&fl_draft)?"FL (Experimental)*":FL_NAME,FG);
+    center(&micro,320,62,"Creative Look / QEMU preview",DIM);
+    static const uint32_t colors[]={0xc85c4d,0xd8ba62,0x71a55e,0x4da9ad,0x647bc1,0xb977ad,0xc85c4d};
+    for(int side=0;side<2;side++) {
+        int x=18+side*315;
+        center(&small,x+144,89,side?FL_NAME:"Standard",FG);
+        for(int y=0;y<144;y++) for(int i=0;i<289;i++) {
+            uint32_t color;
+            if(y<34) { unsigned v=i*255/288; color=v*0x010101; }
+            else if(y<100) {
+                unsigned q=i*6*256/289;
+                color=mix(colors[q/256],colors[q/256+1],q%256);
+                color=mix(0,color,32+(y-34)*224/65);
+            } else {
+                int step=1+i/97;
+                unsigned v=((i/step+y/step)&1)?170:90;
+                color=v*0x010101;
+            }
+            pixels[(y+100)*W+x+i]=color;
+        }
+        if(side) fl_process(pixels+100*W+x,W,289,144,&fl_draft);
+        border(x,100,289,144,0x666666);
+    }
+    for(int i=0;i<FL_ADJUST_COUNT;i++) {
+        int x=18+(i%4)*153,y=254+(i/4)*62;
+        bool locked=i==FL_RANGE && (mode>=8||recording);
+        fill(x,y,145,56,i==fl_focus?HIGHLIGHT:0x202020);
+        border(x,y,145,56,i==fl_focus?0xffb27a:0x555555);
+        center(&small,x+72,y+21,fl_adjust_names[i],locked?DIM:FG);
+        char value[8];int at=0,n=fl_draft.v[i];
+        if(n<0) {value[at++]='-';n=-n;} else if(fl_minimum[i]<0) value[at++]='+';
+        nstr(value+at,n);
+        center(&body,x+72,y+49,value,locked?DIM:FG);
+    }
+    label(&small,20,397,fl_adjust_names[fl_focus],FG);
+    char range[24];int at=0,lo=fl_minimum[fl_focus];
+    if(lo<0) {range[at++]='-';lo=-lo;}
+    at+=nstr(range+at,lo);range[at++]=' ';range[at++]='.';range[at++]='.';range[at++]=' ';
+    if(fl_minimum[fl_focus]<0) range[at++]='+';
+    nstr(range+at,fl_maximum[fl_focus]);
+    right(&small,620,397,fl_focus==FL_RANGE&&(mode>=8||recording)?"Unavailable in movie":range,DIM);
+    center(&small,320,423,"Left/Right: item  Up/Down: value  C: reset",FG);
+    fill(0,435,W,1,0x585858);
+    center(&small,320,456,"Enter: apply in QEMU / Esc: cancel",FG);
+    center(&micro,320,477,"Experimental model - not Sony processing",DIM);
+#endif
+}
 static void uart(const char *s)
 {
     for (;*s;s++) {
@@ -515,7 +600,7 @@ static void uart(const char *s)
 }
 static void report(void)
 {
-    static const char *const labels[]={"shoot","menu","fn","play","index","option","quick","preset"};
+    static const char *const labels[]={"shoot","menu","fn","play","index","option","quick","preset","fl-preview"};
     char b[12];
     uart(labels[screen]); uart(" ");
     if (screen==MENU) {
@@ -542,6 +627,19 @@ static void report(void)
         uart(" FX="); uart(value_of(ITEM_PICTURE_EFFECT));
         uart(" BASE="); uart(creative_base_style);
     }
+#if FL_LOOK_INDEX >= 0
+    uart(selected[ITEM_CREATIVE_LOOK]==FL_LOOK_INDEX?" FL=1 LUT=33":" FL=0");
+    if(screen==FLPREVIEW || (screen==OPTION && option_id==ITEM_CREATIVE_LOOK)) {
+        const FLAdjust *a=screen==FLPREVIEW?&fl_draft:&fl_saved;
+        uart(" ADJ=");
+        for(int i=0;i<FL_ADJUST_COUNT;i++) {
+            if(i) uart(",");
+            int v=a->v[i];if(v<0) {uart("-");v=-v;}
+            nstr(b,v);uart(b);
+        }
+        if(screen==FLPREVIEW) {uart(" FOCUS=");nstr(b,fl_focus);uart(b);}
+    }
+#endif
     uart(use_chinese()?" [zh-CN]\n":" [en]\n");
 }
 static void paint(void)
@@ -557,6 +655,7 @@ static void paint(void)
     case PLAY: case INDEX: draw_play(); break;
     case OPTION: draw_options(); break;
     case PRESET: draw_preset(); break;
+    case FLPREVIEW: draw_fl_preview(); break;
     }
     __asm__ volatile("dsb sy" ::: "memory");
     LCD[4]=(uint32_t)(uintptr_t)pixels;
@@ -567,6 +666,10 @@ static void reset_choices(void)
     for (unsigned i=0;i<COUNT(items);i++) selected[i]=items[i].initial;
     creative_contrast=creative_saturation=creative_sharpness=0;
     creative_base_style="Standard";
+#if FL_LOOK_INDEX >= 0
+    fl_saved=fl_draft=fl_defaults;
+    fl_focus=0;
+#endif
 }
 #if RETRO_STYLE_INDEX >= 0
 static void choose_value(int id, const char *value)
@@ -576,6 +679,9 @@ static void choose_value(int id, const char *value)
 }
 static void apply_preset(void)
 {
+#if FL_LOOK_INDEX >= 0
+    selected[ITEM_CREATIVE_LOOK]=0;
+#endif
     selected[ITEM_CREATIVE_STYLE]=RETRO_STYLE_INDEX;
     creative_contrast=RETRO_CONTRAST;
     creative_saturation=RETRO_SATURATION;
@@ -633,9 +739,27 @@ static void handle(enum Key k)
         if (screen==OPTION && option_id==ITEM_LANGUAGE) option=selected[ITEM_LANGUAGE];
         return;
     }
-    if (screen!=OPTION && screen!=PRESET && k>=TAB1 && k<=TAB6) {
+    if (screen!=OPTION && screen!=PRESET && screen!=FLPREVIEW && k>=TAB1 && k<=TAB6) {
         if(screen!=MENU) open_menu();
         choose_tab(k-TAB1); page_no=0; row=0;
+        return;
+    }
+    if(screen==FLPREVIEW) {
+#if FL_LOOK_INDEX >= 0
+        if(k==CONFIRM) {
+            fl_saved=fl_draft;
+            selected[ITEM_CREATIVE_LOOK]=FL_LOOK_INDEX;
+            choose_value(ITEM_PICTURE_PROFILE,"Off");
+            choose_value(ITEM_PICTURE_EFFECT,"Off");
+            screen=parent;
+        } else if(k==BACK||k==MENUKEY) screen=OPTION;
+        else if(k==LEFT||k==RIGHT) fl_focus=wrap(fl_focus+(k==LEFT?-1:1),FL_ADJUST_COUNT);
+        else if(k==UP||k==DOWN) {
+            if(fl_focus!=FL_RANGE || (mode<8&&!recording))
+                fl_draft.v[fl_focus]=fl_limit(fl_draft.v[fl_focus]+(k==UP?1:-1),
+                                            fl_minimum[fl_focus],fl_maximum[fl_focus]);
+        } else if(k==DELETEKEY) fl_draft=fl_defaults;
+#endif
         return;
     }
     if(screen==PRESET) {
@@ -651,16 +775,29 @@ static void handle(enum Key k)
         if(k==UP||k==DOWN||k==LEFT||k==RIGHT) {
             if(count) option=wrap(option+((k==UP||k==LEFT)?-1:1),count);
         } else if(k==CONFIRM) {
+            if(option_id==ITEM_CREATIVE_LOOK && option==FL_LOOK_INDEX) {
+#if FL_LOOK_INDEX >= 0
+                fl_draft=fl_saved;fl_focus=0;
+#endif
+                screen=FLPREVIEW;
+                return;
+            }
             if(option_id==ITEM_CREATIVE_STYLE && option==RETRO_STYLE_INDEX) {
                 screen=PRESET;
                 return;
             }
             if(a->count) selected[option_id]=option;
             if(option_id==ITEM_CREATIVE_STYLE) {
+#if FL_LOOK_INDEX >= 0
+                selected[ITEM_CREATIVE_LOOK]=0;
+#endif
                 creative_contrast=creative_saturation=creative_sharpness=0;
                 creative_base_style=choices[a->first+option];
             }
             if((option_id==ITEM_PICTURE_PROFILE || option_id==ITEM_PICTURE_EFFECT) && option!=0) {
+#if FL_LOOK_INDEX >= 0
+                selected[ITEM_CREATIVE_LOOK]=0;
+#endif
                 selected[ITEM_CREATIVE_STYLE]=0;
                 creative_contrast=creative_saturation=creative_sharpness=0;
                 creative_base_style="Standard";
@@ -804,6 +941,12 @@ void guest_main(void)
     LCD[0]=((W/16)-1)<<2;
     LCD[1]=H-1;
     reset_choices();
+#if FL_LOOK_INDEX >= 0
+    if(!fl_selftest()) { uart("FL_LUT_SELFTEST_FAIL\n"); for(;;) {} }
+    uart("FL_LUT_SELFTEST_PASS 512\n");
+    if(!fl_adjust_selftest()) {uart("FL_ADJUST_SELFTEST_FAIL\n");for(;;) {}}
+    uart("FL_ADJUST_SELFTEST_PASS\n");
+#endif
     screen=MENU;
     return_screen=SHOOT;
     paint();

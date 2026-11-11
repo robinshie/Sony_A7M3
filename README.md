@@ -8,6 +8,7 @@
 | 查看「复古衣橱」原厂菜单与配方补丁（v3 名称与定位修复已烧录、重启验收通过） | [创意风格实验](docs/creative-style.md) |
 | 继续开发完整胶片算法、研究机内图像处理入口 | [算法开发 TODO](TODO.md) |
 | 生成 FL 近似实验版 3D LUT、预览照片、快速测试 | [FL 本地算法](docs/fl-look.md) |
+| 在真机加载/恢复由 Mac 开关的 FL 近似试用表 | [真机 FL 试用](docs/native-fl.md) |
 | 复现扩展 Gamma 控制接口的原厂 ARM 测试 | [机内色彩接口研究](docs/color-interface.md) |
 | 构建和验证复古衣橱的 RW 图标修复 | [图标修复](docs/style-icons.md) |
 | 在本地构建镜像、备份、烧录、回读或恢复 | [真机操作手册](docs/updater.md) |
