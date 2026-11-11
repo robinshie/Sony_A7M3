@@ -28,7 +28,7 @@ class ClaimedBackend(UsbBackend):
 class Response(bytearray):
     def __init__(self,maximum=1024*1024):
         super().__init__()
-        require(0<maximum<=16*1024*1024, "维护响应上限异常。")
+        require(0<maximum<=32*1024*1024, "维护响应上限异常。")
         self.maximum=maximum
 
     def write(self, data):
@@ -96,7 +96,8 @@ def perform(camera, action):
     print("LIVE_FIRMWARE_BUILD_MATCH", flush=True)
     if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
                   "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix",
-                  "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity"):
+                  "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity",
+                  "creative-icons", "creative-read-icons", "creative-verify-icons", "creative-restore-icons"):
         from camera.creative_flash import perform as creative_update, configure
         creative_update(camera,factory,configure(action))
         return

@@ -19,6 +19,10 @@ def configure(action):
                 'creative-restore-fix':'restore'}
     identity={'creative-identity':'identity','creative-read-identity':'read',
               'creative-verify-identity':'verify','creative-restore-identity':'restore'}
+    icons={'creative-icons':'icons','creative-read-icons':'read','creative-verify-icons':'verify','creative-restore-icons':'restore'}
+    if action in icons:
+        OUT=LAB/'creative-icons'
+        return icons[action]
     if action in identity:
         OUT=LAB/'creative-v3'
         return identity[action]
@@ -31,7 +35,7 @@ def verified(check_image=False):
     proof=json.loads((OUT/'qemu-proof.json').read_text())
     require(proof['manifest_sha256']==file_sha(OUT/'manifest.json'), '烧录测试与镜像清单不符。')
     native_directory=manifest.get('native_directory','menu-persistent')
-    require(native_directory in ('menu-persistent','menu-lazy','menu-identity'),'未知原厂补丁测试目录。')
+    require(native_directory in ('menu-persistent','menu-lazy','menu-identity','menu-icons'),'未知原厂补丁测试目录。')
     native=LAB/native_directory/'proof.json'
     require(file_sha(native)==manifest['native_proof_sha256'], '原厂菜单测试记录发生变化。')
     native_proof=json.loads(native.read_text())
@@ -95,6 +99,23 @@ def identity_inspect_payload():
     return data
 
 
+def direct_image_hash(factory,record,stem):
+    directory=LAB/'image-hash'
+    proof=json.loads((directory/'proof.json').read_text())
+    for path,digest in proof['source_sha256'].items():
+        require(file_sha(ROOT/path)==digest,'图标直接回读测试源码发生变化：'+path)
+    data=(directory/'hash.so').read_bytes()
+    require(len(data)<=16384 and data[:7]==b'\x7fELF\x01\x01\x01' and
+            sha(data)==proof['payload_sha256'],'图标只读散列探针与测试不符。')
+    raw=factory.run(data,'a7imagehash.bin')
+    save(stem.with_suffix('.image-hash.bin'),raw)
+    require(len(raw)==44,'图标直接回读报告长度异常。')
+    magic,status,size=struct.unpack_from('<IiI',raw)
+    require(magic==0x41374948 and status==0 and size==record['after_bytes'] and
+            raw[12:].hex()==record['after_sha256'],'图标文件直接回读 SHA-256 不符。')
+    print(f'LIVE_CREATIVE_IMAGE_DIRECT_HASH_VERIFIED bytes={size} sha256={raw[12:].hex()}',flush=True)
+
+
 def report(factory,name,stem):
     manifest,_=verified()
     raw=factory.run(payload(name),'a7creative.bin')
@@ -131,18 +152,18 @@ def perform(camera,factory,action):
         print(f'LIVE_CREATIVE_ENGLISH bytes={len(english)} sha256={sha(english)}',flush=True)
         print(f'LIVE_CREATIVE_INSPECTION_SAVED {stem}',flush=True)
         return
-    if action in ('flash','fix','identity'):
+    if action in ('flash','fix','identity','icons'):
         settings=camera.getBackupPresetData(True)
         backup=BackupFile(io.BytesIO(settings))
         require(backup.revision==4 and backup.size==len(settings), '设置备份不完整。')
         save(stem.with_suffix('.settings.bin'),settings)
         expected=EXPECTED if action=='flash' else {k:EXPECTED[k] for k in (0x0107075e,0x01070a11,0x01070a17,0x01070a1d)}
         require(all(backup.getProperty(k).data==v for k,v in expected.items()), '机身配方与实测配置不符。')
-        if action=='identity':
-            # Both full file preimages and the running v2 helper are required.
+        if action in ('identity','icons'):
+            # Both full file preimages and the running previous helper are required.
             # The sector payload independently checks every changed sector again.
             previous=None
-            for path in ('/lib/viewUnified2.so','/lib/CautionConfig.so'):
+            for path in (manifest['files'] if action=='icons' else ('/lib/viewUnified2.so','/lib/CautionConfig.so')):
                 record=manifest['files'][path]
                 data=factory.contents('/usr'+path,maximum=record['before_bytes']+16)
                 require(len(data)==record['before_bytes'] and sha(data)==record['before_sha256'],
@@ -152,9 +173,9 @@ def perform(camera,factory,action):
             native=factory.run(inspect_payload(),'a7inspect.bin')
             save(stem.with_suffix('.memory-before.bin'),native)
             require(len(native)==2556 and struct.unpack_from('<4I',native)[2:]==(3,20) and
-                    native[56:714]==previous[0x5b98dc:0x5b9b6e], '运行内存不是已验证的第二版。')
+                    native[56:714]==previous[0x5b98dc:0x5b9b6e], '运行内存与更新前的已验证版本不符。')
             report(factory,'write',stem)
-            print(f'LIVE_CREATIVE_IDENTITY_READBACK_VERIFIED image_sha256={manifest["image_sha256"]}',flush=True)
+            print(f'LIVE_CREATIVE_{action.upper()}_READBACK_VERIFIED image_sha256={manifest["image_sha256"]}',flush=True)
             return
         if action=='fix':
             native=factory.run(inspect_payload(),'a7inspect.bin')
@@ -191,12 +212,21 @@ def perform(camera,factory,action):
             require(data==(OUT/'after.bin').read_bytes(), '机身扇区不是创意风格补丁。')
             view_bytes=None
             for path,record in manifest['files'].items():
+                if path=='/share/app/image_cmn_43.uxc':
+                    # The camera can retain pre-update resource-header pages even
+                    # after power cycling. Hash the ENTIRE file using O_DIRECT;
+                    # do not mask differences or patch bytes before hashing.
+                    direct_image_hash(factory,record,stem)
+                    continue
                 contents=factory.contents('/usr'+path,maximum=record['after_bytes']+16)
+                if len(contents)!=record['after_bytes'] or sha(contents)!=record['after_sha256']:
+                    save(stem.with_name(stem.name+'-'+path.rsplit('/',1)[-1]+'.mismatch'),contents)
+                    print(f'LIVE_CREATIVE_FILE_MISMATCH {path} bytes={len(contents)} sha256={sha(contents)}',flush=True)
                 require(len(contents)==record['after_bytes'] and sha(contents)==record['after_sha256'],
                         f'重启后文件校验不符：{path}')
                 if path=='/lib/viewUnified2.so':view_bytes=contents
                 print(f'LIVE_CREATIVE_FILE_VERIFIED {path} sha256={sha(contents)}',flush=True)
-            if OUT.name in ('creative-v2','creative-v3'):
+            if OUT.name in ('creative-v2','creative-v3','creative-icons'):
                 native=factory.run(inspect_payload(),'a7inspect.bin')
                 save(stem.with_suffix('.memory.bin'),native)
                 require(len(native)==2556 and struct.unpack_from('<4I',native)[2:]==(3,20) and
@@ -205,13 +235,16 @@ def perform(camera,factory,action):
                         native[2552:2556]==view_bytes[0x5bb266:0x5bb26a], '运行代码或菜单数量不符。')
                 entry=struct.unpack_from('<10I',native,724+190*4)
                 require(entry[2:4]==(98,0x0204ed84),'新增菜单记录不符。')
+                if OUT.name=='creative-icons':
+                    require((entry[4],entry[8])==(0x0205c049,0x0205c04a),'RW 大小图标资源未加载。')
+                    print('LIVE_CREATIVE_RW_ICON_REFERENCES_VERIFIED',flush=True)
                 settings=camera.getBackupPresetData(True)
                 backup=BackupFile(io.BytesIO(settings))
                 require(backup.revision==4 and backup.size==len(settings),'重启后设置备份不完整。')
                 save(stem.with_suffix('.settings.bin'),settings)
                 require(all(backup.getProperty(k).data==v for k,v in EXPECTED.items()), '重启后配方保存参数不符。')
                 print('LIVE_CREATIVE_RUNTIME_MENU_AND_RECIPE_VERIFIED count=20 id=98 style_box=3 C=1 S=-1 H=-1',flush=True)
-                if OUT.name=='creative-v3':
+                if OUT.name in ('creative-v3','creative-icons'):
                     identity=factory.run(identity_inspect_payload(),'a7identity.bin')
                     save(stem.with_suffix('.identity.bin'),identity)
                     require(len(identity)==28 and struct.unpack_from('<I',identity)[0]==0x41374944 and
