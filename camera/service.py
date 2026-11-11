@@ -97,7 +97,8 @@ def perform(camera, action):
     if action in ("creative-read", "creative-flash", "creative-restore", "creative-verify", "creative-inspect",
                   "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix",
                   "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity",
-                  "creative-icons", "creative-read-icons", "creative-verify-icons", "creative-restore-icons"):
+                  "creative-icons", "creative-read-icons", "creative-verify-icons", "creative-restore-icons",
+                  "creative-icons-list", "creative-read-icons-list", "creative-verify-icons-list", "creative-restore-icons-list"):
         from camera.creative_flash import perform as creative_update, configure
         creative_update(camera,factory,configure(action))
         return

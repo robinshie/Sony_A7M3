@@ -1,6 +1,6 @@
 # 「复古衣橱」创意风格实验
 
-2026-11-11 后续工作：[RW 图标修复与验证](style-icons.md)、[FL 方向的机内色彩接口研究](color-interface.md)。下文保留 v3 及更早版本的构建和验收记录；安装图标包后改用 `creative-verify-icons`。
+2026-11-11 后续工作：[RW 图标修复与验证](style-icons.md)、[FL 方向的机内色彩接口研究](color-interface.md)。下文保留 v3 及更早版本的构建和验收记录；安装完整图标修正后改用 `creative-verify-icons-list`，仅安装第一版图标包时使用 `creative-verify-icons`。
 
 **状态：v3 已完成烧录、断电重启、屏幕验收及 USB 回读。** v2 已验证入口与参数持久化，但用户后续发现 Fn 名称仍显示基础风格、重新进入时未定位到新增项。当前验收命令改为 `a7m3.py creative-verify-identity`；`a7m3.py flash` 仍只写标题补丁。
 
