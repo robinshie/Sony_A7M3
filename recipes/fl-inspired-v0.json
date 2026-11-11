@@ -1,0 +1,29 @@
+{
+  "id": "fl-inspired-v0",
+  "name": "FL Inspired Experimental",
+  "version": 1,
+  "description": "Original experimental look: restrained color, green/cyan hue shaping, stronger midtone contrast. Not Sony FL or a measured match.",
+  "input_space": "sRGB",
+  "output_space": "sRGB",
+  "strength": 1.0,
+  "exposure_ev": 0.0,
+  "linear_matrix": [
+    [1.015, -0.005, -0.010],
+    [-0.015, 1.020, -0.005],
+    [-0.005, 0.015, 0.990]
+  ],
+  "saturation": 0.82,
+  "hue_bands": [
+    {"center": 30.0, "width": 38.0, "shift": -1.5, "saturation": 1.14},
+    {"center": 120.0, "width": 65.0, "shift": 10.0, "saturation": 0.83},
+    {"center": 220.0, "width": 55.0, "shift": -5.0, "saturation": 0.92}
+  ],
+  "tone_curve": [
+    [0.0, 0.012],
+    [0.06, 0.041],
+    [0.18, 0.145],
+    [0.5, 0.530],
+    [0.8, 0.850],
+    [1.0, 0.985]
+  ]
+}
