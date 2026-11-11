@@ -2,7 +2,46 @@
 
 2026-11-11。v3 已修复名称与列表定位，但图标仍沿用中性风格。本包以精确匹配的 v3 镜像为前置，增加 Fn 的 RW 徽标，以及 MENU 列表和选中页的大小图标。它没有增加 FL 或改变 +1、−1、−1 配方。
 
-第一、二版已完成写入和文件回读；第二版断电重启后，用户照片明确显示左侧选中项及底部参数栏仍为 Ntrl，尽管标题和 +1、−1、−1 正确。第二版不能记作屏幕验收通过。第三版针对照片中的两条实际显示路径修正，状态如下。
+第一、二版已完成写入和文件回读；第二版断电照片仍有两处 Ntrl。第三版断电后用户确认**底部已为 RW，左侧仍为 Ntrl**；文件、运行代码、新资源引用和配方回读全部匹配。此前把左侧问题归因于两个直接资源引用并不完整，第四版处理实际参与左侧查表的独立编号。第四版断电重启后，用户已确认左侧选中和未选中两种状态都显示 RW。
+
+## 第四版：左侧列表的独立编号
+
+左侧 `PAS_MenuDataSelectBeltBase` 没有直接使用行内的大、小图片 ID。普通态 `0x5b71e8` 和选中态 `0x5b7bd0` 都调用菜单数据虚表 `+48`，对应 `libObj.so` 的 `0x14f560`，取菜单行 `+24` 的图标族编号，再查两套 12 字节记录表（`0x7a6118`、`0x7a2174`）。新增项复制了中性行，编号一直是 320。
+
+| 编号 | 普通态资源 | 橙色选中态资源 |
+| --- | --- | --- |
+| 320，原厂中性 | `0x0205c7af` | `0x0205c9e7` |
+| 359，第 3 槽中性／复古衣橱 | `0x0205c76d` | `0x0205c9b5` |
+
+本版在新增行初始化末尾设置编号 359，原有 19 行及原厂中性编号保持不变。同时把已有 `0x0205c9b5` 的 70×35 橙色图换成 RW。新流通过“短原始块 + 压缩余量”保持原来的 **1,974 字节**长度，记录、索引、尺寸和指针都不改变；本地 fwtool 解码器与项目解码器逐像素结果相同。既有底部修复不变。
+
+QEMU 使用原厂完整普通态、选中态及编号 getter，先以旧编号重现白色／橙色 Ntrl，再验证新编号返回两种 RW；两套面板表、13 个原厂基础风格、边界情况共 68 项通过。并重新运行 234 次底部显示切换、256 条分派、34,643 条参数、418 条光标和 91 条 Fn 路径。扇区事务、失败回滚、恢复、错误前置拒绝、e2fsck 及五个整文件导出验证通过。
+
+在已安装第三版的前提下：
+
+```sh
+python3 research/menu_icons_belt.py \
+  --usr "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha15_unpacked" \
+  --kernel /path/to/vmlinuz-lts \
+  --busybox /path/to/alpine-root/bin/busybox \
+  --sony-root "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha7_unpacked" \
+  --lz77-source /path/to/fwtool.py/fwtool/lz77/__init__.py
+python3 research/build_creative_icons_belt.py
+python3 research/creative_icons_belt_test.py \
+  --kernel /path/to/vmlinuz-lts \
+  --busybox /path/to/alpine-root/bin/busybox \
+  --sony-root "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha7_unpacked"
+python3 research/check_creative_image.py .lab/creative-icons-belt
+python3 a7m3.py creative-icons-belt --write-device
+# 断电重启，从 MENU 选择复古衣橱，检查左侧选中项和滚动离开后的图标。
+python3 a7m3.py creative-verify-icons-belt
+```
+
+本版共 1,875 个不同字节（代码 14、图像 1,861）、6 个扇区，已完成真机写入并逐扇区回读一致。新增行初始化所在扇区最后写入。包位于 `.lab/creative-icons-belt/`，原厂组件证明在 `.lab/menu-icons-belt/`。镜像 SHA-256 为 `a01cafd1d3acd9c550b70d08ee1d9e19faecfde5f88fd928f8d2d6e1f5a0428d`，图像文件为 `b13dba8a2ab03594dfcfa70e0b3c4b3e82c7b27989d9e9dddc106ab692c09c59`。恢复至第三版用 `creative-restore-icons-belt --write-device`，底部 RW 修复仍保留。
+
+实屏验收：用户按完整断电流程重启，从 MENU 选择复古衣橱并滚动离开，确认左侧橙色选中图标和未选中图标均为 RW；底部白色 RW 已在第三版确认。
+
+重启后只读验收：`creative-verify-icons-belt` 已通过扇区回读、四个完整代码／语言文件散列、图像文件直接读取散列、运行代码与显示跳转、新增行图标编号 359、20 项菜单、名称／光标身份和 BK4 配方 +1、−1、−1 检查，报告 `written=0`。首次尝试在 USB 切换维护模式时超时；相机仍在线，重试成功，全程未再次写入固件。实屏确认与机器回读均已完成。
 
 ## 第三版：左侧选中项和底部参数栏
 
@@ -12,7 +51,7 @@
 
 另外，原厂创建控件时使用 `根节点数量 - 6`。新增第 20 行会让底部误加入一个样式框项目。本版将此处保持为原厂 13 个基础风格；新增复古衣橱入口仍位于主列表末尾。
 
-本版仅改变 `viewUnified2.so` 中 74 个字节、3 个扇区，已完成真机写入和逐扇区回读一致检查。底部调用所在扇区最后写入。图像资源、两种语言资源和配方保持第二版原值。重启后的显示验收尚未完成。
+本版仅改变 `viewUnified2.so` 中 74 个字节、3 个扇区，已完成真机写入和断电后代码、文件、参数回读。底部调用所在扇区最后写入。图像资源、两种语言资源和配方保持第二版原值。用户确认底部 RW 正常，左侧未修复。
 
 构建与验证（需要已经保存的第二版本地包及原始 4.04 解包文件）：
 
@@ -33,7 +72,7 @@ python3 a7m3.py creative-icons-display --write-device
 python3 a7m3.py creative-verify-icons-display
 ```
 
-QEMU 已执行原厂完整显示函数和原厂图标选择/绘制函数，覆盖 234 次切换（6 槽 × 13 风格 × 3 轮）、异常控件保护、19 行保留和固定 13 个模型索引。外部 GUI 绘制端点用测试桩记录收到的资源 ID，不模拟机身屏幕。原有分派、参数、名称及光标回归、扇区事务、e2fsck 和五文件 debugfs 导出检查全部通过。真机屏幕验收仍待用户断电复测。
+QEMU 已执行原厂完整显示函数和原厂底部图标选择/绘制函数，覆盖 234 次切换（6 槽 × 13 风格 × 3 轮）、异常控件保护、19 行保留和固定 13 个模型索引。外部 GUI 绘制端点用测试桩记录收到的资源 ID，不模拟机身屏幕。原有分派、参数、名称及光标回归、扇区事务、e2fsck 和五文件 debugfs 导出检查全部通过。这一版本没有测试左侧图标编号查表，不能据此宣称左侧已修好。
 
 本地包 `.lab/creative-icons-display/`，原厂组件证明 `.lab/menu-icons-display/`。镜像 SHA-256 为 `2a5e3d10d76ab7c27f31ab12e5b76d1001b811fec3611faa32a2cb7f0721b253`；view 库为 `a19b927d4566d1849259ead2377f5aa461c4921a39e8df26584070bcb595d781`。恢复到第二版使用 `creative-restore-icons-display --write-device`。不同版本验收命令不能混用。
 

@@ -99,7 +99,8 @@ def perform(camera, action):
                   "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity",
                   "creative-icons", "creative-read-icons", "creative-verify-icons", "creative-restore-icons",
                   "creative-icons-list", "creative-read-icons-list", "creative-verify-icons-list", "creative-restore-icons-list",
-                  "creative-icons-display", "creative-read-icons-display", "creative-verify-icons-display", "creative-restore-icons-display"):
+                  "creative-icons-display", "creative-read-icons-display", "creative-verify-icons-display", "creative-restore-icons-display",
+                  "creative-icons-belt", "creative-read-icons-belt", "creative-verify-icons-belt", "creative-restore-icons-belt"):
         from camera.creative_flash import perform as creative_update, configure
         creative_update(camera,factory,configure(action))
         return
