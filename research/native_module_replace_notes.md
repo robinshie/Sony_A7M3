@@ -50,6 +50,8 @@ host derives targets from a fixed revision profile. Its core regression passed
 8,169 checks with 126 fault points, including preservation of prior artifacts.
 
 The r3 feedback module `f3e2d657…` was published through this second replacement
-and fully read back; the original view and WBI stayed unchanged. Physical
-feedback and cold-boot preference restoration are still separate acceptance
-steps.
+and fully read back; the original view and WBI stayed unchanged. The user then
+confirmed the first-page controls and the Save-to-Complete feedback. The
+resident r3 module, generation-3 preferences and active LUT agreed on readback;
+the three unsupported spatial controls remain disabled. A further power cycle
+of that newly edited recipe and broader shooting-mode tests remain separate.
