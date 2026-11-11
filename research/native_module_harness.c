@@ -49,6 +49,10 @@ static int replace_slot(void *opaque,unsigned slot,const unsigned char *before,u
 }
 static int set_value(int id,int value) {uintptr_t *vt=(uintptr_t *)manager_words[0];return ((int(*)(void *,int,int))vt[17])(manager_words,id,value);}
 static int get_value(int id,int *value) {uintptr_t *vt=(uintptr_t *)manager_words[0];return ((int(*)(void *,int,int *))vt[3])(manager_words,id,value);}
+static a7_menu_node *look_row(a7_menu_node *look,unsigned index) {
+    check(look&&look->count==2&&index<10,"look has two native pages and bounded row");
+    return look->children[index/6]->children[index%6];
+}
 void *mock_action_select(void *view) {check(view==action_view,"native action view ABI");return action_selected;}
 int mock_action_process(void *view,void *node) {
     check(view==action_view&&node==action_selected,"native selected action");
@@ -99,10 +103,10 @@ void guest_main(void) {
     test(((DeepInit)parent.vtable[0xf8/4])(&parent,0,0,3)==1 && cold_look->parent==&parent && cold_look->depth==4,"subsequent original initialization supplies actual ancestry");
     typedef int (*GetSelected)(void *,void **);typedef int (*GetInt)(void *,int,int *);
     void *selected=0;int selected_value=-99;
-    test(((GetSelected)0x40682951)(cold_look->children[0],&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==1,"late original graph init retains saved ON cursor");
-    test(((GetSelected)0x40682951)(cold_look->children[1],&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==2,"late original graph init retains saved scalar cursor");
+    test(((GetSelected)0x40682951)(look_row(cold_look,0),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==1,"late original graph init retains saved ON cursor");
+    test(((GetSelected)0x40682951)(look_row(cold_look,1),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==11,"late original graph init retains saved scalar cursor as unsigned UI enum");
     unsigned char grayout=0;
-    test(((int(*)(void *,unsigned char *))0x40682d0b)(cold_look->children[6],&grayout)==1,"late init keeps unsupported sharpness gray");
+    test(((int(*)(void *,unsigned char *))0x40682d0b)(look_row(cold_look,6),&grayout)==1,"late init keeps unsupported sharpness gray");
     put("NATIVE_FL_MODULE_BOOT_PASSED: historical disk recovery, saved ON parameters before MENU, first-MENU configuration, late native graph init/cursors\n");finish();
 #endif
     test(a7_fl_install(0x40000000,process_element)==A7_FL_MODULE_PLATFORM && slot_writes==0,"missing platform refuses activation");
@@ -120,7 +124,7 @@ void guest_main(void) {
     test(state->installed && !state->fault && state->parents==1 && state->mode==0 && slot_writes==1,"resident module default Off with durable first record");
     test(parent.count==7 && parent.children[2]==&creative && parent.children[4]==siblings+2 && same(data_guarded+1,ORIGINAL,1280),"same-level insertion and historical baseline restored");
     a7_menu_node *look=parent.children[3];
-    test(look!=&creative && look->count==10,"independent look root with explicit Save row");
+    test(look!=&creative && look->count==2 && look->children[0]->count==6 && look->children[1]->count==4,"independent look root with two proper pages and explicit Save row");
     test(look->parent==&parent,"native parent ancestry");
     test(look->depth==3,"native root depth");
     test(parent.children[4]->index==5,"native stock sibling one-based index");
@@ -129,20 +133,23 @@ void guest_main(void) {
     for(int id=0;id<618;id++)check(get_value(id,&value)==1&&value==id+1000&&set_value(id,id-300)==1&&stock_value==id-300,"all stock IDs preserve original dispatch");
     test(stock_calls==1236,"stock model routes remain intact");
     test(set_value(0x7000,1)==1 && state->mode==1 && state->dirty && slot_writes==1,"native mode setter performs RAM preview only");
-    test(set_value(0x7001,3)==1 && get_value(0x7001,&value)==1 && value==3 && slot_writes==1,"native contrast setter reaches LUT backend");
+    test(set_value(0x7001,12)==1 && get_value(0x7001,&value)==1 && value==12 && state->parameters[0]==3 && slot_writes==1,"native contrast enum reaches signed LUT backend");
+    unsigned unchanged_writes=write_calls;
+    test(set_value(0x7001,-1)==0 && set_value(0x7001,19)==0 && set_value(0x7000,2)==0 && write_calls==unchanged_writes && state->parameters[0]==3 && slot_writes==1,"invalid native enums never reach LUT or preference writes");
     unsigned writes_before=write_calls;
     test(a7_fl_initialize_color_prepared()==0 && write_calls==writes_before && state->mode==1 && state->dirty && state->parameters[0]==3 && slot_writes==1,"later still-view entry preserves unsaved RAM preview");
     unsigned char gray=0;
     typedef int(*GetGray)(void *,unsigned char *);
-    test(((GetGray)0x40682d0b)(look->children[6],&gray)==1 && set_value(0x7006,1)==0,"unsupported sharpness visible gray and write rejected");
+    test(((GetGray)0x40682d0b)(look_row(look,6),&gray)==1 && set_value(0x7006,4)==0,"unsupported sharpness visible gray and write rejected");
     test(set_value(0x7007,2)==0 && set_value(0x7008,1)==0,"range and clarity reject");
     event_ok=0;test(a7_fl_confirm()==A7_FL_MODULE_EVENT && slot_writes==1,"unproven confirmation cannot persist");event_ok=1;
     *(uint32_t *)(action_view+0x130)=1;*(uintptr_t *)(action_view+0x150)=(uintptr_t)manager_words;*(int *)(action_view+0x158)=7;
-    action_selected=look->children[9];original_action(action_view);
+    action_selected=look_row(look,9);original_action(action_view);
     test(slot_writes==2 && state->generation==2 && !state->dirty && action_flags==1 && action_fallbacks==0 && stock_actions==0,"original native Save action persists once");
     uint8_t committed[1280];bytes(committed,data_guarded+1,1280);
-    test(set_value(0x7001,-3)==1 && a7_fl_cancel()==0 && get_value(0x7001,&value)==1 && value==3 && same(data_guarded+1,committed,1280) && slot_writes==2,"cancel restores committed LUT and native cursor state");
-    test(set_value(0x7002,4)==1,"highlight preview");slot_failed=1;
+    test(set_value(0x7001,6)==1 && state->parameters[0]==-3 && a7_fl_cancel()==0 && get_value(0x7001,&value)==1 && value==12 && same(data_guarded+1,committed,1280) && slot_writes==2,"cancel restores committed signed LUT and native enum cursor state");
+    test(set_value(0x7001,8)==1 && get_value(0x7001,&value)==1 && value==8 && state->parameters[0]==-1 && a7_fl_cancel()==0,"backend minus one is representable without missing-value sentinel");
+    test(set_value(0x7002,13)==1 && state->parameters[1]==4,"highlight enum preview");slot_failed=1;
     test(a7_fl_confirm()==A7_FL_CONTROL_PERSIST && state->dirty && state->generation==2,"durable write failure never claims committed UI");slot_failed=0;
     test(a7_fl_confirm()==0 && slot_writes==3 && state->generation==3,"explicit confirmation retry succeeds");
     test(set_value(0x7000,0)==1 && a7_fl_confirm()==0 && same(data_guarded+1,ORIGINAL,1280) && state->mode==0,"Off restores original and records Off preference");

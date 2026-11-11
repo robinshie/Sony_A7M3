@@ -108,12 +108,24 @@ call_kernel_writer:
     if args.with_bootstrap:
         run([sys.executable,str(ROOT/'research/native_bootstrap.py'),'--usr',str(args.usr)])
         run([sys.executable,str(ROOT/'research/native_bootstrap_test.py')])
-        for name in ('native-bootstrap/compile-proof.json','native-bootstrap-test/proof.json','native-menu-boot-loader/proof.json'):
+        # Older standalone node reports use paths relative to research/. Publish
+        # a checked repo-relative copy for downstream bundle proof readers.
+        adjust_path=ROOT/'.lab/native-adjust/report.json';adjust=json.loads(adjust_path.read_text())
+        for source_path,digest in adjust['source_sha256'].items():
+            if sha((ROOT/'research'/source_path).read_bytes())!=digest:raise ValueError('Stale node fixture: '+source_path)
+        adjust['input_report_sha256']=sha(adjust_path.read_bytes())
+        adjust['source_sha256']={'research/'+p:d for p,d in adjust['source_sha256'].items()}
+        (adjust_path.parent/'integration-proof.json').write_text(json.dumps(adjust,indent=2)+'\n')
+        for name in ('native-bootstrap/compile-proof.json','native-bootstrap-test/proof.json','native-menu-boot-loader/proof.json','native-setting-loader/proof.json','native-adjust/integration-proof.json','native-menu-action-tree/proof.json'):
             path=ROOT/'.lab'/name;proof=json.loads(path.read_text())
             if not proof.get('source_sha256'):raise ValueError(f'Missing checked source provenance: {name}')
             for source_path,digest in proof['source_sha256'].items():
-                if sha((ROOT/source_path).read_bytes())!=digest:raise ValueError(f'Stale dependency evidence: {source_path}')
+                source_file=ROOT/source_path
+                if sha(source_file.read_bytes())!=digest:raise ValueError(f'Stale dependency evidence: {source_path}')
             dependency_proofs[name]=sha(path.read_bytes())
+            if name=='native-setting-loader/proof.json' and (proof.get('module_call_return_va')!=0x5b9b30 or
+                proof.get('module_call_lr_va')!=0x5b9b31 or not proof.get('lifecycle')):
+                raise ValueError('SettingMenu loader lacks checked caller/lifecycle evidence')
         sources+=['payloads/a7-fl-bootstrap.c','payloads/a7-fl-posix.c']
     flags=['-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding',
            '-fno-builtin','-fno-strict-aliasing','-fstack-usage','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
@@ -136,7 +148,7 @@ call_kernel_writer:
     source_files=sources+['payloads/a7-fl-module.h','payloads/a7-fl-runtime.h','payloads/a7-fl-runtime-prefs.h',
         'payloads/a7-fl-runtime-control.h','payloads/a7-fl-runtime-recovery.h','payloads/a7-fl-color.h','payloads/a7-fl-store.h',
         'research/native_adjust.h','research/native_menu.h','research/native_module.py','research/native_module_harness.c',
-        'research/native_fl_runtime_harness.c','research/native_fl_runtime.py','research/native_adjust_fixture.py','research/elf32.py']
+        'research/native_fl_runtime_harness.c','research/native_fl_runtime.py','research/native_adjust_fixture.py','research/native_adjust_harness.c','research/elf32.py']
     if args.with_bootstrap:source_files+=['payloads/a7-fl-bootstrap.h','payloads/a7-fl-posix.h','research/native_bootstrap.py','research/native_bootstrap_test.py','research/native_bootstrap_test_harness.c']
     proof={'scope':'Original Sony generic nodes, process-manager dispatch and backup writer with modeled platform/OSAL/kernel/filesystem; resident FL integration',
            'original_caution_sha256':CAUTION_SHA,'original_view_sha256':VIEW_SHA,'original_ranges':ranges,
@@ -146,7 +158,7 @@ call_kernel_writer:
            'ready_for_staging':args.with_bootstrap,'dependency_proof_sha256':dependency_proofs,
            'platform_bootstrap_guard_fixture_verified':args.with_bootstrap,
            'live_platform_bootstrap_verified':False,'camera_integration':False,'flash_ready':False,
-           'feature_scope':'Still-photo Creative Look menu; FL-inspired native LUT with five scalar controls and explicit Save; last three spatial controls disabled',
+           'feature_scope':'Still-photo Creative Look menu with native Page hierarchy and nonnegative selection enums; FL-inspired LUT with five signed backend controls and explicit Save; last three spatial controls disabled',
            'hardware_validation_required':['Actual still-view boot Backup API readiness','Physical menu navigation and Save action','Cold-power persistence and calibration readback']}
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 

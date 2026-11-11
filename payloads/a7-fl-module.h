@@ -14,7 +14,7 @@ enum a7_fl_module_error {
 enum a7_fl_platform_event { A7_FL_INSTALL_EVENT=0,A7_FL_CONFIRM_EVENT=1,A7_FL_CANCEL_EVENT=2,A7_FL_UNINSTALL_EVENT=3,A7_FL_BOOT_EVENT=4 };
 struct a7_fl_platform {
     uintptr_t view_base,caution_base;
-    void *view_manager; /* Original GlobalMenu constructor argument; may be NULL before first MENU. */
+    void *view_manager; /* Original SettingMenu constructor argument; may be NULL before first MENU. */
     void *manager; /* ProcessDataMgr singleton used for scalar dispatch. */
     uintptr_t *manager_vtable,*parent_vtable;
     a7_menu_node *creative_style,*parents[A7_FL_MODULE_PARENTS];

@@ -93,14 +93,18 @@ static int synchronize(void) {
 }
 static int model_read(void *unused,int id,int *value) {
     (void)unused;if(!module.status.installed||module.status.fault||!value)return 0;
-    if(id==0x7000) {*value=module.control.preference.enabled;return 1;}
+    if(id==0x7000)return native_adjust_encode(&module.trees[0],id,module.control.preference.enabled,value);
     unsigned f=(unsigned)(id-0x7001);if(f>=8)return 0;
-    *value=module.control.preference.parameters[f];return 1;
+    /* Native SettingMenu reserves -1 as a missing-value sentinel. The UI uses
+     * nonnegative selection enums; signed values belong only to our backend. */
+    return native_adjust_encode(&module.trees[0],id,module.control.preference.parameters[f],value);
 }
 static int model_write(void *unused,int id,int value) {
     (void)unused;if(!enter())return 0;
     if(!module.status.installed||module.status.fault) {leave(A7_FL_MODULE_PLATFORM);return 0;}
-    int accepted=native_adjust_write(&module.trees[0],id,value,a7_fl_control_preview,&module.control);
+    int decoded;
+    if(!native_adjust_decode(&module.trees[0],id,value,&decoded)) {leave(A7_FL_CONTROL_ARGUMENT);return 0;}
+    int accepted=native_adjust_write(&module.trees[0],id,decoded,a7_fl_control_preview,&module.control);
     if(!accepted) {leave(module.control.last_error);return 0;}
     if(!synchronize()) {module.status.fault=1;leave(A7_FL_MODULE_NODES);return 0;}
     leave(0);return 1;
@@ -208,8 +212,8 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
                          (a7_menu_node *)&module.trees[j].root,module.pointers[j],65);
         if(rc!=1){rollback();return leave(A7_FL_MODULE_ATTACH);}module.attached++;
     }
-    /* The verified install seam is before GlobalMenu construction while idle.
-     * That constructor does not initialize pages: explicitly invoke the native
+    /* The verified install seam is before SettingMenu construction while idle.
+     * Its later UserInitialize initializes pages: for a warm graph invoke the native
      * four-argument deep init to fix parent/depth/indices, including stock
      * siblings following our new entry. It may create native owning clones. */
     for(unsigned j=0;j<module.platform.parent_count;j++) {

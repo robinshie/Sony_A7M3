@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline resident-report/prefs/LUT diagnostics tests; never imports USB."""
+import argparse
 import ctypes
 import hashlib
 import json
@@ -32,8 +33,11 @@ class Preference(ctypes.Structure):
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--bundle',type=Path,default=ROOT/'.lab/native-install-bound')
+    options=parser.parse_args();bundle_path=options.bundle.resolve()
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
-    bundle=Bundle(ROOT/'.lab/native-install-bound',ROOT/'.lab/native-module/proof.json',ROOT/'.lab/creative-icons-belt',ROOT/'.lab/native-fl-strings')
+    bundle=Bundle(bundle_path,ROOT/'.lab/native-module/proof.json',ROOT/'.lab/creative-icons-belt',ROOT/'.lab/native-fl-strings')
     data=ROOT/'.lab/native-fl-01';base=(data/'candidate.bin').read_bytes();codec=(data/'codec.bin').read_bytes()
     originals=[(data/f'{key:08x}.bin').read_bytes() for key in range(0x30004,0x30008)]
     digest=hashlib.sha256(originals[0]).digest();build=status.BUILD_ID+bytes(24-len(status.BUILD_ID))
@@ -170,7 +174,7 @@ assert not any(n.startswith(('usb','pmca')) or n in ('camera.service','camera.ha
 '''
     offline_outputs=[]
     for args in (['--offline'],['--decode',str(OUT/'resident-fixture.bin')]):
-        run=subprocess.run([sys.executable,'-c',guard,*args],cwd=ROOT,check=True,capture_output=True,text=True)
+        run=subprocess.run([sys.executable,'-c',guard,'--bundle',str(bundle_path),*args],cwd=ROOT,check=True,capture_output=True,text=True)
         output=json.loads(run.stdout);check(output['camera_contacted'] is False,'actual offline/decode CLI never imports transport')
         offline_outputs.append(output)
     h=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()

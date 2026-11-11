@@ -48,6 +48,11 @@ typedef struct {
     int current[NATIVE_ADJUST_FIELDS];
     int current_mode;
     uintptr_t caution_base;
+    /* Generic SettingMenu expects root -> pages -> fields -> value leaves. */
+    NativeAdjustNode pages[2];
+    NativeAdjustNode *page_ptrs[2];
+    NativeAdjustProperty page_props[1];
+    NativeAdjustProperties page_properties;
 } NativeAdjustTree;
 
 /* Call only after the original CautionConfig.so has been relocated/initialized.
@@ -75,5 +80,9 @@ int native_adjust_add_save(NativeAdjustTree *, uint32_t title_resid);
 int native_adjust_read(const NativeAdjustTree *, int process_id, int *value);
 int native_adjust_write(NativeAdjustTree *, int process_id, int value,
                         int (*apply)(void *, unsigned field, int value), void *ctx);
+/* SettingMenu reserves -1 for unavailable values. Model callbacks exchange
+ * nonnegative enum=value-minimum; backend/state APIs above remain signed. */
+int native_adjust_encode(const NativeAdjustTree *,int process_id,int value,int *encoded);
+int native_adjust_decode(const NativeAdjustTree *,int process_id,int encoded,int *value);
 uint32_t native_adjust_number_resid(int value);
 #endif

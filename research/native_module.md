@@ -40,7 +40,7 @@ allowed. Staging readiness is not a claim that the camera was flashed or tested.
 
 The checked dual loader calls `a7_fl_install(view_base, context, mode)`. Mode 1 runs
 from the original still-view entry seam and ignores the context argument. Mode 0
-runs before GlobalMenu construction and receives the actual `ViewManager`; this
+runs before SettingMenu construction in the corrected loader and receives the actual `ViewManager`; this
 is a different object from the process manager at `view_base + 0xa61c18`.
 
 The bootstrap verifies mappings, the readonly `ILCE-7M3` model property, exact

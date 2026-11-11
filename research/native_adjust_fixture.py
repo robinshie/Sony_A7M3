@@ -26,6 +26,10 @@ STUBS = {
     0x675408: ('allocate', False), 0x679cfc: (0x683309, False),
     0x679120: ('unexpected', False), 0x6754f8: (0x6833b1, False),
 }
+WIDGET_STUBS={0x572c1c:'widget_set_pages',0x572c26:'widget_set_rows',
+               0x572c3a:'widget_set_page',0x572c44:'widget_set_row',
+               0x572dca:'widget_has_subcursor',0x573d04:'widget_render',
+               0x573d84:'unexpected'}
 
 
 def main():
@@ -33,6 +37,7 @@ def main():
     ap.add_argument('--usr',required=True,type=Path)
     args=ap.parse_args()
     elf=ELF(args.usr/'lib/CautionConfig.so')
+    view=ELF(args.usr/'lib/viewUnified2.so')
     if hashlib.sha256(elf.data).hexdigest()!=SHA: ap.error('Unexpected CautionConfig SHA-256')
     out=ROOT/'.lab/native-adjust';out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
@@ -42,6 +47,13 @@ def main():
         (out/f'{name}.bin').write_bytes(data)
         asm+=f'.section .native_{name},"ax"\n.incbin "{name}.bin"\n'
         sections.append((va,f'.native_{name}'))
+    # Execute the real layer-one page/row traversal, while recording renderer
+    # setter arguments. The old flat graph is a regression counterexample.
+    data=view.read(0x5740d4,0x574202-0x5740d4)
+    (out/'widget.bin').write_bytes(data)
+    asm+='.section .native_widget,"ax"\n.incbin "widget.bin"\n'
+    sections.append((0x5740d4,'.native_widget'))
+    pieces.append({'library':'viewUnified2.so','va':'0x5740d4','size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
     vtable=bytearray(elf.read(0x918ec0,268))
     for offset in range(4,268,4):
         _,sym=elf.relocations[0x918ec0+offset]
@@ -57,6 +69,10 @@ def main():
             asm+=f'.thumb\nldr.w ip, [pc, #4]\nbx ip\nnop\n.word {destination}\n'
         else:
             asm+=f'.arm\nldr ip, [pc, #0]\nbx ip\n.word {destination}\n'
+    for va,destination in WIDGET_STUBS.items():
+        name=f'.widget_stub_{va:x}';sections.append((va,name))
+        # 10-byte Thumb veneer fits adjacent setters at either halfword alignment.
+        asm+=f'.section {name},"ax"\n.thumb\nmovw ip, #:lower16:{destination}\nmovt ip, #:upper16:{destination}\nbx ip\n'
     (out/'native.S').write_text(asm)
     ld='ENTRY(_start)\nSECTIONS {\n. = 0x100000;\n.text : { *(.text.start) *(.text*) }\n.rodata : { *(.rodata*) }\n. = ALIGN(4096);\n.data : { *(.data*) }\n.bss (NOLOAD) : { __bss_start = .; *(.bss*) *(COMMON) . = ALIGN(8); __bss_end = .; }\n'
     ld+=''.join(f'{name} {va:#x} : {{ *({name}) }}\n' for va,name in sorted(sections))+'}\n'
@@ -68,7 +84,7 @@ def main():
     (out/'adjust.log').write_text(run.stdout+run.stderr);print(run.stdout,end='')
     if 'NATIVE_ADJUST_TESTS_PASSED' not in run.stdout or 'FAIL' in run.stdout: raise ValueError('Native node fixture failed')
     sources={name:hashlib.sha256((ROOT/'research'/name).read_bytes()).hexdigest() for name in ['native_adjust.h','native_adjust.c','native_adjust_harness.c','native_adjust_fixture.py']}
-    report={'caution_sha256':SHA,'extracted_components':pieces,'source_sha256':sources,'scope':'Original node construction, properties, selection, grayout, clone and destruction; backend acceptance/rejection is mocked. No renderer, ISP, USB or camera execution.','flash_ready':False,'log':run.stdout.splitlines()}
+    report={'caution_sha256':SHA,'view_sha256':hashlib.sha256(view.data).hexdigest(),'extracted_components':pieces,'source_sha256':sources,'scope':'Original node construction, properties, selection, grayout, clone/destruction and actual PAS_SelectListTab page/row traversal. Two-page 6/4 structure plus old-flat negative control; signed backend/nonnegative UI enum mapping. Rendering/backend mocked; no ISP, USB or camera execution.','flash_ready':False,'log':run.stdout.splitlines()}
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 
 

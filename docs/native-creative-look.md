@@ -6,7 +6,7 @@
 
 首版目标入口：**MENU → 拍摄设置 1 → 第 14 页 → 创意外观**。它与创意风格同级，保留原页的防闪烁拍摄、人脸登记及登记人脸优先三个项目，也保留已有「复古衣橱」和 RW 图标修改。
 
-选择关或「FL（实验版）」；对比度、高光、阴影、褪色、饱和度直接生成机内 LUT 的变化。调节先预览，最后选择「保存」写入配置。锐度、锐度范围、清晰度尚未实现，保持置灰。首版只接入静态拍摄菜单，使用已验证的表 0 通路；图片配置文件和照片效果应保持关闭。
+选择关或「FL（实验版）」；对比度、高光、阴影、褪色、饱和度直接生成机内 LUT 的变化。修正版分成两页：第一页为开关和五项色彩调节，第二页为三个尚未实现、保持置灰的空间调节项及「保存」。调节先预览，选择「保存」才提交自有配置。首版只接入静态拍摄菜单，使用已验证的表 0 通路；图片配置文件和照片效果应保持关闭。
 
 这是自制近似 FL。原厂非线性色度编解码、节点格式及 LUT 写入路径已有验证；A7 IV 的完整色彩算法和 ISP 处理没有复现。菜单和参数的 ARM 组件测试，也不等于模拟了相机传感器或 ISP。
 
@@ -18,7 +18,9 @@
 - 配置文件 `/setting/A7FL0.CFG` 已通过真实 ARM 文件读写、同步和回读验证，当前为 generation 1、FL 关闭。四张 LUT 回读仍为原厂值。
 - 分页菜单修正版已写入：完整 `viewUnified2.so`（10,854,816 字节）SHA-256 为 `a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7`。修正日志 `/setting/A7FL.RETARGET` 完成阶段 100，3 个当前执行页面保留旧私有副本，`/usr` 恢复只读。保留已验证的启动钩子，恢复旧 GlobalMenu 调用，改接 SettingMenu 构造入口。新入口在下次冷启动生效。
 - 首次 GlobalMenu 版本曾正常开机但未出现入口；只读状态确认模块加载和颜色初始化成功，配置为关闭、四张 LUT 保持原厂值。已据此改接实际分页 SettingMenu，并执行原始构造函数及初始化至菜单树深度初始化调用的 ARM 验证。
-- **菜单显示、物理按键保存及拍照验收尚未通过。写入和回读成功不等于功能已可用。**
+- 用户已确认入口出现，但调节/保存无法使用，后续页面出现数值列表。回读为 `installed=1, fault=0, mode=0, dirty=0, generation=1`，LUT 仍为原厂。已定位缺少原厂子菜单 Page 层，以及负数不能直接作为界面枚举值。旧树经原厂分页函数会被解释为九页；旧 Save 节点经原厂选中行访问器得到空子项。
+- r2 修正版已构建为 42,812 字节，SHA-256 `e64867d24764725dfaf621e2ab9611f6d389f15b21cf6dad7daacd1c618492e1`。新增 Page 层，原厂访问器与动作处理函数能派发第二页第四项 Save；界面使用非负枚举，后端参数与存储仍为有符号值。颜色算法、保存格式及 LUT 基表未变。当前等待恢复 USB 连接后替换模块，尚未写入 r2。
+- **交互、保存及拍照验收尚未通过。入口可见、写入和回读成功不等于功能已可用。**
 
 ## 构建与验证顺序
 
@@ -34,6 +36,7 @@
 | 整合模块 | `research/native_module.py` | 编译实际模块并核对所有依赖证明 |
 | 文件安装器 | `research/native_install_test.py`、`research/native_install_build.py` | 故障注入，绑定真实模块，生成安装负载 |
 | 加载入口激活 | `research/native_menu_activate_test.py`、`research/native_menu_activate_build.py`、`camera/native_activate.py` | 原执行页隔离、原生文件写入、完整回读及撤销路径 |
+| 已装模块更新 | `research/native_module_replace_bind.py`、`camera/native_module_replace.py` | 仅在已知旧模块和加载器基线上，用新 inode 原子替换模块，保留旧模块备份 |
 | 重启后只读检查 | `research/native_inspect.py`、`camera/native_status.py` | 查询已加载模块、双槽配置及四张 LUT，不主动加载模块 |
 
 所有证明都绑定源码和输入散列。修改源码后重新运行对应测试及依赖构建；不要手动将旧证明改成通过。`ready_for_staging` 只允许安装文件，真机运行和冷启动验收单独记录。
@@ -55,6 +58,17 @@ python3 -m camera.native_activate --setting-menu activate --write-device
 # 冷启动、操作机身菜单并接回后，读取真实运行状态
 python3 -m camera.native_status
 ```
+
+已完成入口和资源安装的这台相机，r2 使用单模块更新，不重复执行首次安装或入口激活：
+
+```sh
+python3 -m camera.native_module_replace replace --offline --write-device
+python3 -m camera.native_module_replace replace --write-device
+# 断电重启并试用菜单后，只读检查 r2；此 bundle 仅提供身份数据，不执行其中的安装负载
+python3 -m camera.native_status --bundle .lab/native-install-bound-r2 --module-proof .lab/native-module/proof.json
+```
+
+该更新固定匹配旧模块 `2478cec2…`、新模块 `e64867d2…` 和加载器 `a1c4d8e8…`。同一认证会话核对机型、版本、旧完整文件及 WBI 为零，再原子发布 `/usr/lib/a7fl.so`；旧模块保存在 `/usr/lib/.a7fl-2478cec2.orig`。更新完成要求 `/setting/A7FLUP1.LOG` 完整、全文件回读一致、`/usr` 恢复只读。原进程仍映射旧 inode，新版在冷启动后加载；工具不会自动重试已有更新日志。
 
 连接需要既有 UTM / Sony 服务模式交接环境。第一次物理冷启动后检查菜单和保存，再次冷启动后检查配置及 LUT 是否恢复；必须读取状态 JSON 的实际字段，不能仅凭命令退出码判断功能通过。
 

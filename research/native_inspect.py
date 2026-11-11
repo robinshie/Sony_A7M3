@@ -16,7 +16,9 @@ def main():
  proof_path=a.module.parent/'proof.json';mp=json.loads(proof_path.read_text());module=ELF(a.module)
  assert mp['module_sha256']==sha(module.data) and mp['ready_for_staging'] and not mp['placeholder']
  for name,digest in mp['source_sha256'].items(): assert sha((R/name).read_bytes())==digest,name
- for name,digest in mp['dependency_proof_sha256'].items(): assert sha((R/'.lab'/name).read_bytes())==digest,name
+ for name,digest in mp['dependency_proof_sha256'].items():
+  dependency=R/'.lab'/name;assert sha(dependency.read_bytes())==digest,name
+  for path,value in json.loads(dependency.read_text())['source_sha256'].items():assert sha((R/path).read_bytes())==value,path
  data=(a.module.parent/'a7-fl-module-data.h').read_bytes()
  assert sha(data)==mp['artifact_sha256']['a7-fl-module-data.h']
  def array(name):
@@ -41,11 +43,17 @@ def main():
   symbol=module.symbols[name];pins+=pin(short+'_code',module.read(symbol['value']&~1,symbol['size']))
   pins+=f'static const uint32_t a7_inspect_{short}_va={symbol["value"]}u;\n'
  rw=[s for s in module.segments if s[0]==1 and s[6]==6];assert len(rw)==1
+ rx=[s for s in module.segments if s[0]==1 and s[6]==5];assert len(rx)==1 and rx[0][2]==0
+ rx_hi=(rx[0][4]+4095)&~4095;rw_lo=rw[0][2]&~4095;rw_file_hi=(rw[0][2]+rw[0][4]+4095)&~4095;rw_hi=(rw[0][2]+rw[0][5]+4095)&~4095
+ assert rx_hi<=rw_lo and rw_lo<rw_file_hi<=rw_hi
+ rx_map=f'60000000-{0x60000000+rx_hi:08x} r-xp 00000000 00:01 2 /usr/lib/a7fl.so\n'
+ all_maps=rx_map+f'{0x60000000+rw_lo:08x}-{0x60000000+rw_file_hi:08x} rw-p {rw[0][1]&~4095:08x} 00:01 2 /usr/lib/a7fl.so\n'
+ if rw_file_hi<rw_hi:all_maps+=f'{0x60000000+rw_file_hi:08x}-{0x60000000+rw_hi:08x} rw-p 00000000 00:00 0\n'
+ pins+='#define A7_INSPECT_TEST_MODULE_MAPS '+json.dumps(all_maps)+'\n#define A7_INSPECT_TEST_MODULE_RX '+json.dumps(rx_map)+'\n'
  pins+=f'static const uint32_t a7_inspect_rw_begin={rw[0][2]}u,a7_inspect_rw_end={rw[0][2]+rw[0][5]}u;\n'
  (O/'a7-fl-inspect-pins.h').write_text(pins)
  flags=['-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-I',str(R/'payloads'),'-I',str(R/'research'),'-I',str(O)]
  run(['arm-none-eabi-gcc',*flags,'-fPIC','-nostdlib','-shared','-Wl,-z,noexecstack','-Wl,--no-undefined',str(R/'payloads/a7-fl-inspect.c'),'-lgcc','-o',str(O/'inspect.so')])
- rx=[s for s in module.segments if s[0]==1 and s[6]==5];assert len(rx)==1 and rx[0][2]==0
  (O/'module-rx.bin').write_bytes(module.read(0,rx[0][4]))
  asm='.syntax unified\n.arm\n'
  ld='ENTRY(_start)\nSECTIONS {\n'
@@ -53,8 +61,8 @@ def main():
   asm+=f'.section .{name},"ax"\n.incbin "{name}.bin"\n.section .got_{name},"aw"\n.word mock_{name}\n'
   ld+=f'.{name} {0x40000000+address:#x} : {{ *(.{name}) }}\n.got_{name} {0x40000000+got:#x} : {{ *(.got_{name}) }}\n'
  asm+='.section .module,"ax"\n.incbin "module-rx.bin"\n.section .note.GNU-stack,"",%progbits\n'
- ld+='''.module 0x60000000 : { *(.module) }
- .module_data 0x60009000 (NOLOAD) : { . += 0x57000; }
+ ld+=f'.module 0x60000000 : {{ *(.module) }}\n.module_data {0x60000000+rw_lo:#x} (NOLOAD) : {{ . += {rw_hi-rw_lo:#x}; }}\n'
+ ld+='''
  . = 0x70000000; .text : { *(.text.start) *(.text*) } .rodata : { *(.rodata*) } .data : { *(.data*) }
  .bss (NOLOAD) : { __bss_start = .; *(.bss*) *(COMMON) . = ALIGN(8); __bss_end = .; }
 }

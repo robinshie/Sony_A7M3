@@ -94,7 +94,9 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
             NativeAdjustProperty *p=t->value_props[f][j];
             prop(p+0,0,0,native_adjust_number_resid(value));prop(p+1,6,0,s->help);
             prop(p+2,0xb,1,0);prop(p+3,0xc,1,1);
-            prop(p+4,0xf,1,(uint32_t)value);prop(p+5,0x10,1,(uint32_t)value);
+            /* Signed -1 is a missing-value sentinel in SettingMenu. Labels
+             * retain signed numbers; process values use nonnegative enums. */
+            prop(p+4,0xf,1,(uint32_t)(value-s->minimum));prop(p+5,0x10,1,(uint32_t)(value-s->minimum));
             t->value_properties[f][j]=(NativeAdjustProperties){p,5};
             construct(t,&t->values[f][j],0,0,&t->value_properties[f][j]);
             t->value_ptrs[f][j]=&t->values[f][j];
@@ -109,7 +111,13 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
     prop(t->root_props+0,0,0,title);prop(t->root_props+1,6,0,help);
     prop(t->root_props+2,0xb,1,2);prop(t->root_props+3,0xc,1,3);
     t->root_properties=(NativeAdjustProperties){t->root_props,3};
-    construct(t,&t->root,t->field_ptrs,NATIVE_ADJUST_FIELDS+1,&t->root_properties);
+    prop(t->page_props,0xb,1,0);
+    t->page_properties=(NativeAdjustProperties){t->page_props,0};
+    for(unsigned p=0;p<2;p++) {
+        construct(t,&t->pages[p],t->field_ptrs+p*6,p?3:6,&t->page_properties);
+        t->page_ptrs[p]=&t->pages[p];
+    }
+    construct(t,&t->root,t->page_ptrs,2,&t->root_properties);
     if(!((Init)(base+0x682869))(&t->root,0,0)) return 0;
     for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++) {
         if(!((Select)(base+0x682e59))(&t->fields[f],specs[f].maximum-specs[f].initial+1))
@@ -120,21 +128,35 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
     return 1;
 }
 int native_adjust_add_save(NativeAdjustTree *t,uint32_t title) {
-    if(!t || !title || t->root.parent || t->root.count!=NATIVE_ADJUST_FIELDS+1 ||
-       t->root.children!=t->field_ptrs || t->root.vtable!=t->node_vtable+2) return 0;
+    if(!t || !title || t->root.parent || t->root.count!=2 || t->pages[1].count!=3 ||
+       t->root.children!=t->page_ptrs || t->root.vtable!=t->node_vtable+2) return 0;
     NativeAdjustProperty *p=t->save_props;
     prop(p+0,0,0,title);prop(p+1,6,0,0);prop(p+2,0xb,1,2);
     prop(p+3,0xc,1,4);prop(p+4,0xe,1,NATIVE_ADJUST_SAVE_ID);
     t->save_properties=(NativeAdjustProperties){p,4};
     construct(t,&t->save,0,0,&t->save_properties);
     t->field_ptrs[NATIVE_ADJUST_FIELDS+1]=&t->save;
-    t->root.count=NATIVE_ADJUST_FIELDS+2;
+    t->pages[1].count=4;
     if(!initialize(&t->root,0,0,t->root.depth)) return 0;
     if(!((Select)(t->caution_base+0x682e59))(&t->mode,t->current_mode+1)) return 0;
     for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++)
         if(!((Select)(t->caution_base+0x682e59))(&t->fields[f],
                                             t->specs[f].maximum-t->current[f]+1)) return 0;
     return 1;
+}
+int native_adjust_encode(const NativeAdjustTree*t,int id,int value,int*out) {
+    if(!t||!out)return 0;
+    if(id==0x7000) {if(value!=0&&value!=1)return 0;*out=value;return 1;}
+    unsigned f=(unsigned)(id-NATIVE_ADJUST_ID_FIRST);if(f>=NATIVE_ADJUST_FIELDS)return 0;
+    if(value<t->specs[f].minimum||value>t->specs[f].maximum)return 0;
+    *out=value-t->specs[f].minimum;return 1;
+}
+int native_adjust_decode(const NativeAdjustTree*t,int id,int encoded,int*out) {
+    if(!t||!out)return 0;
+    if(id==0x7000) {if(encoded!=0&&encoded!=1)return 0;*out=encoded;return 1;}
+    unsigned f=(unsigned)(id-NATIVE_ADJUST_ID_FIRST);if(f>=NATIVE_ADJUST_FIELDS)return 0;
+    if(encoded<0||encoded>t->specs[f].maximum-t->specs[f].minimum)return 0;
+    *out=encoded+t->specs[f].minimum;return 1;
 }
 int native_adjust_read(const NativeAdjustTree *t,int process_id,int *value) {
     if(t && value && process_id==0x7000) {*value=t->current_mode;return 1;}

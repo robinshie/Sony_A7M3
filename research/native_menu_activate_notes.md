@@ -1,5 +1,15 @@
 # Native loader activation: staged files, private code pages, then VFS patches
 
+The original profile below installs the first GlobalMenu/StillView dual loader.
+The corrected `--setting-menu` profile upgrades that file to use the actual
+paged SettingMenu constructor. Its pages are `0x214000`, `0x20d000`, `0x5b9000`;
+its four ranges are unchanged cave A, corrected cave B, restoration of the
+GlobalMenu call at `0x20d068`, and the SettingMenu call at `0x21464a`.
+It uses separate `/setting/A7FL.RETARGET*` transaction logs. The original boot
+hook and module call ABI remain unchanged. Build/test with
+`research/native_menu_activate_test.py --setting-menu` and set
+`A7M3_TEST_FIRMWARE_LAB` to the private local firmware/ARM Linux fixture directory.
+
 This helper activates only the already-tested loader in `viewUnified2.so`.
 It does not install the module or locales, change LUTs, format a partition,
 write a raw device, stop threads, or reboot. The module and both locales must

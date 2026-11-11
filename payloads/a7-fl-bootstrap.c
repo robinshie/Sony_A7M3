@@ -141,7 +141,7 @@ static int prepare(void) {
     a7_fl_posix_io(&p->storage);
     if(!identity(0))return A7_FL_MODULE_WITNESS;
     /* Color startup does not dereference menu/model objects. The menu-specific
-     * profile is validated later, at the original GlobalMenu construction seam. */
+     * profile is validated later, at the original SettingMenu construction seam. */
     p->creative_style=(void *)(boot.caution+0xa75ff4);
     p->parents[0]=(void *)(boot.view+0xa6dfa4);p->parent_count=1;
     int rc=a7_fl_prepare(p);

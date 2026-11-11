@@ -18,13 +18,21 @@ Requires `arm-none-eabi-gcc` and `qemu-system-arm`. It reads locally supplied
 firmware and writes extracted Sony bytes only under ignored `.lab/native-adjust`.
 The fixture pins original `CautionConfig.so` SHA-256 to
 `0b9f2b855c032fc36cc83386a1fe706a8b59042e52702035a7d1a293b4e9f8a0`.
-The latest run passed **1,163 checks**. `.lab/native-adjust/report.json` records
+The latest run passed **1,310 checks**. `.lab/native-adjust/report.json` records
 component hashes and scope. The checks cover:
 
 - Original constructors and original node vtable dispatch, parent linkage, a
   group containing Off/FL and eight adjustment fields.
-- Original binary-search property getters, signed values and native numeric
+- Original binary-search property getters, nonnegative UI enums and native numeric
   labels, selection and forward navigation.
+- The actual `PAS_SelectListTab` layer-one traversal reads two pages with six
+  and four rows. A negative control reproduces the prior flat-tree bug: direct
+  fields beneath the root are interpreted as pages and numeric options become
+  page contents. Page wrappers are required even though the old generic node
+  construction and lifetime tests passed.
+- Signed backend values round-trip through nonnegative model enums. Native
+  `SettingMenu` uses `-1` as an unavailable-value sentinel, so a real adjustment
+  of `-1` must never be passed directly to the UI model interface.
 - Accepted callback updates followed by original cursor selection; rejected
   callbacks preserve the value and cursor.
 - Same-value updates restore a cursor reset by original parent initialization
@@ -37,8 +45,8 @@ component hashes and scope. The checks cover:
   call the recording backend.
 - Real stock destruction of an owning heap parent with an embedded child,
   destruction of an uninitialized shallow clone, and destruction of an
-  initialized deep clone, with and without the optional Save row: 490 native
-  allocations and 490 frees, with no free of
+  initialized deep clone, with and without the optional Save row: 498 native
+  allocations and 498 frees, with no free of
   embedded storage, no double free, and surviving original embedded graph.
 - Capability grayout remains correct in all eight fields after original native
   deep cloning and initialization.
@@ -55,7 +63,9 @@ builder currently assigns root `0x0204fd9e`, FL `0x0204fd9f`, and eight labels
 **inclusive last index**, not a count: original search at `0x6835b2` tests
 `low <= high`. Properties are sorted `(key, type, value)` triples of 12 bytes.
 
-`native_adjust_build` constructs one group with these custom process-data IDs:
+`native_adjust_build` constructs one group containing two kind-0 page wrappers,
+six rows on the first page and three on the second (four with Save), using these
+custom process-data IDs:
 
 | ID | Field | Intended backend |
 |---|---|---|
@@ -77,13 +87,17 @@ verified backend. Mode is always available; the callback must reject unsafe
 operations. There is no hidden Picture Profile activation.
 
 `native_adjust_read`/`native_adjust_write` return 1 for success, 0 for rejection.
+These APIs retain signed backend values. The process-manager boundary must use
+`native_adjust_encode` and `native_adjust_decode`: scalar enums are
+`value - minimum`, while mode remains 0/1. Invalid enums, including `-1`, are
+rejected without changing output. Persistence and LUT parameters remain signed.
 The `apply(context, field, value)` callback must also return nonzero only when
 the **real backend accepted** the change. Field indices are 0..7 in table order;
 mode uses `NA_MODE == 8`. Callbacks happen before stored value/cursor updates.
 Persistence and loading saved state are the integration's responsibility.
 
-`native_adjust_add_save(tree, 0x0204eaab)` optionally appends an explicit tenth
-row before attachment or cloning. The existing stock resource is 保存 / Save.
+`native_adjust_add_save(tree, 0x0204eaab)` optionally appends the fourth row of
+the second page before attachment or cloning. The stock resource is 保存 / Save.
 It uses kind 2, execution 4, process `0x7009`, no children and no scalar value.
 The integration must bind the original manager execution callback separately.
 Calling it twice, using a missing title, or modifying an attached tree fails.
@@ -92,9 +106,11 @@ original action nodes, no subtree recursion is performed for this child. The
 function restores all current scalar and mode cursors after reinitialization.
 
 The root has kind `0xb = 2`, execution `0xc = 3` (generic group, as used by the
-original PP Detail group). Each scalar node has kind 2, execution 0, process ID
-at key `0xe`. Leaves have kind 0, execution 1, signed value at both `0xf` and
-`0x10`. The original mode/list code compares key `0x10`, falling back to `0xf`.
+original PP Detail group). Its children are page nodes with the single property
+`0xb = 0`; each page contains at most six field/action rows. Each scalar node has
+kind 2, execution 0, process ID at key `0xe`. Leaves have kind 0, execution 1,
+nonnegative enum at both `0xf` and `0x10`. The original mode/list code compares
+key `0x10`, falling back to `0xf`.
 Off uses existing resource `0x0204e0d2`; signed numeric labels -15..+15 use
 `0x0204e7ad + value`, except zero uses `0x0204e39c`.
 
@@ -154,6 +170,13 @@ Original exported generic utility functions in `viewUnified2.so` also exist at
 `initWidgetForLvWithUpperLabel = 0x399ae5`. The separate `native_menu` component
 hooks the central process-data manager for the custom IDs and delegates other
 IDs to original code.
+
+The fixture executes original `PAS_SelectListTab::initMenuDataForList` at
+`0x5741bd` and its layer-one worker at `0x5740d4`. Rendering setters are recording
+stubs; node traversal is original code. The original PP Detail root array
+`CautionConfig.so:0x9b3e7c` points to Page1, whose kind-only property list is
+`0x7ec7bc`; the page array `0x99eb94` then points to its field rows. This
+distinction was missing in the first deployed graph and caused numeric pages.
 
 ## Detail, sharpness range and clarity: evidence boundary
 

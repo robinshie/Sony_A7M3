@@ -17,16 +17,14 @@ static int same(const void*a,const void*b,unsigned n){for(unsigned i=0;i<n;i++)i
 static const char maps_full[]=
  "40000000-40800000 r-xp 00000000 00:01 1 /usr/lib/viewUnified2.so\n"
  "40800000-40900000 rw-p 00800000 00:01 1 /usr/lib/viewUnified2.so\n"
- "60000000-60009000 r-xp 00000000 00:01 2 /usr/lib/a7fl.so\n"
- "60009000-6000a000 rw-p 00009000 00:01 2 /usr/lib/a7fl.so\n"
- "6000a000-60060000 rw-p 00000000 00:00 0\n";
+ A7_INSPECT_TEST_MODULE_MAPS;
 static const char maps_absent[]=
  "40000000-40800000 r-xp 00000000 00:01 1 /usr/lib/viewUnified2.so\n"
  "40800000-40900000 rw-p 00800000 00:01 1 /usr/lib/viewUnified2.so\n";
 static const char maps_no_data[]=
  "40000000-40800000 r-xp 00000000 00:01 1 /usr/lib/viewUnified2.so\n"
  "40800000-40900000 rw-p 00800000 00:01 1 /usr/lib/viewUnified2.so\n"
- "60000000-60009000 r-xp 00000000 00:01 2 /usr/lib/a7fl.so\n";
+ A7_INSPECT_TEST_MODULE_RX;
 static const char maps_overlap[]=
  "40000000-40800000 r-xp 00000000 00:01 1 /usr/lib/viewUnified2.so\n"
  "40001000-40900000 rw-p 00800000 00:01 1 /usr/lib/viewUnified2.so\n";
