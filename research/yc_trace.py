@@ -25,7 +25,7 @@ PINS={
     'libmpr.so':'16b0260a33748838ba05fdb79e11392e7562052f79ed072123b1bf991bab966d',
 }
 SOURCES=('research/yc_trace.py','research/yc_trace_hook.S','research/yc_trace_hook_test.c',
-         'research/yc_trace_probe.c','payloads/a7-runtime-probe.c','ui/start.S')
+         'research/yc_trace_probe.c','research/yc_trace_probe_test.c','payloads/a7-runtime-probe.c','ui/start.S')
 GETTER='_ZN26C_DataflowInfra_StdData_YC22GetEntry_ImageSizeInfoEP35C_DataflowInfra_Entry_ImageSizeInfo'
 PROFILES={
     'metadata':(0,'dataflowInfraFramework.so',GETTER,0x126ce20,0x22301,12),
@@ -69,11 +69,26 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
            capture_output=True,timeout=20)
     log=t.stdout+t.stderr;(out/'qemu.log').write_bytes(log);print(log.decode(),end='')
     require(b'YC_TRACE_HOOK_PASSED' in log and b'FAIL' not in log,'Hook test failed')
+    require(obj.word(slots[0])==0xffc24 and obj.relocations[0x126c750][1]['name']=='dlsym','Unexpected lazy binding ABI')
+    require(obj.read(0x104ae4,12).hex()=='11c68fe267ca8ce264fcbce5','Unexpected dlsym PLT')
     header=f'#define A7YC_SLOT {slots[0]}u\n#define A7YC_ORIGINAL {original["value"]&~1}u\n#define A7YC_STATE_LITERAL {literal}u\n'
+    header+=f'#define A7YC_LAZY 0xffc24u\n#define A7YC_DLSYM 0x104ae4u\n#define A7YC_SYMBOL "{symbol}"\n'
     header+=f'#define A7YC_TARGET_PATH "/usr/lib/{target}"\n#define A7YC_KIND {mode}u\n'
     header+=array('object_header',obj.data[:64])+array('flow_header',flow.data[:64])
     header+=array('original_pin',flow.read(original['value']&~1,original['size']))+array('hook_code',code)
-    (out/'yc-trace-pins.h').write_text(header)
+    header+=array('lazy_pin',obj.read(0xffc24,20))+array('dlsym_pin',obj.read(0x104ae4,12))
+    (out/'yc-trace-pins.h').write_text('#ifndef A7YC_PINS_H\n#define A7YC_PINS_H\n'+header+'#endif\n')
+    run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mno-unaligned-access','-O2',
+         '-ffreestanding','-fno-builtin','-nostdlib','-Wall','-Wextra','-Werror',
+         '-Wno-misleading-indentation','-I',str(out),'-T',str(out/'test.ld'),
+         str(ROOT/'ui/start.S'),str(ROOT/'research/yc_trace_probe_test.c'),
+         '-lgcc','-o',str(out/'probe-test.elf')])
+    t=run(['qemu-system-arm','-M','realview-pbx-a9','-smp','1','-m','64','-nodefaults',
+           '-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio',
+           '-semihosting-config','enable=on,target=native','-device',f'loader,file={out}/probe-test.elf,cpu-num=0'],
+           capture_output=True,timeout=20)
+    probe_log=t.stdout+t.stderr;(out/'probe-qemu.log').write_bytes(probe_log);print(probe_log.decode(),end='')
+    require(b'YC_TRACE_PROBE_PASSED' in probe_log and b'FAIL' not in probe_log,'Import lifecycle test failed')
     for action,index in (('install',0),('read',1),('stop',2)):
         run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access',
              '-fPIC','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
@@ -81,7 +96,8 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
              '-Wno-unused-function','-Wno-misleading-indentation','-I',str(ROOT/'payloads'),'-I',str(out),
              f'-DACTION={index}',str(ROOT/'research/yc_trace_probe.c'),'-lgcc','-o',str(out/f'{action}.so')])
     (out/'proof.json').write_text(json.dumps(dict(source_sha256={n:sha((ROOT/n).read_bytes()) for n in SOURCES},
-        library_sha256={n:PINS[n] for n in elves},kind=kind,version=2,hook_sha256=sha(code),qemu_log_sha256=sha(log),
+        library_sha256={n:PINS[n] for n in elves},kind=kind,version=3,hook_sha256=sha(code),qemu_log_sha256=sha(log),
+        probe_qemu_log_sha256=sha(probe_log),
         payload_sha256={a:sha((out/f'{a}.so').read_bytes()) for a in ('install','read','stop')},
         scope='Temporary bounded metadata import hook; no pixel writes or firmware replacement',
         camera_executed=False,capture_path_verified=False),indent=2)+'\n')
@@ -95,7 +111,7 @@ FIELDS={'attached':(0,1),'unit_type':(4,4),'unit_handle':(8,2),'unit_data_offset
 def decode(raw):
     require(len(raw)==10344,'Unexpected report length')
     h=struct.unpack_from('<3Ii6I',raw)
-    require(h[:2]==(0x41375950,2),'Unexpected report identity')
+    require(h[:2]==(0x41375950,3),'Unexpected report identity')
     state=struct.unpack_from('<16I',raw,40);rows=[]
     require(state[5]<=127,'Unexpected trace count')
     def record(i):
@@ -106,7 +122,7 @@ def decode(raw):
         rows.append(record(i))
     return dict(status=h[3],action=h[2],object_base=hex(h[4]),target_base=hex(h[5]),
         code=hex(h[6]),state=hex(h[7]),slot=hex(h[8]),original=hex(h[9]),
-        armed=state[4],count=state[5],dropped=state[6],records=rows,observed_calls=state[8],failures=state[9],last_error=state[10]-(1<<32) if state[10]>>31 else state[10],
+        armed=state[4],count=state[5],dropped=state[6],records=rows,observed_calls=state[8],failures=state[9],last_error=state[10]-(1<<32) if state[10]>>31 else state[10],restore_slot=hex(state[13]),
         largest_area=state[11],kind=state[12],largest=record(127) if state[11] else None,
         pixel_buffer_exported=False,capture_path_verified=False,firmware_replaced=False)
 
