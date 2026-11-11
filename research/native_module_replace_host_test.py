@@ -6,7 +6,9 @@ from types import SimpleNamespace
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from camera import native_module_replace as host
 from local import BUILD_ID
-B=ROOT/'.lab/native-module-replace-bound-r1';bundle=host.Bundle(B);m=bundle.manifest
+import argparse
+parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--binding',type=Path,default=ROOT/'.lab/native-module-replace-bound-r1');args=parser.parse_args()
+B=args.binding.resolve();bundle=host.Bundle(B);m=bundle.manifest
 old=(B/'old-module.so').read_bytes();new=(B/'new-module.so').read_bytes();view=(ROOT/'.lab/native-setting-loader/viewUnified2.so').read_bytes()
 checks=0
 def check(ok,label):

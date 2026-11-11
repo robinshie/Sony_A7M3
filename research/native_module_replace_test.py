@@ -37,7 +37,7 @@ class Env:
   self.root=Path(folder);self.lib=self.root/'usr/lib';self.setting=self.root/'setting';self.lib.mkdir(parents=True);self.setting.mkdir()
   (self.lib/'a7fl.so').write_bytes(OLD);(self.lib/'viewUnified2.so').write_bytes(VIEW)
   self.calls=0;self.fail_at=0;self.fds={};self.ro=True;self.fail_ro=False;self.chunk=0;self.stage_writes=0;self.partial_failure=False;self.error=None
-  self.model=1;self.version=b'37114_13.2026020901';self.block_ro=0;self.space=10000
+  self.model=1;self.version=b'37114_13.2026020901';self.block_ro=0;self.space=10000;self.owner_overrides={}
   self.callback=CALL(self.invoke);self.identity=IDENTITY(lambda _:self.model)
  def allocate(self,item):
   fd=10
@@ -89,7 +89,9 @@ class Env:
   if nr==6:self.close(a);return 0
   if nr==197:
    item=self.fds[a];s=os.fstat(item[1]);raw=bytearray(104)
-   struct.pack_into('<Q',raw,0,s.st_dev);struct.pack_into('<III',raw,16,s.st_mode,s.st_nlink,0)
+   original=item[2] in (self.lib,self.lib/'viewUnified2.so')
+   uid,gid=self.owner_overrides.get(str(item[2].relative_to(self.root)),(57285,1000) if original else (0,0))
+   struct.pack_into('<Q',raw,0,s.st_dev);struct.pack_into('<IIII',raw,16,s.st_mode,s.st_nlink,uid,gid)
    struct.pack_into('<Q',raw,48,s.st_size);struct.pack_into('<Q',raw,96,s.st_ino);C.memmove(b,bytes(raw),104);return 0
   if nr==3:
    item=self.fds[a];size=min(c,self.chunk) if self.chunk else c
@@ -157,12 +159,21 @@ def main():
    env=Env(td);setattr(env,field,value);r=run(env);check(r.status!=0 and not env.stage_writes,'identity/build/block/space guard rejects')
  with tempfile.TemporaryDirectory(dir=OUT) as td:
   env=Env(td);env.fail_ro=True;r=run(env);check(r.status==-4 and not r.readonly_confirmed,'persistent remount-ro failure remains explicit')
+ # Actual Sony stat64 reports: original /usr/lib and view owner57285:1000;
+ # our installed module is0:0. The previous blanket uid0 guard rejected them.
+ for path,owner,phase in [('usr/lib',(0,0),1006),('usr/lib',(57285,0),1006),
+                          ('usr/lib/viewUnified2.so',(0,0),1008),
+                          ('usr/lib/a7fl.so',(57285,1000),1007),('setting',(57285,1000),1006)]:
+  with tempfile.TemporaryDirectory(dir=OUT) as td:
+   env=Env(td);env.owner_overrides[path]=owner;r=run(env)
+   check(r.status!=0 and r.phase==phase and not env.stage_writes and not (env.setting/'A7FLUP1.LOG').exists(),
+         'per-path unexpected owner rejects before any mutation: '+path)
  for name in ('native_module_replace','native_module_replace_linux'):
   subprocess.run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-ffreestanding','-fno-builtin','-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-fPIC','-c',str(ROOT/'research'/f'{name}.c'),'-o',str(OUT/f'{name}.o')],check=True)
  subprocess.run(['arm-none-eabi-ld','-shared','--no-undefined','-z','noexecstack',str(OUT/'native_module_replace.o'),str(OUT/'native_module_replace_linux.o'),'-o',str(OUT/'unbound-core.so')],check=True)
  files=['research/native_module_replace.c','research/native_module_replace.h','research/native_module_replace_linux.c','research/native_module_replace_test.py','payloads/sha256.h']
  h=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
- proof={'checks':checks,'fault_points':total,'source_sha256':{p:h(ROOT/p) for p in files},'arm_core_sha256':h(OUT/'unbound-core.so'),
+ proof={'checks':checks,'fault_points':total,'owner_profile':{'/usr/lib':[57285,1000],'/usr/lib/viewUnified2.so':[57285,1000],'/usr/lib/a7fl.so':[0,0],'/setting':[0,0]},'source_sha256':{p:h(ROOT/p) for p in files},'arm_core_sha256':h(OUT/'unbound-core.so'),
         'bound':False,'deployed':False,'scope':'Real private host file I/O/link/rename/fsync, modeled ARM metadata/mount/identity syscalls; no camera or resident-process changes.'}
  (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n');print('NATIVE_MODULE_REPLACE_CHECKS',checks,'FAULT_POINTS',total);print('NATIVE_MODULE_REPLACE_TESTS_PASSED')
 if __name__=='__main__':main()

@@ -12,14 +12,15 @@
 
 ## 当前安装记录（2026-11-11）
 
-- 真机已安装 `/usr/lib/a7fl.so`，大小 42,208 字节，SHA-256 `2478cec27f88e838f03915da36ac09c66efff9d6a3bd53d59fc487f6cd345aac`。
+- 真机已更新 `/usr/lib/a7fl.so` 为 r2，大小 42,812 字节，SHA-256 `e64867d24764725dfaf621e2ab9611f6d389f15b21cf6dad7daacd1c618492e1`。旧版 42,208 字节模块（SHA-256 `2478cec27f88e838f03915da36ac09c66efff9d6a3bd53d59fc487f6cd345aac`）保存在 `/usr/lib/.a7fl-2478cec2.orig`。
 - 简体中文和英文资源已写入，原资源分别链接为 `.a7fl-zh.orig`、`.a7fl-en.orig`。启动快照曾带回旧目录缓存：raw 目录使用新 inode 16687/16688，VFS 却恢复旧 inode 16523/16411。按原厂升级步骤使旧 WBI 头失效后，用户断电重启，新目录与两份完整语言资源校验均通过。没有在旧缓存视图中重复安装文件。
 - 文件安装器完成阶段 100，三份文件均发布，两个原资源备份均存在，`/usr` 已恢复只读。安装日志位于 `/setting/A7FL.INSTALL`。
 - 配置文件 `/setting/A7FL0.CFG` 已通过真实 ARM 文件读写、同步和回读验证，当前为 generation 1、FL 关闭。四张 LUT 回读仍为原厂值。
 - 分页菜单修正版已写入：完整 `viewUnified2.so`（10,854,816 字节）SHA-256 为 `a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7`。修正日志 `/setting/A7FL.RETARGET` 完成阶段 100，3 个当前执行页面保留旧私有副本，`/usr` 恢复只读。保留已验证的启动钩子，恢复旧 GlobalMenu 调用，改接 SettingMenu 构造入口。新入口在下次冷启动生效。
 - 首次 GlobalMenu 版本曾正常开机但未出现入口；只读状态确认模块加载和颜色初始化成功，配置为关闭、四张 LUT 保持原厂值。已据此改接实际分页 SettingMenu，并执行原始构造函数及初始化至菜单树深度初始化调用的 ARM 验证。
 - 用户已确认入口出现，但调节/保存无法使用，后续页面出现数值列表。回读为 `installed=1, fault=0, mode=0, dirty=0, generation=1`，LUT 仍为原厂。已定位缺少原厂子菜单 Page 层，以及负数不能直接作为界面枚举值。旧树经原厂分页函数会被解释为九页；旧 Save 节点经原厂选中行访问器得到空子项。
-- r2 修正版已构建为 42,812 字节，SHA-256 `e64867d24764725dfaf621e2ab9611f6d389f15b21cf6dad7daacd1c618492e1`。新增 Page 层，原厂访问器与动作处理函数能派发第二页第四项 Save；界面使用非负枚举，后端参数与存储仍为有符号值。颜色算法、保存格式及 LUT 基表未变。当前等待恢复 USB 连接后替换模块，尚未写入 r2。
+- r2 新增 Page 层，原厂访问器与动作处理函数能派发第二页第四项 Save；界面使用非负枚举，后端参数与存储仍为有符号值。颜色算法、保存格式及 LUT 基表未变。单模块更新日志 `/setting/A7FLUP1.LOG` 已完成阶段 100，新模块及旧备份完整回读通过，加载器与 WBI 均不变，`/usr` 恢复只读；待用户冷启动验证交互。
+- 更新器预检曾错误要求所有文件归 root 所有，因而在阶段 1006 拒绝原厂目录，没有开始写入。依据已有真机元数据修正为按路径核对所有者后，r1b 更新器通过预检并完成上述更新；没有修改相机文件权限。
 - **交互、保存及拍照验收尚未通过。入口可见、写入和回读成功不等于功能已可用。**
 
 ## 构建与验证顺序
@@ -62,8 +63,8 @@ python3 -m camera.native_status
 已完成入口和资源安装的这台相机，r2 使用单模块更新，不重复执行首次安装或入口激活：
 
 ```sh
-python3 -m camera.native_module_replace replace --offline --write-device
-python3 -m camera.native_module_replace replace --write-device
+python3 -m camera.native_module_replace replace --binding .lab/native-module-replace-bound-r1b --offline --write-device
+python3 -m camera.native_module_replace replace --binding .lab/native-module-replace-bound-r1b --write-device
 # 断电重启并试用菜单后，只读检查 r2；此 bundle 仅提供身份数据，不执行其中的安装负载
 python3 -m camera.native_status --bundle .lab/native-install-bound-r2 --module-proof .lab/native-module/proof.json
 ```

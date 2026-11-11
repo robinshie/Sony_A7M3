@@ -20,8 +20,10 @@ void nmr_binding(const NMRBundle*b,unsigned char out[32]){Sha256 h;sha_init(&h);
 static long sc(Work*w,long n,long a,long b,long c,long d,long e,long f){long r=w->call(w->ctx,n,a,b,c,d,e,f);if(r<0&&!w->r->first_error)w->r->first_error=(int)r;return r;}
 static int closefd(Work*w,int fd){return sc(w,CLOSE,fd,0,0,0,0,0)==0;}
 /* ARM EABI stat64 is104bytes: dev0,mode16,nlink20,uid24,size48,ino96. */
-static int statfd(Work*w,int fd,File*f){union{uint64_t aligned;unsigned char b[104];}s;zero(&s,sizeof s);
- if(sc(w,FSTAT,fd,(long)s.b,0,0,0,0)||u32(s.b+24)||u64(s.b+48)>0xffffffffu)return 0;
+/* Original Sony /usr/lib and view inode retain uid57285/gid1000; the new
+ * module/backup and /setting are root-owned. Ownership is path-specific. */
+static int statfd(Work*w,int fd,File*f,unsigned uid,unsigned gid){union{uint64_t aligned;unsigned char b[104];}s;zero(&s,sizeof s);
+ if(sc(w,FSTAT,fd,(long)s.b,0,0,0,0)||u32(s.b+24)!=uid||u32(s.b+28)!=gid||u64(s.b+48)>0xffffffffu)return 0;
  f->dev=u64(s.b);f->ino=u64(s.b+96);f->mode=u32(s.b+16);f->links=u32(s.b+20);f->size=(uint32_t)u64(s.b+48);return f->ino!=0;}
 static int ident(const File*a,const File*b){return a->dev==b->dev&&a->ino==b->ino;}
 static int absent(Work*w,int dir,const char*name){long fd=w->call(w->ctx,OPENAT,dir,(long)name,NOFOLLOW|NONBLOCK,0,0,0);
@@ -30,9 +32,11 @@ static int hashfd(Work*w,int fd,unsigned size,const unsigned char expected[32]){
  for(;;){long n=sc(w,RD,fd,(long)w->buffer,sizeof w->buffer,0,0,0);if(n<0||(unsigned)n>sizeof w->buffer){ok=0;break;}if(!n)break;
   if(used>size||(unsigned)n>size-used){ok=0;break;}sha_update(&h,w->buffer,(unsigned)n);used+=(unsigned)n;}
  sha_finish(&h,sum);return ok&&used==size&&same(sum,expected,32);}
+static int named(const char*a,const char*b){while(*a&&*a==*b){a++;b++;}return *a==*b;}
 static int file(Work*w,int dir,const char*name,unsigned size,const unsigned char hash[32],unsigned links,const File*expected,File*out){
  int fd=(int)sc(w,OPENAT,dir,(long)name,NOFOLLOW|NONBLOCK,0,0,0);if(fd<0)return 0;File a,b;
- int ok=statfd(w,fd,&a)&&(a.mode&0xf000)==0x8000&&a.links==links&&a.size==size&&(!expected||ident(&a,expected))&&hashfd(w,fd,size,hash)&&statfd(w,fd,&b)&&ident(&a,&b)&&a.size==b.size&&a.links==b.links;
+ unsigned original=named(name,"viewUnified2.so"),uid=original?57285:0,gid=original?1000:0;
+ int ok=statfd(w,fd,&a,uid,gid)&&(a.mode&0xf000)==0x8000&&a.links==links&&a.size==size&&(!expected||ident(&a,expected))&&hashfd(w,fd,size,hash)&&statfd(w,fd,&b,uid,gid)&&ident(&a,&b)&&a.size==b.size&&a.links==b.links;
  if(!closefd(w,fd))ok=0;if(ok&&out)*out=a;return ok;}
 static int writeall(Work*w,int fd,const void*p,unsigned size){const unsigned char*s=p;while(size){long n=sc(w,WR,fd,(long)s,size,0,0,0);if(n<=0||(unsigned)n>size)return 0;s+=n;size-=(unsigned)n;}return 1;}
 static int journal(Work*w,unsigned phase){struct{uint32_t magic,sequence,phase,created,backed,published;unsigned char binding[32],hash[32];}v;
@@ -57,7 +61,7 @@ static int preflight(Work*w,NMRIdentity identity,void*ctx){
  w->r->phase=1006;
  w->lib=(int)sc(w,OPEN,(long)"/usr/lib",DIRECTORY|NOFOLLOW,0,0,0,0);if(w->lib<0)return 0;
  w->setting=(int)sc(w,OPEN,(long)"/setting",DIRECTORY|NOFOLLOW,0,0,0,0);if(w->setting<0)return 0;
- File d;if(!statfd(w,w->lib,&d)||(d.mode&0xf000)!=0x4000||!statfd(w,w->setting,&d)||(d.mode&0xf000)!=0x4000)return 0;
+ File d;if(!statfd(w,w->lib,&d,57285,1000)||(d.mode&0xf000)!=0x4000||!statfd(w,w->setting,&d,0,0)||(d.mode&0xf000)!=0x4000)return 0;
  w->r->phase=1007;if(!file(w,w->lib,current,w->b->old_size,w->b->old_sha,1,0,&w->old))return 0;
  w->r->phase=1008;if(!file(w,w->lib,"viewUnified2.so",w->b->view_size,w->b->view_sha,1,0,0))return 0;
  w->r->phase=1009;return absent(w,w->lib,temporary)&&absent(w,w->lib,backup)&&absent(w,w->setting,logname);
@@ -65,7 +69,7 @@ static int preflight(Work*w,NMRIdentity identity,void*ctx){
 static int unlink_owned_temp(Work*w){
  if(!w->r->created)return 1;File*expected=w->temp_old?&w->old:&w->new_file;
  if(!expected->ino)return 0;int fd=(int)sc(w,OPENAT,w->lib,(long)temporary,NOFOLLOW|NONBLOCK,0,0,0);if(fd<0)return 0;File st;
- int ok=statfd(w,fd,&st)&&ident(&st,expected)&&(st.mode&0xf000)==0x8000;if(!closefd(w,fd))ok=0;
+ int ok=statfd(w,fd,&st,0,0)&&ident(&st,expected)&&(st.mode&0xf000)==0x8000;if(!closefd(w,fd))ok=0;
  if(!ok||sc(w,UNLINKAT,w->lib,(long)temporary,0,0,0,0))return 0;w->r->created=0;return sc(w,SYNC,w->lib,0,0,0,0,0)==0;
 }
 static int rollback(Work*w){int ok=1;
@@ -94,7 +98,7 @@ int nmr_run(const NMRBundle*b,const unsigned char expected[32],NMRCall call,void
  if(!journal(&w,1)||sc(&w,SYNC,w.setting,0,0,0,0,0)||!remount(&w,0))goto done;w.rw=1;r->readonly_confirmed=0;
  if(!mount_is(&w,0)||!journal(&w,2)||!journal(&w,10))goto fail;
  int fd=(int)sc(&w,OPENAT,w.lib,(long)temporary,1|CREAT|EXCL|NOFOLLOW|NONBLOCK,0555,0,0);if(fd<0)goto fail;r->created=1;
- int ok=statfd(&w,fd,&w.new_file)&&(w.new_file.mode&0xf000)==0x8000&&w.new_file.links==1&&w.new_file.size==0&&
+ int ok=statfd(&w,fd,&w.new_file,0,0)&&(w.new_file.mode&0xf000)==0x8000&&w.new_file.links==1&&w.new_file.size==0&&
         writeall(&w,fd,b->new_bytes,b->new_size)&&sc(&w,SYNC,fd,0,0,0,0,0)==0;
  if(!closefd(&w,fd))ok=0;
  if(!ok||!file(&w,w.lib,temporary,b->new_size,b->new_sha,1,&w.new_file,0)||sc(&w,SYNC,w.lib,0,0,0,0,0)||!journal(&w,20))goto fail;
