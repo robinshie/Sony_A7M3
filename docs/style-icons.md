@@ -2,11 +2,44 @@
 
 2026-11-11。v3 已修复名称与列表定位，但图标仍沿用中性风格。本包以精确匹配的 v3 镜像为前置，增加 Fn 的 RW 徽标，以及 MENU 列表和选中页的大小图标。它没有增加 FL 或改变 +1、−1、−1 配方。
 
-第一版已完成写入、断电重启后的整文件直接回读、运行菜单和参数检查；用户补测发现展开后的竖向列表仍显示 Ntrl。第二版补齐该路径，已写入并完成 9 个扇区、26,481,288 字节图标文件直接散列、运行菜单、名称定位和 +1、−1、−1 参数回读。第二版断电重启后的屏幕复测仍待用户确认。
+第一、二版已完成写入和文件回读；第二版断电重启后，用户照片明确显示左侧选中项及底部参数栏仍为 Ntrl，尽管标题和 +1、−1、−1 正确。第二版不能记作屏幕验收通过。第三版针对照片中的两条实际显示路径修正，状态如下。
+
+## 第三版：左侧选中项和底部参数栏
+
+只读诊断发现，进程映射中的新资源 `0x5c049/0x5c04a` 索引仍为 `0xffff`，虽然磁盘直接散列正确；三个既有槽 3 资源的索引、记录长度及压缩流散列与第二版完全一致。因此新增菜单行改用已正确映射的 `0x0205c87e`（116×100）及 `0x0205c823`（70×60）。不改其他 19 行的图标，不再依赖两个新索引。
+
+底部并不直接使用新增菜单行的图标。原厂 `0x5b9c60` 显示函数在 `0x5b9e36` 按 `style - 1` 选择 `PAS_BtnComboIcon` 的项目，Neutral/槽 3 仍得到原厂中性图片。本次在这条路径上，仅当 `style=3, box=3` 时，将控件自己的 Neutral 图片换成同尺寸 RW；其他组合恢复原厂 Neutral。仍由原厂 `0x56a334` 绘制，返回的选择索引保持 0–12，不向模型提交新风格编号。控件数量、数据指针和原资源值均有检查。
+
+另外，原厂创建控件时使用 `根节点数量 - 6`。新增第 20 行会让底部误加入一个样式框项目。本版将此处保持为原厂 13 个基础风格；新增复古衣橱入口仍位于主列表末尾。
+
+本版仅改变 `viewUnified2.so` 中 74 个字节、3 个扇区，已完成真机写入和逐扇区回读一致检查。底部调用所在扇区最后写入。图像资源、两种语言资源和配方保持第二版原值。重启后的显示验收尚未完成。
+
+构建与验证（需要已经保存的第二版本地包及原始 4.04 解包文件）：
+
+```sh
+python3 research/menu_icons_display.py \
+  --usr "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha15_unpacked" \
+  --kernel /path/to/vmlinuz-lts \
+  --busybox /path/to/alpine-root/bin/busybox \
+  --sony-root "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha7_unpacked"
+python3 research/build_creative_icons_display.py
+python3 research/creative_icons_display_test.py \
+  --kernel /path/to/vmlinuz-lts \
+  --busybox /path/to/alpine-root/bin/busybox \
+  --sony-root "$A7M3_FIRMWARE_ROOT/0700_part_image/dev/nflasha7_unpacked"
+python3 research/check_creative_image.py .lab/creative-icons-display
+python3 a7m3.py creative-icons-display --write-device
+# 断电重启，从 MENU 选择复古衣橱，检查左侧及底部 RW，再接回 USB/UTM。
+python3 a7m3.py creative-verify-icons-display
+```
+
+QEMU 已执行原厂完整显示函数和原厂图标选择/绘制函数，覆盖 234 次切换（6 槽 × 13 风格 × 3 轮）、异常控件保护、19 行保留和固定 13 个模型索引。外部 GUI 绘制端点用测试桩记录收到的资源 ID，不模拟机身屏幕。原有分派、参数、名称及光标回归、扇区事务、e2fsck 和五文件 debugfs 导出检查全部通过。真机屏幕验收仍待用户断电复测。
+
+本地包 `.lab/creative-icons-display/`，原厂组件证明 `.lab/menu-icons-display/`。镜像 SHA-256 为 `2a5e3d10d76ab7c27f31ab12e5b76d1001b811fec3611faa32a2cb7f0721b253`；view 库为 `a19b927d4566d1849259ead2377f5aa461c4921a39e8df26584070bcb595d781`。恢复到第二版使用 `creative-restore-icons-display --write-device`。不同版本验收命令不能混用。
 
 ## 第二版：展开后的竖向列表
 
-同一风格使用四组不同尺寸的图标。第一版改了 Fn 的 70×35 图标，并为新增 MENU 项指定了新大小图标，但展开列表另用一张 58×50 资源。原厂 `viewUnified7.so` 文件偏移 `0x8c834` 明确引用 `0x0205c7c8`，因此继续显示第 3 槽的 Ntrl。
+同一风格使用四组不同尺寸的图标。第一版改了 Fn 的 70×35 图标，并为新增 MENU 项指定了新大小图标。原厂 `viewUnified7.so` 文件偏移 `0x8c834` 还引用 `0x0205c7c8`（58×50）；第二版补齐了这一族资源，但之后的用户照片证明这不足以修复实际出现问题的两处显示。
 
 本次补齐同一槽位的三个现有资源：`0x0205c7c8`（58×50 竖向列表）、`0x0205c823`（70×60）、`0x0205c87e`（116×100）。后两者在原厂 `viewUnified2.so` 的 `0xa594f8`、`0xa594e8` 有直接引用。既有原厂「中性」及其他样式框的图标保持原样；第一版已正常的 RW 图标也保持原样。
 

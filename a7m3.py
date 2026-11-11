@@ -27,11 +27,12 @@ def device(action):
                       "creative-fix", "creative-read-fix", "creative-verify-fix", "creative-restore-fix",
                       "creative-identity", "creative-read-identity", "creative-verify-identity", "creative-restore-identity",
                       "creative-icons", "creative-read-icons", "creative-verify-icons", "creative-restore-icons",
-                      "creative-icons-list", "creative-read-icons-list", "creative-verify-icons-list", "creative-restore-icons-list"):
+                      "creative-icons-list", "creative-read-icons-list", "creative-verify-icons-list", "creative-restore-icons-list",
+                      "creative-icons-display", "creative-read-icons-display", "creative-verify-icons-display", "creative-restore-icons-display"):
             from camera.creative_flash import payload as creative_payload, verified, configure
             operation=configure(action)
-            verified(check_image=operation in ("flash","fix","identity","icons","icons-list"))
-            creative_payload("write" if operation in ("flash","fix","identity","icons","icons-list") else "restore" if operation=="restore" else "read")
+            verified(check_image=operation in ("flash","fix","identity","icons","icons-list","icons-display"))
+            creative_payload("write" if operation in ("flash","fix","identity","icons","icons-list","icons-display") else "restore" if operation=="restore" else "read")
         elif action in ("menu-ram-install", "menu-ram-inspect", "menu-ram-restore"):
             from camera.menu_ram import payload as menu_payload
             menu_payload(action.removeprefix("menu-ram-"))
@@ -88,6 +89,10 @@ def main():
         ("creative-read-icons-list", "只读检查竖向列表图标补丁扇区"),
         ("creative-verify-icons-list", "验证竖向列表图标、原有菜单与配方"),
         ("creative-restore-icons-list", "恢复竖向列表补丁前的第一版 RW 图标"),
+        ("creative-icons-display", "修正 RW 竖向列表及底部参数栏的实际显示路径"),
+        ("creative-read-icons-display", "只读回读显示路径修复的扇区"),
+        ("creative-verify-icons-display", "验证显示路径代码、资源与原有配方"),
+        ("creative-restore-icons-display", "恢复到第二版图标包"),
         ("creative-identity", "在第二版基础上修复 Fn 名称及重新进入创意风格时的定位"),
         ("creative-read-identity", "只读检查第三版补丁扇区"),
         ("creative-verify-identity", "重启后验证第三版文件、运行代码与配方"),
@@ -103,7 +108,8 @@ def main():
         action = actions.add_parser(name, help=help_text)
         if name in ("flash", "restore", "creative-flash", "creative-restore", "creative-fix", "creative-restore-fix",
                     "creative-identity", "creative-restore-identity", "creative-icons", "creative-restore-icons",
-                    "creative-icons-list", "creative-restore-icons-list"):
+                    "creative-icons-list", "creative-restore-icons-list",
+                    "creative-icons-display", "creative-restore-icons-display"):
             action.add_argument("--write-device", action="store_true", required=True)
     args = cli.parse_args()
     os.umask(0o077)

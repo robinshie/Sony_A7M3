@@ -22,6 +22,11 @@ def configure(action):
     icons={'creative-icons':'icons','creative-read-icons':'read','creative-verify-icons':'verify','creative-restore-icons':'restore'}
     icons_list={'creative-icons-list':'icons-list','creative-read-icons-list':'read',
                 'creative-verify-icons-list':'verify','creative-restore-icons-list':'restore'}
+    icons_display={'creative-icons-display':'icons-display','creative-read-icons-display':'read',
+                  'creative-verify-icons-display':'verify','creative-restore-icons-display':'restore'}
+    if action in icons_display:
+        OUT=LAB/'creative-icons-display'
+        return icons_display[action]
     if action in icons_list:
         OUT=LAB/'creative-icons-list'
         return icons_list[action]
@@ -40,7 +45,7 @@ def verified(check_image=False):
     proof=json.loads((OUT/'qemu-proof.json').read_text())
     require(proof['manifest_sha256']==file_sha(OUT/'manifest.json'), '烧录测试与镜像清单不符。')
     native_directory=manifest.get('native_directory','menu-persistent')
-    require(native_directory in ('menu-persistent','menu-lazy','menu-identity','menu-icons','style-icons-list'),'未知原厂补丁测试目录。')
+    require(native_directory in ('menu-persistent','menu-lazy','menu-identity','menu-icons','style-icons-list','menu-icons-display'),'未知原厂补丁测试目录。')
     native=LAB/native_directory/'proof.json'
     require(file_sha(native)==manifest['native_proof_sha256'], '原厂菜单测试记录发生变化。')
     native_proof=json.loads(native.read_text())
@@ -104,6 +109,19 @@ def identity_inspect_payload():
     return data
 
 
+def display_inspect_payload():
+    directory=LAB/'display-inspection'
+    directory.mkdir(mode=0o700,parents=True,exist_ok=True)
+    obj=directory/'inspect.o';target=directory/'inspect.so'
+    subprocess.run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-Os','-fPIC',
+                    '-ffreestanding','-fno-builtin','-fno-stack-protector','-fno-unwind-tables',
+                    '-fno-asynchronous-unwind-tables','-c',str(ROOT/'payloads/a7-display-inspect.c'),'-o',str(obj)],check=True)
+    subprocess.run(['arm-none-eabi-ld','-shared','--no-undefined','-z','noexecstack',str(obj),'-o',str(target)],check=True)
+    data=target.read_bytes()
+    require(len(data)<=16384 and data[:7]==b'\x7fELF\x01\x01\x01','显示路径只读探针格式异常。')
+    return data
+
+
 def direct_image_hash(factory,record,stem,phase='after'):
     directory=LAB/'image-hash'
     proof=json.loads((directory/'proof.json').read_text())
@@ -158,18 +176,18 @@ def perform(camera,factory,action):
         print(f'LIVE_CREATIVE_ENGLISH bytes={len(english)} sha256={sha(english)}',flush=True)
         print(f'LIVE_CREATIVE_INSPECTION_SAVED {stem}',flush=True)
         return
-    if action in ('flash','fix','identity','icons','icons-list'):
+    if action in ('flash','fix','identity','icons','icons-list','icons-display'):
         settings=camera.getBackupPresetData(True)
         backup=BackupFile(io.BytesIO(settings))
         require(backup.revision==4 and backup.size==len(settings), '设置备份不完整。')
         save(stem.with_suffix('.settings.bin'),settings)
         expected=EXPECTED if action=='flash' else {k:EXPECTED[k] for k in (0x0107075e,0x01070a11,0x01070a17,0x01070a1d)}
         require(all(backup.getProperty(k).data==v for k,v in expected.items()), '机身配方与实测配置不符。')
-        if action in ('identity','icons','icons-list'):
+        if action in ('identity','icons','icons-list','icons-display'):
             # Both full file preimages and the running previous helper are required.
             # The sector payload independently checks every changed sector again.
             previous=None
-            for path in (manifest['files'] if action in ('icons','icons-list') else ('/lib/viewUnified2.so','/lib/CautionConfig.so')):
+            for path in (manifest['files'] if action in ('icons','icons-list','icons-display') else ('/lib/viewUnified2.so','/lib/CautionConfig.so')):
                 record=manifest['files'][path]
                 if path=='/share/app/image_cmn_43.uxc':
                     direct_image_hash(factory,record,stem,phase='before')
@@ -235,7 +253,7 @@ def perform(camera,factory,action):
                         f'重启后文件校验不符：{path}')
                 if path=='/lib/viewUnified2.so':view_bytes=contents
                 print(f'LIVE_CREATIVE_FILE_VERIFIED {path} sha256={sha(contents)}',flush=True)
-            if OUT.name in ('creative-v2','creative-v3','creative-icons','creative-icons-list'):
+            if OUT.name in ('creative-v2','creative-v3','creative-icons','creative-icons-list','creative-icons-display'):
                 native=factory.run(inspect_payload(),'a7inspect.bin')
                 save(stem.with_suffix('.memory.bin'),native)
                 require(len(native)==2556 and struct.unpack_from('<4I',native)[2:]==(3,20) and
@@ -244,16 +262,26 @@ def perform(camera,factory,action):
                         native[2552:2556]==view_bytes[0x5bb266:0x5bb26a], '运行代码或菜单数量不符。')
                 entry=struct.unpack_from('<10I',native,724+190*4)
                 require(entry[2:4]==(98,0x0204ed84),'新增菜单记录不符。')
-                if OUT.name in ('creative-icons','creative-icons-list'):
-                    require((entry[4],entry[8])==(0x0205c049,0x0205c04a),'RW 大小图标资源未加载。')
+                if OUT.name in ('creative-icons','creative-icons-list','creative-icons-display'):
+                    expected_icons=(0x0205c87e,0x0205c823) if OUT.name=='creative-icons-display' else (0x0205c049,0x0205c04a)
+                    require((entry[4],entry[8])==expected_icons,'RW 大小图标引用不符。')
                     print('LIVE_CREATIVE_RW_ICON_REFERENCES_VERIFIED',flush=True)
+                if OUT.name=='creative-icons-display':
+                    display=factory.run(display_inspect_payload(),'a7display.bin')
+                    save(stem.with_suffix('.display.bin'),display)
+                    require(len(display)==20 and struct.unpack_from('<I',display)[0]==0x41374449 and
+                            struct.unpack_from('<I',display,8)[0]==1 and
+                            display[12:16]==view_bytes[0x5b9e36:0x5b9e3a] and
+                            display[16:20]==view_bytes[0x5bb998:0x5bb99c],
+                            '显示路径尚未完整加载，请断电重启后回读。')
+                    print('LIVE_CREATIVE_DISPLAY_HOOKS_VERIFIED',flush=True)
                 settings=camera.getBackupPresetData(True)
                 backup=BackupFile(io.BytesIO(settings))
                 require(backup.revision==4 and backup.size==len(settings),'重启后设置备份不完整。')
                 save(stem.with_suffix('.settings.bin'),settings)
                 require(all(backup.getProperty(k).data==v for k,v in EXPECTED.items()), '重启后配方保存参数不符。')
                 print('LIVE_CREATIVE_RUNTIME_MENU_AND_RECIPE_VERIFIED count=20 id=98 style_box=3 C=1 S=-1 H=-1',flush=True)
-                if OUT.name in ('creative-v3','creative-icons','creative-icons-list'):
+                if OUT.name in ('creative-v3','creative-icons','creative-icons-list','creative-icons-display'):
                     identity=factory.run(identity_inspect_payload(),'a7identity.bin')
                     save(stem.with_suffix('.identity.bin'),identity)
                     require(len(identity)==28 and struct.unpack_from('<I',identity)[0]==0x41374944 and
