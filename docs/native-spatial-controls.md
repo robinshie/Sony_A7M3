@@ -65,22 +65,28 @@ python3 research/sharpness_probe.py \
 
 进一步找到 `dataflowInfraFramework.so` 的 `C_DataflowInfra_StdData_YC::GetEntry_ImageSizeInfo`（偏移 `0x22300`，Thumb），以及 `libObj.so` 导入槽 `0x126ce20`。原厂 `GetData_All` 复制对象偏移 20 开始的 60 字节，标量访问器包含有效图像尺寸、DMM 句柄、压缩、排列、位深枚举及条带宽度。**这些字段的存在不代表已经取得像素，也不代表处理时拥有图像缓冲区。**
 
-`research/yc_trace.py` 构建一个临时 RAM 探针：仅在精确库身份和原导入槽匹配时，将该槽指向保留在匿名内存中的记录包装函数。包装函数调用原函数一次、保留返回值，只复制成功返回的元数据；不做图像写入、文件 I/O、分配或等待。记录最多 128 项，仅收集有效尺寸至少 2800×1800 的候选，避免小尺寸预览迅速占满记录。尺寸过滤不能证明来源是拍照。
+`research/yc_trace.py` 构建临时 RAM 探针：仅在精确库身份和原导入槽匹配时，将该槽指向保留在匿名内存中的记录包装函数。包装函数调用原函数一次、保留返回值，只复制成功返回的元数据；不做图像写入、文件 I/O、分配或等待。v1 最多记录 128 项，仅收集有效尺寸至少 2800×1800 的候选；该过滤现已由下述 v2 的独立最大样本槽替代。
 
 ARM 包装函数通过 2,080 组测试，覆盖原函数失败、禁用、锁已占用、容量达到/超过上限、小尺寸跳过、结果和元数据一致性及数组边界。安装器只修改进程中的一个已核对导入槽，不改系统文件。停止时恢复原槽，保留匿名分配直到进程退出，避免已进入包装函数的调用访问被释放内存。
 
 `research/yc_metadata_fixture.py` 另行提取原厂 25 个标量访问器和 60 字节整块访问器，在 QEMU 中使用 256 种已知字节模式，完成 431,616 项检查，核对 Python 解析器的字段偏移、长度和输出边界。枚举的实际含义及真实帧内容仍未验证。
 
-本轮已加载探针，返回 `status=1, armed=1, count=0`，记录在私有 `.lab/yc-trace/1794394519470077000/`。正在等待用户保持开机拍摄一张大尺寸 JPEG 后接回，以读取真实调用记录。尚未完成实拍路径确认。前一次构建因本地响应上限参数不合法，在读取固件库前终止；没有加载旧探针。
+v1 探针曾成功加载，记录在私有 `.lab/yc-trace/1794394519470077000/`。用户保持开机拍摄并回放大尺寸 JPEG 后，已读取并解除探针：`status=2, armed=0, count=0, dropped=0`，见 `.lab/yc-trace/1794396814049091000/`。这只说明没有符合 v1 尺寸过滤条件的记录，不能区分接口未被调用、调用失败或尺寸条件不匹配。原导入槽已经恢复；没有写入新的功能固件。v1 源码位于提交 `63f3951`。
+
+v2 已增加调用/失败计数，取消小图像过滤，保留前 127 份成功记录，并用独立槽保存最大有效尺寸的样本，避免早期预览占满后漏掉照片。记录器不等待竞争中的锁，因此计数不包含未取得锁的并发调用。另新增 JPEG 编码入口记录器：观察 `libObj.so` 导入槽 `0x126b17c`，目标为 `libmpr.so` 偏移 `0x85ecbc` 的 `MprIf::EncodeStill`；只复制原调用的 64 字节 RegionInfo，不解引用其中的物理像素地址。
+
+v2 两种模式通过 4,128 组 ARM 检查，包含原函数失败时不可访问的参数指针、原返回值、两种对象布局、容量边界和最大样本槽。安装前会先检查两处原始导入槽，再逐项附加；停止先禁用记录，取得记录锁后才恢复槽，避免繁忙时丢失探针位置。新版不会接管未知版本的旧探针。
+
+两次加载 v2 的尝试均停在 USB 维护模式切换前，尚未执行相机内负载。后续分阶段诊断确认 USB 配置读取、接口获取、传输恢复和 SCSI INQUIRY 均正常，卡在 `SonyExtCmdCamera.getCameraInfo()`，18 秒进程超时；原切换脚本为 25 秒超时。已请求用户断电重启恢复，当前没有活动的本项目跟踪探针，也未更改 r3 系统模块。
 
 离线构建默认不接触相机。下面的 `--live` 命令用于已配置的 USB 交接环境；安装到停止之间保持相机开机，不能把它当作持久固件更新：
 
 ```sh
-python3 research/yc_trace.py --usr "$A7M3_USR"
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind both
 python3 research/yc_metadata_fixture.py --usr "$A7M3_USR"
-python3 research/yc_trace.py --usr "$A7M3_USR" --live --action install
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind both --live --action install
 # 保持开机、拔 USB，正常拍照，然后重新连接。
-python3 research/yc_trace.py --usr "$A7M3_USR" --live --action stop
+python3 research/yc_trace.py --usr "$A7M3_USR" --kind both --live --action stop
 ```
 
 另一个候选为 `libmpr.so` 的 `MprIf::EncodeStill`，`libObj.so` 内存在两处调用，其中一处邻近 `ObjConverter`。尚未观察正常按快门是否经过该编码入口，不能据函数名称就注入照片处理算法。

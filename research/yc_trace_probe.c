@@ -6,11 +6,12 @@
 #ifndef ACTION
 #define ACTION 0
 #endif
-struct Trace {uint32_t magic,version,original,lock,armed,count,dropped,maximum;uint32_t records[128][16];};
+struct Trace {uint32_t magic,version,original,lock,armed,count,dropped,maximum;
+ uint32_t calls,failures,last_error,area,mode,reserved[3];uint32_t records[128][20];};
 struct Result {uint32_t magic,version,action;int32_t status;uint32_t object_base,dataflow_base,code,state,slot,original;struct Trace trace;};
 static struct Result result;
-_Static_assert(sizeof(struct Trace)==8224,"trace ABI");
-_Static_assert(sizeof(struct Result)==8264,"result ABI");
+_Static_assert(sizeof(struct Trace)==10304,"trace ABI");
+_Static_assert(sizeof(struct Result)==10344,"result ABI");
 static int same(const void *a,const void *b,unsigned n){const volatile unsigned char *x=a;const unsigned char *y=b;for(unsigned i=0;i<n;i++)if(x[i]!=y[i])return 0;return 1;}
 static void copy(void *a,const void *b,unsigned n){unsigned char *x=a;const volatile unsigned char *y=b;for(unsigned i=0;i<n;i++)x[i]=y[i];}
 static int exact(const char *a,const char *b){while(*b&&*a==*b){a++;b++;}return !*b&&(!*a||*a=='\n');}
@@ -34,10 +35,11 @@ static int inspect(void){
  char version[24];static const char build[]="37114_13.2026020901";
  if(read_proc("/version.txt",version,sizeof version)!=(long)sizeof build-1||!same(version,build,sizeof build-1))return -1;
  report.maps_n=read_proc("/proc/self/maps",report.maps,sizeof report.maps-1);if(report.maps_n<=0)return -2;report.maps[report.maps_n]=0;
- uint32_t obj=base("/usr/lib/libObj.so"),flow=base("/usr/lib/dataflowInfraFramework.so");
+ uint32_t obj=base("/usr/lib/libObj.so"),flow=base(A7YC_TARGET_PATH);
  result.object_base=obj;result.dataflow_base=flow;
  if(!obj||!flow||obj>UINT32_MAX-A7YC_SLOT-4||flow>UINT32_MAX-A7YC_ORIGINAL-sizeof original_pin)return -3;
- if(!same((void*)obj,object_header,sizeof object_header)||!same((void*)flow,flow_header,sizeof flow_header)||
+ if(!readable(obj,sizeof object_header)||!readable(flow,sizeof flow_header)||
+    !same((void*)obj,object_header,sizeof object_header)||!same((void*)flow,flow_header,sizeof flow_header)||
     !readable(flow+A7YC_ORIGINAL,sizeof original_pin)||!same((void*)(flow+A7YC_ORIGINAL),original_pin,sizeof original_pin))return -4;
  uint32_t *slot=(void*)(obj+A7YC_SLOT),original=flow+A7YC_ORIGINAL+1;
  result.slot=(uintptr_t)slot;result.original=original;
@@ -48,7 +50,7 @@ static int inspect(void){
   long allocation=allocate();if(!allocation||(uint32_t)allocation>=0xfffff001u)return -7;
   uint32_t code=(uint32_t)allocation;state=(void*)(code+4096);result.code=code;result.state=(uintptr_t)state;
   copy((void*)code,hook_code,sizeof hook_code);*(uint32_t*)(code+A7YC_STATE_LITERAL)=(uintptr_t)state;
-  state->magic=0x41375943;state->version=1;state->original=original;state->maximum=128;state->armed=1;
+  state->magic=0x41375943;state->version=2;state->original=original;state->maximum=128;state->armed=1;state->mode=A7YC_KIND;
   if(sc3(0xf0002,code,code+sizeof hook_code,0)||sc3(125,code,4096,5)){sc3(91,code,16384,0);return -8;}
   uint32_t expected=original;
   if(!__atomic_compare_exchange_n(slot,&expected,code,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)){sc3(91,code,16384,0);return -9;}
@@ -56,18 +58,22 @@ static int inspect(void){
   if((current&4095)||current>UINT32_MAX-16384||!range(current,4096,"r-xp",1)||!range(current+4096,12288,"rw-p",1))return -10;
   state=(void*)(current+4096);result.code=current;result.state=(uintptr_t)state;
   for(unsigned i=0;i<sizeof hook_code;i++)if((i<A7YC_STATE_LITERAL||i>=A7YC_STATE_LITERAL+4)&&((volatile unsigned char*)current)[i]!=hook_code[i])return -11;
-  if(*(uint32_t*)(current+A7YC_STATE_LITERAL)!=(uintptr_t)state||state->magic!=0x41375943||state->version!=1||state->original!=original||state->maximum!=128)return -12;
+  if(*(uint32_t*)(current+A7YC_STATE_LITERAL)!=(uintptr_t)state||state->magic!=0x41375943||state->version!=2||state->original!=original||state->maximum!=128||state->mode!=A7YC_KIND)return -12;
  }
- if(ACTION==2){
-  __atomic_store_n(&state->armed,0,__ATOMIC_RELEASE);uint32_t expected=result.code;
-  if(!__atomic_compare_exchange_n(slot,&expected,original,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return -13;
- }
+ if(ACTION==2)__atomic_store_n(&state->armed,0,__ATOMIC_RELEASE);
+ /* Keep the slot discoverable if a current recorder owns the lock. A later
+  * stop can retry the known disarmed hook and collect its completed record. */
  if(__atomic_exchange_n(&state->lock,1,__ATOMIC_ACQUIRE))return -14;
+ if(ACTION==2){uint32_t expected=result.code;
+  if(!__atomic_compare_exchange_n(slot,&expected,original,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)){
+   __atomic_store_n(&state->lock,0,__ATOMIC_RELEASE);return -13;
+  }
+ }
  copy(&result.trace,state,sizeof *state);__atomic_store_n(&state->lock,0,__ATOMIC_RELEASE);
  return ACTION==2?2:1;
 }
 __attribute__((constructor)) static void constructor(void){
- result.magic=0x41375950;result.version=1;result.action=ACTION;result.status=inspect();
+ result.magic=0x41375950;result.version=2;result.action=ACTION;result.status=inspect();
  sc3(10,(long)"/tmp/jiritsu/libJit.so",0,0);long fd=sc3(5,(long)"/tmp/jiritsu/a7yc.bin",1|64|128|0x8000,0600);if(fd<0)return;
  unsigned done=0;while(done<sizeof result){long n=sc3(4,fd,(long)((unsigned char*)&result+done),sizeof result-done);if(n<=0||(unsigned)n>sizeof result-done)break;done+=(unsigned)n;}
  sc3(118,fd,0,0);sc3(6,fd,0,0);
