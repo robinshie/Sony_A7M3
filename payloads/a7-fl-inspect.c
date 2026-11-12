@@ -3,7 +3,11 @@
 #include "a7-fl-inspect-pins.h"
 _Static_assert(sizeof(struct a7_fl_bootstrap_report)==36,"bootstrap report ABI");
 _Static_assert(sizeof(struct a7_fl_module_status)==68,"runtime report ABI");
+#ifdef A7_FL_INSPECT_PREVIEW
+_Static_assert(sizeof(struct a7_fl_inspect_report)==184,"preview inspect report ABI");
+#else
 _Static_assert(sizeof(struct a7_fl_inspect_report)==148,"inspect report ABI");
+#endif
 static struct {uintptr_t view,module;unsigned count;struct{uintptr_t lo,hi;}ranges[1024];char maps[65536];} memory;
 #ifdef A7_FL_INSPECT_TEST
 extern long a7_fl_inspect_syscall(long,long,long,long);
@@ -93,6 +97,9 @@ int a7_fl_inspect_read(struct a7_fl_inspect_report *out) {
     for(unsigned i=0;i<sizeof *out;i++)((unsigned char *)out)[i]=0;
     out->magic=0x41374653;out->version=1;out->status=A7_FL_INSPECT_IDENTITY;
     out->bootstrap_bytes=sizeof out->bootstrap;out->runtime_bytes=sizeof out->runtime;
+#ifdef A7_FL_INSPECT_PREVIEW
+    out->version=2;out->preview_bytes=sizeof out->preview;
+#endif
     char version[24];static const char expected[]="37114_13.2026020901";
     long length=read_file("/version.txt",version,sizeof version);
     if(length!=(long)sizeof expected-1||!same(version,expected,sizeof expected-1)||!maps())return out->status;
@@ -106,8 +113,16 @@ int a7_fl_inspect_read(struct a7_fl_inspect_report *out) {
     if(!memory.module || !pin(memory.module,0,a7_inspect_module_header,sizeof a7_inspect_module_header)||
        !pin(memory.module,a7_inspect_boot_va&~1u,a7_inspect_boot_code,sizeof a7_inspect_boot_code)||
        !pin(memory.module,a7_inspect_runtime_va&~1u,a7_inspect_runtime_code,sizeof a7_inspect_runtime_code))goto close;
+#ifdef A7_FL_INSPECT_PREVIEW
+    if(!pin(memory.module,a7_inspect_preview_va&~1u,a7_inspect_preview_code,sizeof a7_inspect_preview_code))goto close;
+#endif
     void *bootstrap=((Symbol)(memory.view+0x15c8dc))(handle,"a7_fl_bootstrap_status");
     void *runtime=((Symbol)(memory.view+0x15c8dc))(handle,"a7_fl_status");
+#ifdef A7_FL_INSPECT_PREVIEW
+    void *preview=((Symbol)(memory.view+0x15c8dc))(handle,"a7_fl_preview_status");
+    out->preview_symbol=(uintptr_t)preview;
+    if((uintptr_t)preview!=memory.module+a7_inspect_preview_va) {rc=A7_FL_INSPECT_SYMBOL;goto close;}
+#endif
     out->bootstrap_symbol=(uintptr_t)bootstrap;out->runtime_symbol=(uintptr_t)runtime;
     if((uintptr_t)bootstrap!=memory.module+a7_inspect_boot_va || (uintptr_t)runtime!=memory.module+a7_inspect_runtime_va) {
         rc=A7_FL_INSPECT_SYMBOL;goto close;
@@ -115,14 +130,26 @@ int a7_fl_inspect_read(struct a7_fl_inspect_report *out) {
     const struct a7_fl_bootstrap_report *b=((const struct a7_fl_bootstrap_report *(*)(void))bootstrap)();
     const struct a7_fl_module_status *r=((const struct a7_fl_module_status *(*)(void))runtime)();
     if(!owned_data((uintptr_t)b,sizeof *b)||!owned_data((uintptr_t)r,sizeof *r)){rc=A7_FL_INSPECT_POINTER;goto close;}
+#ifdef A7_FL_INSPECT_PREVIEW
+    const struct a7_fl_preview_report *p=((const struct a7_fl_preview_report *(*)(void))preview)();
+    if(!owned_data((uintptr_t)p,sizeof *p)){rc=A7_FL_INSPECT_POINTER;goto close;}
+#endif
     for(unsigned attempt=0;attempt<3;attempt++) {
         struct a7_fl_bootstrap_report again_boot;struct a7_fl_module_status again_runtime;
         read_copy(&out->bootstrap,b,sizeof *b);read_copy(&out->runtime,r,sizeof *r);
+#ifdef A7_FL_INSPECT_PREVIEW
+        struct a7_fl_preview_report again_preview;
+        read_copy(&out->preview,p,sizeof *p);
+#endif
         __asm__ volatile("dmb ish":::"memory");
 #ifdef A7_FL_INSPECT_TEST
         a7_fl_inspect_copy_hook();
 #endif
         read_copy(&again_boot,b,sizeof *b);read_copy(&again_runtime,r,sizeof *r);
+#ifdef A7_FL_INSPECT_PREVIEW
+        read_copy(&again_preview,p,sizeof *p);
+        if(!same(&out->preview,&again_preview,sizeof *p))continue;
+#endif
         if(same(&out->bootstrap,&again_boot,sizeof *b)&&same(&out->runtime,&again_runtime,sizeof *r)) {
             out->stable=1;rc=A7_FL_INSPECT_LOADED;goto close;
         }

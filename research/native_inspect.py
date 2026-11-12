@@ -9,9 +9,15 @@ O=R/'.lab/native-inspect'
 def sha(data): return hashlib.sha256(data).hexdigest()
 def run(args, **kw): return subprocess.run(args, check=True, **kw)
 def main():
+ global O
  p=argparse.ArgumentParser();p.add_argument('--usr',type=Path,required=True)
  p.add_argument('--module',type=Path,default=R/'.lab/native-module/liba7-fl-module.so')
- p.add_argument('--bundle',type=Path,default=R/'.lab/native-fl-01');a=p.parse_args()
+ p.add_argument('--bundle',type=Path,default=R/'.lab/native-fl-01')
+ p.add_argument('--with-preview',action='store_true',help='Read the pure refresh-request status export too')
+ p.add_argument('--out',type=Path,help='Keep a revision-specific inspector and evidence directory')
+ a=p.parse_args()
+ if a.with_preview:O=O.with_name('native-inspect-preview')
+ if a.out:O=a.out.resolve()
  O.mkdir(parents=True,exist_ok=True)
  proof_path=a.module.parent/'proof.json';mp=json.loads(proof_path.read_text());module=ELF(a.module)
  assert mp['module_sha256']==sha(module.data) and mp['ready_for_staging'] and not mp['placeholder']
@@ -39,7 +45,7 @@ def main():
  for name,(address,_) in parts.items():
   b=view.read(address,12);pins+=pin(name,b);(O/(name+'.bin')).write_bytes(b)
  pins+=pin('module_header',module.data[:52])
- for short,name in [('boot','a7_fl_bootstrap_status'),('runtime','a7_fl_status')]:
+ for short,name in [('boot','a7_fl_bootstrap_status'),('runtime','a7_fl_status')]+([('preview','a7_fl_preview_status')] if a.with_preview else []):
   symbol=module.symbols[name];pins+=pin(short+'_code',module.read(symbol['value']&~1,symbol['size']))
   pins+=f'static const uint32_t a7_inspect_{short}_va={symbol["value"]}u;\n'
  rw=[s for s in module.segments if s[0]==1 and s[6]==6];assert len(rw)==1
@@ -53,6 +59,7 @@ def main():
  pins+=f'static const uint32_t a7_inspect_rw_begin={rw[0][2]}u,a7_inspect_rw_end={rw[0][2]+rw[0][5]}u;\n'
  (O/'a7-fl-inspect-pins.h').write_text(pins)
  flags=['-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-I',str(R/'payloads'),'-I',str(R/'research'),'-I',str(O)]
+ if a.with_preview:flags+=['-DA7_FL_INSPECT_PREVIEW']
  run(['arm-none-eabi-gcc',*flags,'-fPIC','-nostdlib','-shared','-Wl,-z,noexecstack','-Wl,--no-undefined',str(R/'payloads/a7-fl-inspect.c'),'-lgcc','-o',str(O/'inspect.so')])
  (O/'module-rx.bin').write_bytes(module.read(0,rx[0][4]))
  asm='.syntax unified\n.arm\n'
@@ -90,6 +97,8 @@ _start:
  t=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={O}/inspect-test.elf,cpu-num=0'],capture_output=True,timeout=15)
  log=t.stdout+t.stderr;(O/'qemu.log').write_bytes(log);print(log.decode(),end='');assert b'NATIVE_INSPECT_PASSED' in log and b'FAIL ' not in log
  sources=['payloads/a7-fl-inspect.c','payloads/a7-fl-inspect.h','payloads/a7-fl-module.h','payloads/a7-fl-bootstrap.h','research/native_inspect.py','research/native_inspect_harness.c']
+ if a.with_preview:sources+=['payloads/a7-fl-preview.h']
  proof={'payload_sha256':sha((O/'inspect.so').read_bytes()),'module_sha256':sha(module.data),'module_proof_sha256':sha(proof_path.read_bytes()),'source_sha256':{s:sha((R/s).read_bytes()) for s in sources},'original_lut_sha256':{k:sha(v) for k,v in originals.items()},'original_sha256':sha(originals['00030004']),'base_fl_sha256':sha(base),'codec_sha256':sha(codec),'build':re.search(r'a7_pkg_build\[24\]="([^"]+)"',data.decode())[1],'pins_sha256':sha(pins.encode()),'qemu_log_sha256':sha(log),'report_bytes':148,'report_path':'/tmp/jiritsu/a7status.bin','scope':'Original view dlopen/dlsym/dlclose PLTs and exact staged-module status accessors execute in QEMU with modeled loader and proc files; no module initialization or persistent mutation.','camera_execution':False}
+ proof['report_bytes']=184 if a.with_preview else 148;proof['includes_preview_requests']=a.with_preview
  (O/'proof.json').write_text(json.dumps(proof,indent=2)+'\n');print('payload_sha256:',proof['payload_sha256'])
 if __name__=='__main__': main()

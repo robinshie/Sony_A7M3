@@ -137,19 +137,30 @@ int generate_capture(unsigned t,const int *p,uint8_t *out){
         check(native!=0 and status.decode_preference(bytes(damaged),digest.hex())['state']=='invalid','valid-checksum invalid preference values rejected by Python and C')
     symbols=attested.symbols
     def report(mode=1,loaded=1,stable=1,installed=1,ready=1,dirty=0,parameters=params):
-        header=struct.pack('<IIi4Ii3I',0x41374653,1,loaded,0x40000000,0x70000000,
+        header=struct.pack('<IIi4Ii3I',0x41374653,2 if 'preview_symbol' in symbols else 1,loaded,0x40000000,0x70000000,
                            0x70000000+symbols['bootstrap_symbol'],0x70000000+symbols['runtime_symbol'],0,36,68,stable)
         boot=struct.pack('<4Ii4I',1,2,0,3,0,1,0x40000000,0x50000000,0x60000000)
         runtime=struct.pack('<7I10i',1,installed,0,1,dirty,5,ready,0,mode,*parameters)
-        return header+boot+runtime
+        preview=(struct.pack('<4I5i',0x70000000+symbols['preview_symbol'],28,7,7,1,1,0,0,0)
+                 if 'preview_symbol' in symbols else b'')
+        return header+boot+runtime+preview
     raw=report();decoded=status.decode_report(raw,symbols)
     check(decoded['state']=='resident-ready' and decoded['runtime']['parameters']==params and not decoded['cold_power_verified'],
           'loaded report decoded without pretending physical or cold boot validation')
-    for n in range(148):rejects(lambda:status.decode_report(raw[:n],symbols),'truncated resident report rejected')
+    for n in range(len(raw)):rejects(lambda:status.decode_report(raw[:n],symbols),'truncated resident report rejected')
     rejects(lambda:status.decode_report(raw+b'x',symbols),'long report rejected')
-    for offset,value in ((0,0),(4,2),(32,35),(36,67),(40,2),(20,0x70000100)):
+    for offset,value in ((0,0),(4,3),(32,35),(36,67),(40,2),(20,0x70000100)):
         damaged=bytearray(raw);struct.pack_into('<I',damaged,offset,value)
         rejects(lambda:status.decode_report(bytes(damaged),symbols),'malformed header or foreign exported symbol rejected')
+    if 'preview_symbol' in symbols:
+        check(decoded['preview_requests']==dict(attempts=7,issued=7,last_result=1,active=[1,0,0,0],isp_completion_verified=False),
+              'request report does not claim ISP completion')
+        for offset,value in ((148,0x70000100),(152,27),(156,6)):
+            damaged=bytearray(raw);struct.pack_into('<I',damaged,offset,value)
+            rejects(lambda:status.decode_report(bytes(damaged),symbols),'preview symbol, size and counters checked')
+        legacy=bytearray(raw[:148]);struct.pack_into('<I',legacy,4,1)
+        legacy_symbols={k:v for k,v in symbols.items() if k!='preview_symbol'}
+        check(status.decode_report(bytes(legacy),legacy_symbols)['preview_requests'] is None,'legacy report supported')
     check(status.decode_report(report(loaded=0),symbols)['state']=='not-loaded','absent resident module remains pending')
     check(status.decode_report(report(loaded=-3),symbols)['state']=='probe-error','probe failure is explicit')
     check(status.decode_report(report(stable=0),symbols)['state']=='unstable','unstable snapshot is explicit')

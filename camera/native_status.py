@@ -132,17 +132,25 @@ def select_preferences(raw,original_sha):
 
 
 def decode_report(raw,expected_symbols=None):
-    require(len(raw)==148,'Unexpected resident report length.')
+    require(len(raw) in (148,184),'Unexpected resident report length.')
     values=struct.unpack_from('<IIi4Ii3I',raw)
     names=('magic','version','status','view_base','module_base','bootstrap_symbol','runtime_symbol',
            'dlclose_result','bootstrap_bytes','runtime_bytes','stable')
     header=dict(zip(names,values))
-    require(header['magic']==0x41374653 and header['version']==1 and header['status']<=1 and
+    require(header['magic']==0x41374653 and (header['version'],len(raw)) in ((1,148),(2,184)) and header['status']<=1 and
             header['bootstrap_bytes']==36 and header['runtime_bytes']==68 and header['stable'] in (0,1),
             'Malformed resident report header.')
+    preview=None
+    if header['version']==2:
+        symbol,length=struct.unpack_from('<2I',raw,148)
+        require(length==28,'Unexpected preview diagnostic length.')
+        header['preview_symbol']=symbol
+        attempts,issued,result,*active=struct.unpack_from('<2I5i',raw,156)
+        require(issued<=attempts,'Invalid preview request counters.')
+        preview=dict(attempts=attempts,issued=issued,last_result=result,active=active,isp_completion_verified=False)
     if header['status']<=0:
         return dict(state='not-loaded' if header['status']==0 else 'probe-error',header=header,
-                    bootstrap=None,runtime=None,physical_menu_verified=False,cold_power_verified=False)
+                    bootstrap=None,runtime=None,preview_requests=preview,physical_menu_verified=False,cold_power_verified=False)
     require(all(header[key] for key in ('view_base','module_base','bootstrap_symbol','runtime_symbol')),
             'Loaded report is missing native addresses.')
     if expected_symbols:
@@ -163,7 +171,7 @@ def decode_report(raw,expected_symbols=None):
            'module-reported-error' if runtime['last_error']<0 or bootstrap['result']<0 else
            'loaded-awaiting-initialization' if not runtime['runtime_ready'] else
            'color-ready-menu-pending' if not runtime['installed'] else 'resident-ready')
-    return dict(state=state,header=header,bootstrap=bootstrap,runtime=runtime,
+    return dict(state=state,header=header,bootstrap=bootstrap,runtime=runtime,preview_requests=preview,
                 physical_menu_verified=False,cold_power_verified=False)
 
 
@@ -232,6 +240,9 @@ class Profile:
         module=ELF(module_path)
         self.symbols={key:module.symbols[name]['value'] for key,name in
                       (('bootstrap_symbol','a7_fl_bootstrap_status'),('runtime_symbol','a7_fl_status'))}
+        if p.get('includes_preview_requests'):
+            require(p.get('report_bytes')==184,'Preview probe report ABI differs.')
+            self.symbols['preview_symbol']=module.symbols['a7_fl_preview_status']['value']
         require(all(self.symbols.values()),'Module lacks resident status exports.')
 
 

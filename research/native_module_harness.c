@@ -87,6 +87,23 @@ static int replace_slot(void *opaque,unsigned slot,const unsigned char *before,u
 }
 static int set_value(int id,int value) {uintptr_t *vt=(uintptr_t *)manager_words[0];return ((int(*)(void *,int,int))vt[17])(manager_words,id,value);}
 static int get_value(int id,int *value) {uintptr_t *vt=(uintptr_t *)manager_words[0];return ((int(*)(void *,int,int *))vt[3])(manager_words,id,value);}
+#ifdef A7_FL_PREVIEW_REFRESH
+#include "a7-fl-preview.h"
+static unsigned preview_requests;
+static int preview_error;
+int a7_fl_preview_request(uintptr_t base,const struct a7_fl_api *backup,
+                         int (*readable)(void *,uintptr_t,unsigned),void *opaque) {
+    test(base==0x40000000&&backup->read==api.read&&readable==memory_guard&&opaque==&identity_calls,"preview uses witnessed native platform");
+    test(a7_fl_status()->installed,"no model request during early color boot");
+    int enabled,values[5];test(get_value(0x7000,&enabled)==1,"current accepted mode readable");
+    for(unsigned i=0;i<5;i++){test(get_value(0x7001+i,values+i)==1,"current accepted scalar readable");values[i]-=i==3?0:9;}
+    A7FLColorParams p={values[0],values[1],values[2],values[3],values[4]};uint8_t expected[1280];
+    if(enabled)test(a7_fl_adjust_lut(CANDIDATE,1280,EXPAND,COMPRESS,&p,expected,1280)==0,"expected source generated");
+    else bytes(expected,ORIGINAL,1280);
+    test(same(expected,data_guarded+1,1280),"refresh follows successful complete source-table update");
+    preview_requests++;return preview_error?preview_error:1;
+}
+#endif
 static a7_menu_node *look_row(a7_menu_node *look,unsigned index) {
     check(look&&look->count==2&&index<10,"look has two native pages and bounded row");
     return look->children[index/6]->children[index%6];
@@ -203,7 +220,14 @@ void guest_main(void) {
     int value;
     for(int id=0;id<618;id++)check(get_value(id,&value)==1&&value==id+1000&&set_value(id,id-300)==1&&stock_value==id-300,"all stock IDs preserve original dispatch");
     test(stock_calls==1236,"stock model routes remain intact");
+#ifdef A7_FL_PREVIEW_REFRESH
+    test(preview_requests==0,"neither boot nor unrelated stock IDs issues replay");
+#endif
     test(set_value(0x7000,1)==1 && state->mode==1 && state->dirty && slot_writes==1,"native mode setter performs RAM preview only");
+#ifdef A7_FL_PREVIEW_REFRESH
+    test(preview_requests==1,"accepted FL enable requests preview refresh");
+    test(set_value(0x7000,1)==1&&preview_requests==1,"same mode avoids duplicate request");
+#endif
 #ifdef A7_FL_CAPTURE_LOOK
     test(capture_matches(1),"FL switch writes both still capture properties");
     test(a7_fl_cancel()==0 && capture_matches(0) && state->mode==0,"cancel restores both CAP tables");
@@ -249,6 +273,12 @@ void guest_main(void) {
 #endif
     test(slot_writes==2 && state->generation==2 && !state->dirty && action_flags==1 && action_fallbacks==0 && stock_actions==0,"original native Save action persists once");
     test(row_title(look,9)==0x0204ef85,"successful durable Save visibly becomes Complete");
+#ifdef A7_FL_PREVIEW_REFRESH
+    preview_error=A7_FL_PREVIEW_PIN;original_action(action_view);
+    test(confirm_dialog()==A7_FL_PREVIEW_PIN&&row_title(look,9)==0x0204ef87&&slot_writes==2&&!state->dirty,"failed replay does not claim Complete or duplicate durable write");
+    preview_error=0;original_action(action_view);
+    test(confirm_dialog()==0&&row_title(look,9)==0x0204ef85&&slot_writes==2,"Save retries replay without changing settings");
+#endif
 #ifdef A7_FL_SPATIAL_SETTINGS_ONLY
     struct a7_fl_preference stored_recipe;
     test(a7_fl_preference_choose(&stored_recipe,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0 &&
@@ -257,6 +287,12 @@ void guest_main(void) {
         test(stored_recipe.parameters[5+i]==chosen_value[i],"saved slot has exact spatial values");
     test(set_value(0x7008,9)==1 && a7_fl_cancel()==0 && get_value(0x7008,&value)==1 &&
          value==7 && slot_writes==2 && write_calls==writes_before,"cancel restores saved spatial cursor without writing");
+#endif
+#ifdef A7_FL_PREVIEW_REFRESH
+    unsigned before_replay=preview_requests;
+    preview_error=A7_FL_PREVIEW_READ;
+    test(set_value(0x7001,13)==1&&state->parameters[0]==4&&state->last_error==A7_FL_PREVIEW_READ&&preview_requests==before_replay+1,"failed replay retains accepted scalar and exposes error");
+    preview_error=0;test(a7_fl_cancel()==0&&state->parameters[0]==3&&preview_requests==before_replay+2,"cancel restores LUT then replays original active style");
 #endif
     uint8_t committed[1280];bytes(committed,data_guarded+1,1280);
     test(set_value(0x7001,6)==1 && state->parameters[0]==-3 && a7_fl_cancel()==0 && get_value(0x7001,&value)==1 && value==12 && same(data_guarded+1,committed,1280) && slot_writes==2,"cancel restores committed signed LUT and native enum cursor state");
@@ -291,6 +327,9 @@ void guest_main(void) {
 #endif
     test(a7_fl_uninstall()==0 && parent.count==6 && parent.children==parent_children && parent.children[3]->index==4 && manager_words[0]==(uintptr_t)(manager_vtable_words+2),"uninstall restores native parent model and stock indices");
     test(saves==0,"module never requests calibration sync");
+#ifdef A7_FL_PREVIEW_REFRESH
+    put("NATIVE_FL_PREVIEW_INTEGRATION_PASSED: accepted color updates, save retry, cancel and early-boot isolation; downstream model mocked\n");
+#endif
     put("NATIVE_FL_MODULE_PASSED: original nodes + 618 stock routes + runtime421checks; integrated preview/commit/cancel/store/rollback\n");
     put("PLATFORM_AND_FILESYSTEM_MODELED; NO_CAMERA_ACTIVATION_OR_NATIVE_RENDERER_TEST\n");finish();
 }

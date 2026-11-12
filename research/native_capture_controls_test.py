@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Private-data host/ARM tests for adjustable capture tables. No device I/O."""
-import hashlib,json,shutil,subprocess
+import argparse,hashlib,json,shutil,subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'.lab/native-capture-controls-test'
@@ -9,15 +9,21 @@ ROUTE=ROOT/'.lab/lut3d-capture-look'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def run(args,**kw):return subprocess.run(args,check=True,**kw)
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--route',type=Path,default=ROUTE,help='Fresh original-LUT fixture with identical private tables')
+    route_dir=parser.parse_args().route.resolve()
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     mp=json.loads((LEGACY/'proof.json').read_text())
     assert mp['module_sha256']=='1216dda332c42c6378fd993ccb89781d6229150c00798191835232de3923b675'
     assert sha(LEGACY/'a7-fl-module-data.h')==mp['artifact_sha256']['a7-fl-module-data.h']
-    route=json.loads((ROUTE/'proof.json').read_text())
+    legacy_route=json.loads((ROUTE/'proof.json').read_text())
     assert sha(ROUTE/'proof.json')==mp['capture_look']['source_qemu_proof_sha256']
+    route=json.loads((route_dir/'proof.json').read_text())
+    for key in ('avcam_sha256','native_ranges','table_input_sha256','descriptor_controls_sha256','capture_candidates'):
+        assert route[key]==legacy_route[key],key
     for p,d in route['source_sha256'].items():assert sha(ROOT/p)==d,p
-    for name,r in route['native_ranges'].items():assert sha(ROUTE/(name+'.bin'))==r['sha256'],name
-    data=(ROUTE/'table_inputs.bin').read_bytes()
+    for name,r in route['native_ranges'].items():assert sha(route_dir/(name+'.bin'))==r['sha256'],name
+    data=(route_dir/'table_inputs.bin').read_bytes()
     assert hashlib.sha256(data[:5120]).hexdigest()==route['table_input_sha256']
     assert hashlib.sha256(data[5120:9728]).hexdigest()==route['descriptor_controls_sha256']
     assert data[9728]==1
@@ -40,7 +46,7 @@ int main(void){a7_capture_controls_tests();printf("CAPTURE_CONTROLS_HOST_PASSED:
     (OUT/'host.log').write_bytes(host.stdout+host.stderr);print(host.stdout.decode(),end='')
     # Existing original generator, selector and packing fixture; only its entry
     # is replaced, and a new test calls the unmodified native Create function.
-    for p in ROUTE.iterdir():
+    for p in route_dir.iterdir():
         if p.suffix=='.bin' or p.name in ('native.S','start.S','guest.ld'):shutil.copyfile(p,OUT/p.name)
     (OUT/'arm.c').write_text('''#define guest_main unused_legacy_entry
 #include "lut3d_harness.c"
@@ -71,6 +77,7 @@ void guest_main(void){a7_capture_controls_tests();put("CAPTURE_CONTROLS_ARM_PASS
     sources+=['payloads/a7-fl-capture-controls.h','payloads/a7-fl-color.h','research/native_capture_controls_test.py','research/lut3d_harness.c']
     proof={'source_sha256':{p:sha(ROOT/p) for p in sources},'artifacts':{p:sha(OUT/p) for p in ('host-test','test.elf','host.log','qemu.log','a7-fl-module-data.h','arm.c','native.S','guest.ld','start.S')},
            'legacy_module_sha256':mp['module_sha256'],'legacy_capture_proof_sha256':sha(ROUTE/'proof.json'),
+           'current_capture_proof_sha256':sha(route_dir/'proof.json'),
            'all_single_control_values':True,'all_tone_combinations_host':True,'tone_combination_count':19**3*10*2,
            'tested_levels':list(range(1,9)),'max_packed_delta':[24,32,32],
            'base_delta_scale':[3,2],'host_sanitizers':True,'arm_original_create':True,'exact_recovery':True,'partial_write_rollback':True,'camera_pixels_verified':False}

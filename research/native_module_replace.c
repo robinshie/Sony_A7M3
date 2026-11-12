@@ -20,6 +20,10 @@ static const char temporary[]=".a7fl-r5.new",backup[]=".a7fl-1216dda3.orig",logn
 static const char temporary[]=".a7fl-r6.new",backup[]=".a7fl-62c85626.orig",logname[]="A7FLUP6.LOG";
 #elif NMR_REVISION == 7
 static const char temporary[]=".a7fl-r7.new",backup[]=".a7fl-25d5f6f1.orig",logname[]="A7FLUP7.LOG";
+#elif NMR_REVISION == 8
+static const char temporary[]=".a7fl-r8.new",backup[]=".a7fl-74d1df6c.orig",logname[]="A7FLUP8.LOG";
+#elif NMR_REVISION == 9
+static const char temporary[]=".a7fl-r9.new",backup[]=".a7fl-a332915e.orig",logname[]="A7FLUP9.LOG";
 #else
 #error Unsupported module replacement revision
 #endif

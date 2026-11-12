@@ -15,12 +15,14 @@ REVISIONS={1:dict(old_sha=OLD,old_size=42208,temporary='.a7fl-r1.new',backup='.a
            4:dict(old_sha='bd01f7b1a0b6594c118613ca2b6c87debdcb17032bccd6ef43be14ffa8aaf274',old_size=43356,temporary='.a7fl-r4.new',backup='.a7fl-bd01f7b1.orig',journal='A7FLUP4.LOG'),
            5:dict(old_sha='1216dda332c42c6378fd993ccb89781d6229150c00798191835232de3923b675',old_size=48912,temporary='.a7fl-r5.new',backup='.a7fl-1216dda3.orig',journal='A7FLUP5.LOG'),
            6:dict(old_sha='62c85626243e7009d78999ab16568163e9186934ccd820b70c7b3ea08ff7b5d0',old_size=55420,temporary='.a7fl-r6.new',backup='.a7fl-62c85626.orig',journal='A7FLUP6.LOG'),
-           7:dict(old_sha='25d5f6f1f428cfbd92cae46be496b407eb746fbe06a4120215f5f2b87d508f31',old_size=60744,temporary='.a7fl-r7.new',backup='.a7fl-25d5f6f1.orig',journal='A7FLUP7.LOG')}
+           7:dict(old_sha='25d5f6f1f428cfbd92cae46be496b407eb746fbe06a4120215f5f2b87d508f31',old_size=60744,temporary='.a7fl-r7.new',backup='.a7fl-25d5f6f1.orig',journal='A7FLUP7.LOG'),
+           8:dict(old_sha='74d1df6c73ebd7d056ce741a28e3f459fdf2e7c5ac29063527e18b7111a64703',old_size=63524,temporary='.a7fl-r8.new',backup='.a7fl-74d1df6c.orig',journal='A7FLUP8.LOG'),
+           9:dict(old_sha='a332915e7cd4c5753df843480779f21b1d05941504f814a6cd438892ec86b865',old_size=65392,temporary='.a7fl-r9.new',backup='.a7fl-a332915e.orig',journal='A7FLUP9.LOG')}
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
- if revision not in (4,5,6,7):return
+ if revision not in (4,5,6,7,8,9):return
  c=proof.get('capture_look');deps=proof.get('dependency_proof_sha256')
  require(isinstance(c,dict) and isinstance(deps,dict) and proof.get('spatial_settings_only') is True and
          c.get('arm_transaction_verified') is True and c.get('fixed_capture_tables') is (revision==4) and
@@ -34,6 +36,14 @@ def require_capture_release(revision,proof):
   require(proof.get('save_confirmation_dialog') is True and
           isinstance(deps.get('native-save-dialog/proof.json'),str),
           'Revision 6 requires the tested native confirmation dialog.')
+ if revision==8:
+  require(proof.get('preview_refresh_request') is True and
+          isinstance(deps.get('native-preview-request/proof.json'),str),
+          'Revision 8 requires the guarded same-value preview replay tests.')
+ if revision>=9:
+  require(proof.get('preview_refresh_request') is True and proof.get('preview_timed_cycle') is True and
+          isinstance(deps.get('native-preview-cycle/proof.json'),str),
+          'Revision 9 requires the guarded native timer cycle tests.')
  digest=c.get('source_qemu_proof_sha256')
  require(isinstance(digest,str) and len(digest)==64 and all(x in '0123456789abcdef' for x in digest) and
          digest in deps.values(),'Revision 4 requires its capture QEMU proof as a pinned dependency.')

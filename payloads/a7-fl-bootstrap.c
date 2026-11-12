@@ -78,6 +78,7 @@ static int maps(void) {
         int is_caution=exact_path(name,"/usr/lib/CautionConfig.so");
         int is_backup=exact_path(name,"/usr/lib/libbackup.so");
         int allowed=is_view||is_caution||is_backup||exact_path(name,"/usr/lib/a7fl.so")||
+                    exact_path(name,"/usr/lib/libObj.so")||
                     !*name||*name=='\n'||*name=='[';
         /* Only private ordinary memory and exact pinned module paths are used. */
         if(end[0]==' '&&end[1]=='r'&&end[4]=='p'&&allowed){

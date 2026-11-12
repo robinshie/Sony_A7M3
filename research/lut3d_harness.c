@@ -1,5 +1,7 @@
 /* Execute original AV-CAM LUT routines in isolated QEMU RAM. No Sony ISP. */
 #include <stdint.h>
+#include "lut3d_preview_cache.h"
+#include "../payloads/a7-fl-color.h"
 #define BASE 0x635c6000u
 #define FN(off, type) ((type)(uintptr_t)(BASE+(off)+1))
 #define GUARD 0xa5a5a5a5u
@@ -128,23 +130,73 @@ static void selector_test(void) {
         selector_cases++;
     }
 }
-/* Prototype at the consumer refresh branch. QEMU supplies a stable, owned
- * source and one capture context. Neither lifetime is assumed on a device. */
-static unsigned char refresh_previous[1215];
-static const unsigned char *refresh_shadow;
-static const void *refresh_context;
-static unsigned refresh_forced;
+/* Only the registered QEMU preview output may extend the stock predicate. */
+struct refresh_fixture {
+    struct lut3d_preview_cache cache;
+    const uint8_t *shadow;
+    const void *context;
+    unsigned forced;
+};
+static struct refresh_fixture *active_preview;
+
 int fixture_refresh_gate(void *a,void *b) {
     int stock=FN(0x522dec,int (*)(void *,void *))(a,b);
-    if(b!=refresh_context)return stock;
+    struct refresh_fixture *fixture=active_preview;
+    if(!fixture || b!=fixture->context)return stock;
     const uintptr_t *desc=(const void *)((const uintptr_t *)b)[3];
-    if(((const unsigned char *)desc)[4]!=0 || desc[0x64/4]!=(uintptr_t)refresh_shadow)return stock;
-    unsigned changed=0;
-    for(unsigned i=0;i<1215;i++)changed|=refresh_previous[i]!=refresh_shadow[i];
-    if(!changed)return stock;
-    for(unsigned i=0;i<1215;i++)refresh_previous[i]=refresh_shadow[i];
-    refresh_forced++;
-    return 1;
+    if(((const unsigned char *)desc)[4]!=0 || desc[0x64/4]!=(uintptr_t)fixture->shadow)return stock;
+    int changed=lut3d_preview_changed(&fixture->cache,fixture->shadow);
+    if(changed && !stock)fixture->forced++;
+    return stock||changed;
+}
+
+static void check_preview_output(const uint32_t out[407],const uint8_t *source,unsigned level) {
+    check(out[0]==GUARD && out[406]==GUARD,"refresh packed output bounds");
+    for(unsigned a=0;a<5;a++)for(unsigned b=0;b<9;b++)for(unsigned c=0;c<9;c++) {
+        unsigned i=a*81+b*9+c;
+        check(out[1+index_of(a,b,c)]==word(scaled(source[i],level),scaled(source[i+405],level),
+                                           scaled(source[i+810],level)),"refreshed preview packed output");
+    }
+}
+
+static void refresh_draw(struct refresh_fixture *fixture,uintptr_t *a,uintptr_t *b,
+                         const uint32_t out[407],unsigned level) {
+    FN(0x523894,void (*)(void *,void *))(a,b);
+    const uint8_t *descriptor=(const void *)b[3],*state=(const void *)b[4];
+    if(descriptor[4]!=0 || ((const uintptr_t *)descriptor)[0x64/4]!=(uintptr_t)fixture->shadow ||
+       state[0x27]!=2) {
+        fixture->cache.valid=0;
+        return;
+    }
+    check_preview_output(out,fixture->shadow,level);
+    lut3d_preview_rendered(&fixture->cache,fixture->shadow);
+}
+
+static void refresh_fl_controls(struct refresh_fixture *fixture,uintptr_t *a,uintptr_t *b,
+                                uint8_t shadow[1280],const uint32_t out[407]) {
+    static uint8_t stock[1280],base_fl[1280],soft[1280],strong[1280];
+    const uint16_t *expand=(const void *)(BASE+0x8a999e);
+    const uint8_t *compress=(const void *)(BASE+0x9b5921);
+    const A7FLColorParams low={.contrast=-9},high={.contrast=9};
+    for(unsigned i=0;i<405;i++) {
+        stock[i]=4;
+        base_fl[i]=12;
+    }
+    check(a7_fl_adjust_lut(base_fl,1280,expand,compress,&low,soft,1280)==0 &&
+          a7_fl_adjust_lut(base_fl,1280,expand,compress,&high,strong,1280)==0,
+          "generate preview sources with actual FL controls");
+    check(soft[0]!=strong[0] && stock[0]!=soft[0] && stock[0]!=strong[0],
+          "FL fixture generates three distinguishable looks");
+    const uint8_t *sources[]={stock,soft,strong,strong,stock};
+    const unsigned forced[]={1,2,3,3,4};
+    unsigned initial=fixture->forced;
+    for(unsigned i=0;i<sizeof(sources)/sizeof(sources[0]);i++) {
+        for(unsigned j=0;j<1280;j++)shadow[j]=sources[i][j];
+        /* No style, strength, selector or lifecycle change between frames. */
+        refresh_draw(fixture,a,b,out,8);
+        check(fixture->forced==initial+forced[i],"FL off/on/slider preview invalidation count");
+    }
+    put("NATIVE_3DLUT_FL_PREVIEW_PASSED: FL on, contrast -9/+9 and off refresh with style held fixed\n");
 }
 static void refresh_test(void) {
     static uint32_t params_words[0x220/4], mode_words[0x240/4], descriptor_words[0x70/4];
@@ -195,26 +247,37 @@ static void refresh_test(void) {
     select(a_context,b_context);
     check(state[0x27]==2 && out[1]==old,"original dirty key rebuilds at unchanged final strength");
     check(dirty(a_context,b_context)==0,"refresh key is clean before prototype");
-    refresh_context=b_context;refresh_shadow=shadow;
-    for(unsigned i=0;i<1215;i++)refresh_previous[i]=shadow[i];
+    static struct refresh_fixture preview;
+    preview.shadow=shadow;preview.context=b_context;
+    active_preview=&preview;
+    check_preview_output(out,shadow,8);
+    lut3d_preview_rendered(&preview.cache,shadow);
     shadow[0]^=1;
+    /* A rebuild request alone must not advance the last rendered snapshot. */
     select(a_context,b_context);
-    check(state[0x27]==2 && out[1]==updated && refresh_forced==1,"source-change gate refreshes while mode and strength stay fixed");
-    select(a_context,b_context);
-    check(out[1]==updated && refresh_forced==1,"unchanged source does not force a rebuild");
+    check(preview.forced==1 && lut3d_preview_changed(&preview.cache,shadow),"unacknowledged refresh stays pending");
+    refresh_draw(&preview,a_context,b_context,out,8);
+    check(out[1]==updated && preview.forced==2,"source change refreshes without a mode or strength change");
+    refresh_draw(&preview,a_context,b_context,out,8);
+    check(out[1]==updated && preview.forced==2,"unchanged source does not force a rebuild");
     shadow[0]=original;
-    select(a_context,b_context);
-    check(out[1]==old && refresh_forced==2,"source-change gate refreshes the restored stock source");
+    refresh_draw(&preview,a_context,b_context,out,8);
+    check(out[1]==old && preview.forced==3,"source-change gate refreshes the restored stock source");
     shadow[1279]^=1;
-    select(a_context,b_context);
-    check(out[1]==old && refresh_forced==2,"ignored table tail does not refresh");
+    refresh_draw(&preview,a_context,b_context,out,8);
+    check(out[1]==old && preview.forced==3,"ignored table tail does not refresh");
+    refresh_fl_controls(&preview,a_context,b_context,shadow,out);
     descriptor[4]=1;
-    select(a_context,b_context);
+    refresh_draw(&preview,a_context,b_context,out,8);
     uint32_t other=out[1];
+    unsigned forced=preview.forced;
     shadow[0]^=1;
-    select(a_context,b_context);
-    check(out[1]==other && refresh_forced==2,"table 0 update does not refresh table 1");
-    refresh_context=0;
+    refresh_draw(&preview,a_context,b_context,out,8);
+    check(out[1]==other && preview.forced==forced && !preview.cache.valid,"table 0 update does not refresh table 1");
+    descriptor[4]=0;
+    refresh_draw(&preview,a_context,b_context,out,8);
+    check(preview.cache.valid,"returning to preview records the newly packed table");
+    active_preview=0;
     check(out[0]==GUARD && out[406]==GUARD,"refresh packed output bounds");
     put("NATIVE_3DLUT_REFRESH_PASSED: unchanged native path stays cached; source-change prototype rebuilds table 0 in both directions\n");
 }

@@ -2,6 +2,9 @@
 #define A7_FL_INSPECT_H
 #include "a7-fl-bootstrap.h"
 #include "a7-fl-module.h"
+#ifdef A7_FL_INSPECT_PREVIEW
+#include "a7-fl-preview.h"
+#endif
 enum a7_fl_inspect_error {
     A7_FL_INSPECT_NOT_LOADED=0,A7_FL_INSPECT_LOADED=1,
     A7_FL_INSPECT_IDENTITY=-1,A7_FL_INSPECT_PINS=-2,
@@ -17,6 +20,10 @@ struct a7_fl_inspect_report {
     uint32_t bootstrap_bytes,runtime_bytes,stable;
     struct a7_fl_bootstrap_report bootstrap;
     struct a7_fl_module_status runtime;
+#ifdef A7_FL_INSPECT_PREVIEW
+    uint32_t preview_symbol,preview_bytes;
+    struct a7_fl_preview_report preview;
+#endif
 };
 /* Reads an already loaded module only. RTLD_NOLOAD, exact status-only symbol
  * names/code pins, owned mapping checks and balanced dlclose. No install calls. */

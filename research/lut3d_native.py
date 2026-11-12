@@ -221,11 +221,13 @@ _start:
     print(log.decode(errors='replace'), end='')
     if (result.returncode or b'QEMU_NATIVE_3DLUT_PASSED' not in result.stdout
             or b'NATIVE_3DLUT_REFRESH_PASSED' not in result.stdout
+            or b'NATIVE_3DLUT_FL_PREVIEW_PASSED' not in result.stdout
             or b'NATIVE_3DLUT_CAPTURE_ROUTE_PASSED' not in result.stdout or b'FAIL ' in log
             or (candidates and b'NATIVE_3DLUT_CAPTURE_LOOK_PASSED' not in result.stdout)):
         raise ValueError('Native 3D LUT experiment failed')
     sources = ('research/lut3d_native.py', 'research/lut3d_format.py',
-               'research/lut3d_harness.c', 'research/gamma_avcam.py')
+               'research/lut3d_harness.c', 'research/lut3d_preview_cache.h',
+               'payloads/a7-fl-color.h', 'research/gamma_avcam.py')
     if candidates:
         sources += ('research/native_fl.py', 'research/fl_look.py', 'recipes/fl-inspired-v0.json')
     proof = {
@@ -247,7 +249,7 @@ _start:
         'depth_adjustment_tested': False, 'sd_conversion_tested': False,
         'storage_layout_verified': True, 'native_selection_executed': True,
         'selection_scope': 'All 256 selector byte values at levels 7 and 8; fixed zero mode/config and state=1; no scheduling',
-        'refresh_scope': 'Original state=2 selector; QEMU-only interposition of its refresh call with an opt-in source-change gate; inactive gate delegates to original predicate',
+        'refresh_scope': 'Original state=2 selector; QEMU-only preview cache compares all used source bytes; update cache after full output verification; test FL on/off and contrast -9/+9 without changing style',
         'qemu_refresh_interposition': {'call_offset': hex(REFRESH_CALL), 'veneer_fixture_offset': hex(REFRESH_VENEER)},
         'color_space_and_units_known': False, 'hardware_interpolation_known': False,
         'jpeg_output_proven': False, 'camera_integration': False, 'flash_ready': False,

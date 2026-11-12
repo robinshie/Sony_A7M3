@@ -6,6 +6,9 @@
 #include "a7-fl-color.h"
 #include "native_adjust.h"
 #include "a7-fl-module-data.h"
+#ifdef A7_FL_PREVIEW_REFRESH
+#include "a7-fl-preview.h"
+#endif
 #ifdef A7_FL_SAVE_DIALOG
 #include "a7-fl-dialog.h"
 #endif
@@ -54,6 +57,15 @@ static int leave(int rc) {snapshot(rc);__atomic_store_n(&module.lock,0,__ATOMIC_
 static int enter(void) {return __atomic_exchange_n(&module.lock,1,__ATOMIC_ACQUIRE)==0;}
 const struct a7_fl_module_status *a7_fl_status(void) {return &module.status;}
 static int readable(uintptr_t p,unsigned n) {return module.platform.readable(module.platform.opaque,p,n)==1;}
+static int refresh_preview(void) {
+#ifdef A7_FL_PREVIEW_REFRESH
+    int rc=a7_fl_preview_request(module.platform.view_base,&module.platform.backup,
+                                module.platform.readable,module.platform.opaque);
+    return rc==1?0:rc;
+#else
+    return 0;
+#endif
+}
 static int witnesses(enum a7_fl_platform_event event) {
     struct a7_fl_platform *p=&module.platform;
     return p->identity(p->opaque)==1 && p->event(p->opaque,event)==1;
@@ -174,6 +186,8 @@ static int model_write(void *unused,int id,int value) {
     if(!module.status.installed||module.status.fault) {leave(A7_FL_MODULE_PLATFORM);return 0;}
     int decoded;
     if(!native_adjust_decode(&module.trees[0],id,value,&decoded)) {leave(A7_FL_CONTROL_ARGUMENT);return 0;}
+    int old_mode=module.control.preference.enabled;
+    uint32_t old_crc=module.control.preference.candidate_crc;
 #ifdef A7_FL_CAPTURE_CONTROLS
     if(id>=0x7000&&id<=0x7005) {
         int rc=capture_check(module.control.preference.enabled);
@@ -195,7 +209,11 @@ static int model_write(void *unused,int id,int value) {
     if(!accepted) {leave(reconcile_failed_color(module.control.last_error));return 0;}
     if(!synchronize()) {module.status.fault=1;leave(A7_FL_MODULE_NODES);return 0;}
     if(module.control.dirty)save_feedback(0x0204eaab); /* Save */
-    leave(0);return 1;
+    int refresh=old_mode!=module.control.preference.enabled ||
+        (module.control.preference.enabled&&old_crc!=module.control.preference.candidate_crc);
+    /* LUT writes were accepted already. A rejected refresh must not pretend the
+     * scalar was rolled back. Expose the error and retry on explicit Save. */
+    leave(refresh?refresh_preview():0);return 1;
 }
 static int save_commit(void) {
     if(!enter())return A7_FL_MODULE_BUSY;
@@ -206,6 +224,7 @@ static int save_commit(void) {
      * Save node. It is never reached by scalar preview setters. External confirm
      * remains separately witness-gated and may be disabled by the bootstrap. */
     int rc=commit_checked();
+    if(!rc)rc=refresh_preview();
     /* Async dialog commits also repopulate the cached native menu labels.
      * Only a successful durable commit may show Complete; edits restore Save. */
     save_feedback(rc?0x0204ef87:0x0204ef85); /* Not Complete / Complete */
@@ -361,6 +380,8 @@ int a7_fl_cancel(void) {
     if(!enter())return A7_FL_MODULE_BUSY;
     if(!module.status.installed||module.status.fault)return leave(A7_FL_MODULE_PLATFORM);
     if(!witnesses(A7_FL_CANCEL_EVENT))return leave(A7_FL_MODULE_EVENT);
+    int old_mode=module.control.preference.enabled;
+    uint32_t old_crc=module.control.preference.candidate_crc;
     int rc=capture_check(module.control.preference.enabled);
 #ifdef A7_FL_CAPTURE_CONTROLS
     if(!rc&&module.control.dirty) {
@@ -375,6 +396,8 @@ int a7_fl_cancel(void) {
     rc=a7_fl_control_cancel(&module.control);
     if(rc)rc=reconcile_failed_color(rc);
     if(!rc&&!synchronize()){module.status.fault=1;rc=A7_FL_MODULE_NODES;}
+    if(!rc&&(old_mode!=module.control.preference.enabled ||
+       (module.control.preference.enabled&&old_crc!=module.control.preference.candidate_crc)))rc=refresh_preview();
     return leave(rc);
 }
 int a7_fl_uninstall(void) {

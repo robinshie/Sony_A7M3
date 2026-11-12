@@ -39,7 +39,10 @@ def main():
     ap.add_argument('--capture-look-proof',type=Path,help='Bind the two QEMU-verified fixed CAP looks')
     ap.add_argument('--capture-controls',action='store_true',help='Stronger CAP default and five capture controls; preserves legacy preferences')
     ap.add_argument('--save-dialog',action='store_true',help='Native Confirm/Cancel before saving, then completion feedback')
+    ap.add_argument('--preview-refresh',action='store_true',help='Experimental same-value native style replay after color edits and Save')
+    ap.add_argument('--preview-cycle',action='store_true',help='Experimental timed native style transition/restoration instead of r8 same-value replay')
     args=ap.parse_args()
+    if args.preview_cycle:args.preview_refresh=True
     if args.spatial_settings_only:OUT=OUT.with_name('native-module-spatial-settings-only')
     if args.capture_look_proof:
         if not args.spatial_settings_only or not args.with_bootstrap:
@@ -51,6 +54,9 @@ def main():
     if args.save_dialog:
         if not args.capture_controls:ap.error('--save-dialog requires the accepted capture-controls build')
         OUT=OUT.with_name('native-module-save-dialog')
+    if args.preview_refresh:
+        if not args.save_dialog:ap.error('--preview-refresh requires the accepted save-dialog build')
+        OUT=OUT.with_name('native-module-preview-cycle' if args.preview_cycle else 'native-module-preview-refresh')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -73,6 +79,12 @@ def main():
     header+=array('a7_pkg_original_sha',hashlib.sha256(originals[0]).digest())
     header+='static const char a7_pkg_build[24]="37114_13.2026020901";\n'
     capture_look=None;dependency_proofs={}
+    if args.preview_refresh:
+        script='research/native_preview_cycle_test.py' if args.preview_cycle else 'research/native_preview_test.py'
+        run([sys.executable,str(ROOT/script),'--usr',str(args.usr)])
+        key='native-preview-cycle/proof.json' if args.preview_cycle else 'native-preview-request/proof.json'
+        pp=ROOT/'.lab'/key
+        dependency_proofs[key]=sha(pp.read_bytes())
     if args.save_dialog:
         run([sys.executable,str(ROOT/'research/native_save_dialog.py'),'--usr',str(args.usr)])
         dp=ROOT/'.lab/native-save-dialog/proof.json'
@@ -101,7 +113,7 @@ def main():
                           source_qemu_proof_sha256=digest)
         dependency_proofs[key]=digest
     if args.capture_controls:
-        run([sys.executable,str(ROOT/'research/native_capture_controls_test.py')])
+        run([sys.executable,str(ROOT/'research/native_capture_controls_test.py'),'--route',str(args.capture_look_proof.resolve().parent)])
         cp=ROOT/'.lab/native-capture-controls-test/proof.json'
         capture_look.update(fixed_capture_tables=False,dynamic_capture_controls=True,control_count=5,
                             base_delta_scale=[3,2],max_packed_delta=[24,32,32],controls_proof_sha256=sha(cp.read_bytes()))
@@ -193,11 +205,13 @@ call_kernel_writer:
     if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
     if args.capture_controls:flags+=['-DA7_FL_CAPTURE_CONTROLS']
     if args.save_dialog:flags+=['-DA7_FL_SAVE_DIALOG','-I',str(ROOT/'.lab/native-save-dialog')]
+    if args.preview_refresh:flags+=['-DA7_FL_PREVIEW_REFRESH','-I',str(ROOT/('.lab/native-preview-cycle' if args.preview_cycle else '.lab/native-preview-request'))]
     run(['arm-none-eabi-gcc',*flags,'-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
          str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources],'-lgcc','-o','module-test.elf'],cwd=OUT)
     # The module integration fixture models opening/answering the dialog;
     # native dialog lifecycle instructions are exercised by its own fixture.
     if args.save_dialog:sources+=['payloads/a7-fl-dialog.c']
+    if args.preview_refresh:sources+=['payloads/a7-fl-preview-cycle.c' if args.preview_cycle else 'payloads/a7-fl-preview.c']
     objects=[]
     for i,path in enumerate(sources):
         name=f'part-{i}.o';objects.append(name)
@@ -207,13 +221,15 @@ call_kernel_writer:
     log=result.stdout+result.stderr;(OUT/'qemu.log').write_bytes(log);print(log.decode(),end='')
     if b'NATIVE_FL_MODULE_PASSED' not in log or b'FAIL ' in log:raise ValueError('Integration fixture failed')
     run(['arm-none-eabi-gcc',*flags,'-DA7_FL_TEST_SAVED_BOOT','-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
-         str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p!='payloads/a7-fl-dialog.c'],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
+         str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p not in ('payloads/a7-fl-dialog.c','payloads/a7-fl-preview.c','payloads/a7-fl-preview-cycle.c')],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
     boot_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     boot_log=boot_run.stdout+boot_run.stderr;(OUT/'boot.log').write_bytes(boot_log);print(boot_log.decode(),end='')
     if b'NATIVE_FL_MODULE_BOOT_PASSED' not in boot_log or b'FAIL ' in boot_log:raise ValueError('Cold boot integration fixture failed')
     if capture_look and (b'NATIVE_FL_CAPTURE_MODULE_PASSED' not in log or
                          b'NATIVE_FL_CAPTURE_BOOT_PASSED' not in boot_log):
         raise ValueError('CAP transaction integration fixture failed')
+    if args.preview_refresh and b'NATIVE_FL_PREVIEW_INTEGRATION_PASSED' not in log:
+        raise ValueError('Preview request integration fixture failed')
     source_files=sources+['payloads/a7-fl-module.h','payloads/a7-fl-runtime.h','payloads/a7-fl-runtime-prefs.h',
         'payloads/a7-fl-runtime-control.h','payloads/a7-fl-runtime-recovery.h','payloads/a7-fl-color.h','payloads/a7-fl-store.h',
         'research/native_adjust.h','research/native_menu.h','research/native_module.py','research/native_module_harness.c',
@@ -222,6 +238,8 @@ call_kernel_writer:
     if capture_look:source_files+=['payloads/a7-fl-capture.h']
     if args.capture_controls:source_files+=['payloads/a7-fl-capture-controls.h']
     if args.save_dialog:source_files+=['payloads/a7-fl-dialog.h']
+    if args.preview_refresh:source_files+=['payloads/a7-fl-preview.h']
+    if args.preview_cycle:source_files+=['payloads/a7-fl-preview-cycle.h']
     proof={'scope':'Original Sony generic nodes, process-manager dispatch and backup writer with modeled platform/OSAL/kernel/filesystem; resident FL integration',
            'original_caution_sha256':CAUTION_SHA,'original_view_sha256':VIEW_SHA,'original_ranges':ranges,
            'source_sha256':{p:sha((ROOT/p).read_bytes()) for p in source_files},
@@ -232,6 +250,9 @@ call_kernel_writer:
            'live_platform_bootstrap_verified':False,'camera_integration':False,'flash_ready':False,
            'spatial_settings_only':args.spatial_settings_only,
            'save_confirmation_dialog':args.save_dialog,
+           'preview_refresh_request':args.preview_refresh,
+           'preview_timed_cycle':args.preview_cycle,
+           'preview_refresh_hardware_verified':False,
            'feature_scope':('Still-photo Creative Look menu with native Page hierarchy and nonnegative selection enums; FL-inspired LUT with five signed backend controls and explicit Save; '+
                             ('three editable spatial settings persisted as preferences only; no spatial image effect' if args.spatial_settings_only else 'last three spatial controls disabled')),
            'hardware_validation_required':['Actual still-view boot Backup API readiness','Physical menu navigation and Save action','Cold-power persistence and calibration readback']}
