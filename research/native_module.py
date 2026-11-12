@@ -31,10 +31,23 @@ def array(name,values,kind='uint8_t'):
     return f'static const {kind} {name}[{len(values)}]={{\n'+',\n'.join(rows)+'\n};\n'
 
 def main():
+    global OUT
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--usr',type=Path,required=True);ap.add_argument('--bundle',type=Path,required=True)
     ap.add_argument('--with-bootstrap',action='store_true',help='Link and verify the actual Linux/platform bootstrap for staging')
-    args=ap.parse_args();OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
+    ap.add_argument('--spatial-settings-only',action='store_true',help='Build a separate demo with editable and savable spatial settings, without image processing')
+    ap.add_argument('--capture-look-proof',type=Path,help='Bind the two QEMU-verified fixed CAP looks')
+    ap.add_argument('--capture-controls',action='store_true',help='Stronger CAP default and five capture controls; preserves legacy preferences')
+    args=ap.parse_args()
+    if args.spatial_settings_only:OUT=OUT.with_name('native-module-spatial-settings-only')
+    if args.capture_look_proof:
+        if not args.spatial_settings_only or not args.with_bootstrap:
+            ap.error('CAP module preserves the installed spatial settings and requires the native bootstrap')
+        OUT=OUT.with_name('native-module-capture-look')
+    if args.capture_controls:
+        if not args.capture_look_proof:ap.error('--capture-controls requires --capture-look-proof')
+        OUT=OUT.with_name('native-module-capture-controls')
+    OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
         name=f'string_{locale}.uxc';raw=(ROOT/'.lab/native-fl-strings'/name).read_bytes()
@@ -55,6 +68,36 @@ def main():
     header+=array('a7_pkg_expand',struct.unpack('<129H',codec[:258]),'uint16_t')+array('a7_pkg_compress',codec[258:])
     header+=array('a7_pkg_original_sha',hashlib.sha256(originals[0]).digest())
     header+='static const char a7_pkg_build[24]="37114_13.2026020901";\n'
+    capture_look=None;dependency_proofs={}
+    if args.capture_look_proof:
+        path=args.capture_look_proof.resolve()
+        key=str(path.relative_to(ROOT/'.lab'))
+        raw=path.read_bytes();capture=json.loads(raw);digest=sha(raw)
+        if not capture.get('private_backup') or not any(x.startswith('NATIVE_3DLUT_CAPTURE_LOOK_PASSED:')
+                for x in capture.get('log',[])) or not capture.get('source_sha256'):
+            raise ValueError('Original CAP route and packed-table verification required')
+        for source_path,source_digest in capture['source_sha256'].items():
+            if sha((ROOT/source_path).read_bytes())!=source_digest:raise ValueError('Stale CAP proof: '+source_path)
+        tables=capture.get('capture_candidates',[])
+        if [t['property'] for t in tables]!=['0x30005','0x30006']:
+            raise ValueError('Both CAP candidates are required')
+        for i,t in enumerate(tables,1):
+            if t['file']!=f'offline-capture-table{i}.bin' or t['tested_levels']!=list(range(1,9)):
+                raise ValueError('Wrong CAP test artifact identity')
+            table=(path.parent/t['file']).read_bytes()
+            if (len(table)!=1280 or table[1215:]!=originals[i][1215:] or
+                sha(table)!=t['candidate_sha256'] or sha(originals[i])!=t['original_sha256']):
+                raise ValueError('CAP table proof and machine originals differ')
+            header+=array(f'a7_pkg_capture{i}',table)
+        capture_look=dict(fixed_capture_tables=True,property_ids=[0x30005,0x30006],tables=tables,
+                          source_qemu_proof_sha256=digest)
+        dependency_proofs[key]=digest
+    if args.capture_controls:
+        run([sys.executable,str(ROOT/'research/native_capture_controls_test.py')])
+        cp=ROOT/'.lab/native-capture-controls-test/proof.json'
+        capture_look.update(fixed_capture_tables=False,dynamic_capture_controls=True,control_count=5,
+                            base_delta_scale=[3,2],max_packed_delta=[24,32,32],controls_proof_sha256=sha(cp.read_bytes()))
+        dependency_proofs[str(cp.relative_to(ROOT/'.lab'))]=sha(cp.read_bytes())
     (OUT/'a7-fl-module-data.h').write_text(header)
     caution=ELF(args.usr/'lib/CautionConfig.so');view=ELF(args.usr/'lib/viewUnified2.so')
     if sha(caution.data)!=CAUTION_SHA or sha(view.data)!=VIEW_SHA:raise ValueError('Pinned original native inputs required')
@@ -111,7 +154,8 @@ call_kernel_writer:
     sources=['payloads/a7-fl-module.c','payloads/a7-fl-runtime.c','payloads/a7-fl-runtime-prefs.c',
              'payloads/a7-fl-runtime-control.c','payloads/a7-fl-runtime-recovery.c','payloads/a7-fl-store.c',
              'research/native_adjust.c','research/native_menu.c']
-    dependency_proofs={}
+    if capture_look:sources+=['payloads/a7-fl-capture.c']
+    if args.capture_controls:sources+=['payloads/a7-fl-capture-controls.c']
     if args.with_bootstrap:
         run([sys.executable,str(ROOT/'research/native_bootstrap.py'),'--usr',str(args.usr)])
         run([sys.executable,str(ROOT/'research/native_bootstrap_test.py')])
@@ -137,6 +181,9 @@ call_kernel_writer:
     flags=['-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding',
            '-fno-builtin','-fno-strict-aliasing','-fstack-usage','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
            '-I',str(ROOT/'payloads'),'-I',str(ROOT/'research'),'-I',str(OUT),'-I',str(ROOT/'.lab/native-bootstrap')]
+    if args.spatial_settings_only:flags+=['-DA7_FL_SPATIAL_SETTINGS_ONLY']
+    if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
+    if args.capture_controls:flags+=['-DA7_FL_CAPTURE_CONTROLS']
     run(['arm-none-eabi-gcc',*flags,'-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
          str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources],'-lgcc','-o','module-test.elf'],cwd=OUT)
     objects=[]
@@ -152,11 +199,16 @@ call_kernel_writer:
     boot_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     boot_log=boot_run.stdout+boot_run.stderr;(OUT/'boot.log').write_bytes(boot_log);print(boot_log.decode(),end='')
     if b'NATIVE_FL_MODULE_BOOT_PASSED' not in boot_log or b'FAIL ' in boot_log:raise ValueError('Cold boot integration fixture failed')
+    if capture_look and (b'NATIVE_FL_CAPTURE_MODULE_PASSED' not in log or
+                         b'NATIVE_FL_CAPTURE_BOOT_PASSED' not in boot_log):
+        raise ValueError('CAP transaction integration fixture failed')
     source_files=sources+['payloads/a7-fl-module.h','payloads/a7-fl-runtime.h','payloads/a7-fl-runtime-prefs.h',
         'payloads/a7-fl-runtime-control.h','payloads/a7-fl-runtime-recovery.h','payloads/a7-fl-color.h','payloads/a7-fl-store.h',
         'research/native_adjust.h','research/native_menu.h','research/native_module.py','research/native_module_harness.c',
         'research/native_fl_runtime_harness.c','research/native_fl_runtime.py','research/native_adjust_fixture.py','research/native_adjust_harness.c','research/elf32.py','research/uxc_strings.py']
     if args.with_bootstrap:source_files+=['payloads/a7-fl-bootstrap.h','payloads/a7-fl-posix.h','research/native_bootstrap.py','research/native_bootstrap_test.py','research/native_bootstrap_test_harness.c']
+    if capture_look:source_files+=['payloads/a7-fl-capture.h']
+    if args.capture_controls:source_files+=['payloads/a7-fl-capture-controls.h']
     proof={'scope':'Original Sony generic nodes, process-manager dispatch and backup writer with modeled platform/OSAL/kernel/filesystem; resident FL integration',
            'original_caution_sha256':CAUTION_SHA,'original_view_sha256':VIEW_SHA,'original_ranges':ranges,
            'source_sha256':{p:sha((ROOT/p).read_bytes()) for p in source_files},
@@ -165,8 +217,13 @@ call_kernel_writer:
            'ready_for_staging':args.with_bootstrap,'dependency_proof_sha256':dependency_proofs,
            'platform_bootstrap_guard_fixture_verified':args.with_bootstrap,
            'live_platform_bootstrap_verified':False,'camera_integration':False,'flash_ready':False,
-           'feature_scope':'Still-photo Creative Look menu with native Page hierarchy and nonnegative selection enums; FL-inspired LUT with five signed backend controls and explicit Save; last three spatial controls disabled',
+           'spatial_settings_only':args.spatial_settings_only,
+           'feature_scope':('Still-photo Creative Look menu with native Page hierarchy and nonnegative selection enums; FL-inspired LUT with five signed backend controls and explicit Save; '+
+                            ('three editable spatial settings persisted as preferences only; no spatial image effect' if args.spatial_settings_only else 'last three spatial controls disabled')),
            'hardware_validation_required':['Actual still-view boot Backup API readiness','Physical menu navigation and Save action','Cold-power persistence and calibration readback']}
+    if capture_look:
+        proof['capture_look']=dict(capture_look,arm_transaction_verified=True)
+        proof['hardware_validation_required']+=['sRGB and Adobe RGB JPEG A/B; AV-CAM application']
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 if __name__=='__main__':main()

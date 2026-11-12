@@ -59,13 +59,26 @@ class Codec:
 def bounded(value, low, high):
     return min(high, max(low, value))
 
+def cap_level_code(raw, level):
+    """Signed interpretation after the original non-SD scale and 7-bit pack."""
+    signed = raw if raw < 128 else raw-256
+    packed = (signed if level == 8 else signed * level // 8) & 127
+    return packed if packed < 64 else packed-128
 
-def build_table(original, codec, recipe, strength=0.65):
+
+def build_table(original, codec, recipe, strength=0.65, *, capture_table=None):
     require(len(original) == 1280, 'Expected native property size 1280')
     require(isinstance(strength, (int, float)) and not isinstance(strength, bool) and
             math.isfinite(strength) and 0 <= strength <= 1, 'Invalid strength')
     validate(recipe)
-    old = [x if x < 128 else x-256 for x in original[:1215]]
+    # The CAP source is stored as seven-bit nodes. The original level-8
+    # path masks each component to seven bits; levels 1–7 scale the raw
+    # signed-eight-bit input instead and are outside this experiment.
+    require(capture_table in (None, 1, 2), 'Unknown CAP source table')
+    packed7 = capture_table == 2
+    sign, wrap = (64, 128) if packed7 else (128, 256)
+    require(not packed7 or all(x < wrap for x in original[:1215]), 'CAP source must use seven-bit nodes')
+    old = [x if x < sign else x-wrap for x in original[:1215]]
     require(all(-64 <= x <= 63 for x in old), 'Source must use signed eight-bit/seven-bit-compatible nodes')
     if strength == 0:
         return original
@@ -96,10 +109,22 @@ def build_table(original, codec, recipe, strength=0.65):
                     value = bounded(base[plane]+step, -64, 63)
                     # Keep the luminance endpoints inside the original domain.
                     if plane == 0:
-                        value = bounded(value, max(-64, -a*64), min(63, 256-a*64))
-                    out[i+plane*405] = value & 255
+                        lo,hi=max(-64,-a*64),min(63,256-a*64)
+                        # Preserve the CAP factory endpoint offset when it
+                        # already lies outside the nominal display domain.
+                        if capture_table is not None:
+                            lo,hi=min(lo,base[plane]),max(hi,base[plane])
+                        value = bounded(value,lo,hi)
+                    at = i+plane*405
+                    encoded = value & (wrap-1)
+                    if capture_table is not None and any(abs(cap_level_code(encoded, level) -
+                                           cap_level_code(original[at], level)) > MAX_DELTA[plane]
+                                       for level in range(1, 8)):
+                        # Keep original nodes at scale-dependent wrap boundaries.
+                        encoded = original[at]
+                    out[at] = encoded
     require(out[1215:] == original[1215:], 'Native property tail changed')
-    require(all(abs((new if new < 128 else new-256)-before) <= MAX_DELTA[p]
+    require(all(abs((new if new < sign else new-wrap)-before) <= MAX_DELTA[p]
                 for p in range(3) for before,new in zip(old[p*405:(p+1)*405], out[p*405:(p+1)*405])),
             'Native experiment exceeded its code-delta budget')
     return bytes(out)

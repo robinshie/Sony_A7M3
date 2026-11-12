@@ -18,12 +18,16 @@ from lut3d_format import packed_index, pack, unpack, BANK_COUNTS, BANK_REGISTERS
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '.lab/lut3d-native'
+# QEMU-only veneer; this file offset is not an installation address.
+REFRESH_CALL = 0x5239d4
+REFRESH_VENEER = 0x523bc0
 RANGES = {
     'chroma_compress': (0x522d2c, 0x522d68),
     'chroma_expand': (0x522d68, 0x522da8),
     'chroma_expansion_table': (0x8a999e, 0x8a9aa0),
     'chroma_compression_table': (0x9b5921, 0x9b5b22),
     'pack': (0x522da8, 0x522dec),
+    'check_refresh': (0x522dec, 0x5230d4),
     'create_copy': (0x5231fc, 0x523894),
     'permutation': (0x8a9658, 0x8a9982),
     'depth_reset': (0x7cd4de, 0x7cd4f0),
@@ -34,8 +38,14 @@ RANGES = {
     'sd_condition': (0x523194, 0x5231fc),
     'select_table': (0x523894, 0x523bb8),
     'two_plane_amount': (0x526978, 0x526a2c),
+    'make_descriptor': (0x526a90, 0x527800),
+    'descriptor_fields': (0x525cd4, 0x525ed8),
+    'descriptor_mode': (0x7cd950, 0x7cd970),
+    'descriptor_override': (0x7d28bc, 0x7d28da),
     'bit_getter': (0x7cbc9e, 0x7cbca6),
     'low_nibble': (0x7cd5ba, 0x7cd5c0),
+    'capture_epoch': (0x7661ec, 0x7661f2),
+    'refresh_status': (0x7cf1ea, 0x7cf1f2),
 }
 
 
@@ -75,6 +85,7 @@ def main():
     cli.add_argument('--avcam', required=True, type=Path)
     cli.add_argument('--settings', type=Path, help='Optional existing private BK4 snapshot; read only')
     cli.add_argument('--pmca', type=Path, help='Local PMCA source needed to read --settings')
+    cli.add_argument('--capture-look', action='store_true', help='Generate and test offline CAP table candidates')
     cli.add_argument('--out', type=Path, default=OUT, help='Private output directory for this fixture')
     args = cli.parse_args()
     OUT = args.out.resolve()
@@ -83,6 +94,8 @@ def main():
         cli.error('Requires the pinned ILCE-7M3 4.04 av-cam.bin')
     if bool(args.settings) != bool(args.pmca):
         cli.error('--settings and --pmca must be supplied together')
+    if args.capture_look and not args.settings:
+        cli.error('--capture-look needs an original private settings snapshot')
     # The two native backup-ID lists use the same indices for these four tables.
     backup_ids = (0x30004, 0x30005, 0x30006, 0x30007)
     for start in (0x1141964, 0x1141c18):
@@ -92,6 +105,13 @@ def main():
     if struct.unpack_from('<4I', data, 0x1141ed8) != tuple(BASE+x for x in destinations):
         raise ValueError('Backup destination registry changed')
     fixture = bytes((i*37+i//1280*11)&255 for i in range(5120))
+    controls = bytearray(4608)
+    controls[0x150:0x162] = bytes.fromhex('02020101020201010000ffff0000ffffffff')
+    if (struct.unpack_from('<I', data, 0x11923e0)[0] != BASE + 0x10611c6
+            or struct.unpack_from('<I', data, 0x1141ecc)[0] != BASE + 0x10611c6
+            or any(struct.unpack_from('<I', data, start+4)[0] != 0x30001
+                   for start in (0x1141964, 0x1141c18))):
+        raise ValueError('Descriptor control property registry changed')
     backup_record = None
     if args.settings:
         sys.path.insert(0, str(args.pmca.resolve()))
@@ -104,23 +124,56 @@ def main():
         if any(len(p.data) != 1280 for p in properties):
             raise ValueError('Unexpected LUT backup property length')
         fixture = b''.join(p.data for p in properties)
+        descriptor_controls = backup.getProperty(0x30001)
+        if len(descriptor_controls.data) != len(controls) or descriptor_controls.attr != 8:
+            raise ValueError('Unexpected descriptor control property')
+        controls = descriptor_controls.data
         backup_record = {'settings_sha256': sha(raw), 'properties': [
             {'id': hex(key), 'bytes': len(p.data), 'attributes': p.attr, 'sha256': sha(p.data),
              'runtime_destination_offset': hex(dst)}
             for key, p, dst in zip(backup_ids, properties, destinations)]}
     verify_format(data)
+    candidates = {}
+    if args.capture_look:
+        from native_fl import Codec, DEFAULT_RECIPE, build_table
+        codec, recipe = Codec.from_firmware(data), json.loads(DEFAULT_RECIPE.read_bytes())
+        for table in (1, 2):
+            stock = fixture[1280*table:1280*(table+1)]
+            candidate = build_table(stock, codec, recipe, capture_table=table)
+            if candidate == stock or candidate[1215:] != stock[1215:]:
+                raise ValueError(f'CAP table {table} does not preserve its property tail or has no effect')
+            candidates[table] = (stock, candidate)
     OUT.mkdir(mode=0o700, parents=True, exist_ok=True)
     OUT.chmod(0o700)
     (OUT / 'proof.json').unlink(missing_ok=True)
+    for table in (1, 2):
+        capture_artifact = OUT / f'offline-capture-table{table}.bin'
+        capture_artifact.unlink(missing_ok=True)
+        if table in candidates:
+            capture_artifact.write_bytes(candidates[table][1])
     asm = '.syntax unified\n'
     sections = []
-    (OUT / 'table_inputs.bin').write_bytes(fixture)
+    (OUT / 'table_inputs.bin').write_bytes(fixture + controls + bytes([bool(candidates)]) +
+                                          b''.join(pair[1] for pair in candidates.values()))
     asm += '.section .table_inputs,"a"\n.incbin "table_inputs.bin"\n'
     sections.append((0x40300000, 'table_inputs'))
     for name, (start, end) in RANGES.items():
         (OUT / (name + '.bin')).write_bytes(data[start:end])
-        asm += f'.section .{name},"ax"\n.incbin "{name}.bin"\n'
+        asm += f'.section .{name},"ax"\n'
+        if name == 'select_table':
+            # The original call is BL to the refresh predicate. Interpose only
+            # that call in the guest, leaving the original routine available.
+            if data[REFRESH_CALL:REFRESH_CALL+4] != bytes.fromhex('fff70afa'):
+                raise ValueError('Unexpected native refresh call preimage')
+            asm += f'.incbin "{name}.bin",0,{REFRESH_CALL-start}\n.thumb\n'
+            asm += 'bl fixture_refresh_veneer\n'
+            asm += f'.incbin "{name}.bin",{REFRESH_CALL+4-start}\n'
+        else:
+            asm += f'.incbin "{name}.bin"\n'
         sections.append((BASE + start, name))
+    asm += ('.section .fixture_refresh,"ax"\n.thumb\n.thumb_func\nfixture_refresh_veneer:\n'
+            'ldr ip,1f\nbx ip\n.balign 4\n1: .word fixture_refresh_gate\n')
+    sections.append((BASE + REFRESH_VENEER, 'fixture_refresh'))
     for offset, target, arm in ((0x3a4bc0, 'native_log', False),
                                 (0x50ca58, 'native_copy', True),
                                 (0x50d13c, 'native_set', True)):
@@ -166,10 +219,15 @@ _start:
     log = result.stdout + result.stderr
     (OUT / 'qemu.log').write_bytes(log)
     print(log.decode(errors='replace'), end='')
-    if result.returncode or b'QEMU_NATIVE_3DLUT_PASSED' not in result.stdout or b'FAIL ' in log:
+    if (result.returncode or b'QEMU_NATIVE_3DLUT_PASSED' not in result.stdout
+            or b'NATIVE_3DLUT_REFRESH_PASSED' not in result.stdout
+            or b'NATIVE_3DLUT_CAPTURE_ROUTE_PASSED' not in result.stdout or b'FAIL ' in log
+            or (candidates and b'NATIVE_3DLUT_CAPTURE_LOOK_PASSED' not in result.stdout)):
         raise ValueError('Native 3D LUT experiment failed')
     sources = ('research/lut3d_native.py', 'research/lut3d_format.py',
                'research/lut3d_harness.c', 'research/gamma_avcam.py')
+    if candidates:
+        sources += ('research/native_fl.py', 'research/fl_look.py', 'recipes/fl-inspired-v0.json')
     proof = {
         'avcam_sha256': SHA, 'load_base': hex(BASE),
         'native_ranges': {k: {'file_offset': hex(a), 'bytes': b-a, 'sha256': sha(data[a:b])}
@@ -183,12 +241,25 @@ _start:
         'pack_cases': 103680, 'table_cases': 180, 'selector_cases': 512, 'bank_copy_calls': 8,
         'coordinate_codec_cases': 8194, 'coordinate_codec_functions_verified': True,
         'table_input_sha256': sha(fixture), 'private_backup': backup_record,
+        'descriptor_controls_sha256': sha(controls),
+        'descriptor_control_input': 'BK4 0x30001' if args.settings else 'synthetic controls',
+        'capture_route_scope': 'Original descriptor producer and table selector; fixture still modes, no live context or pixels',
         'depth_adjustment_tested': False, 'sd_conversion_tested': False,
         'storage_layout_verified': True, 'native_selection_executed': True,
         'selection_scope': 'All 256 selector byte values at levels 7 and 8; fixed zero mode/config and state=1; no scheduling',
+        'refresh_scope': 'Original state=2 selector; QEMU-only interposition of its refresh call with an opt-in source-change gate; inactive gate delegates to original predicate',
+        'qemu_refresh_interposition': {'call_offset': hex(REFRESH_CALL), 'veneer_fixture_offset': hex(REFRESH_VENEER)},
         'color_space_and_units_known': False, 'hardware_interpolation_known': False,
         'jpeg_output_proven': False, 'camera_integration': False, 'flash_ready': False,
     }
+    if candidates:
+        proof['capture_candidates'] = [{
+            'property': hex(0x30004 + table), 'tested_levels': list(range(1, 9)), 'bytes': len(candidate),
+            'file': f'offline-capture-table{table}.bin',
+            'original_sha256': sha(stock), 'candidate_sha256': sha(candidate),
+            'changed_source_bytes': sum(a != b for a, b in zip(stock, candidate)),
+            'original_packed_table_restored': True, 'installable': False,
+        } for table, (stock, candidate) in candidates.items()]
     (OUT / 'proof.json').write_text(json.dumps(proof, indent=2) + '\n')
 
 

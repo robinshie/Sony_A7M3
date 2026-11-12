@@ -17,4 +17,10 @@ int a7_fl_spatial_luma(const uint8_t *src,size_t src_bytes,unsigned src_stride,
                        uint8_t *dst,size_t dst_bytes,unsigned dst_stride,
                        unsigned width,unsigned height,const A7FLSpatialParams *,
                        void *workspace,size_t workspace_bytes);
+/* Same output as a7_fl_spatial_luma, using one writable, exclusively owned
+ * luma plane. The caller owns synchronization and buffer lifetime. */
+size_t a7_fl_spatial_inplace_workspace(unsigned width);
+int a7_fl_spatial_inplace(uint8_t *luma,size_t bytes,unsigned stride,
+                          unsigned width,unsigned height,const A7FLSpatialParams *,
+                          void *workspace,size_t workspace_bytes);
 #endif

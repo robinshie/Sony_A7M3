@@ -35,6 +35,7 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
     proof=dict(source_sha256={p:digest((ROOT/p).read_bytes()) for p in sources},
         host_log_sha256=digest(host.stdout+host.stderr),qemu_log_sha256=digest(arm.stdout+arm.stderr),
         log=arm.stdout.decode().splitlines(),workspace_bytes_at_6000_pixels=420000,
+        inplace_workspace_bytes_at_6000_pixels=576000,
         camera_hook=False,hardware_isp_tested=False,camera_image_tested=False,flash_ready=False,
         scope='Own experimental 8-bit luma spatial kernel; independent 2-D oracle, ASan/UBSan host, same C under ARM QEMU')
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')

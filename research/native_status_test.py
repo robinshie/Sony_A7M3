@@ -16,8 +16,6 @@ import zlib
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from camera import native_status as status
-from camera.native_install import Bundle
-from research.elf32 import ELF
 OUT=ROOT/'.lab/native-status-test'
 checks=0
 def check(ok,message):
@@ -34,11 +32,23 @@ class Preference(ctypes.Structure):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--bundle',type=Path,default=ROOT/'.lab/native-install-bound')
-    options=parser.parse_args();bundle_path=options.bundle.resolve()
+    binding=parser.add_mutually_exclusive_group()
+    binding.add_argument('--bundle',type=Path)
+    binding.add_argument('--replacement-binding',type=Path)
+    parser.add_argument('--capture-proof',type=Path)
+    parser.add_argument('--module-proof',type=Path)
+    parser.add_argument('--probe',type=Path,default=ROOT/'.lab/native-inspect')
+    options=parser.parse_args()
+    replacement=options.replacement_binding.resolve() if options.replacement_binding else None
+    bundle_path=(options.bundle or ROOT/'.lab/native-install-bound').resolve()
+    module_proof=(options.module_proof.resolve() if options.module_proof else
+                  replacement/'module-proof.json' if replacement else ROOT/'.lab/native-module/proof.json')
+    probe=options.probe.resolve()
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
-    bundle=Bundle(bundle_path,ROOT/'.lab/native-module/proof.json',ROOT/'.lab/creative-icons-belt',ROOT/'.lab/native-fl-strings')
     data=ROOT/'.lab/native-fl-01';base=(data/'candidate.bin').read_bytes();codec=(data/'codec.bin').read_bytes()
+    capture_proof=options.capture_proof.resolve() if options.capture_proof else None
+    attested=status.Profile(bundle_path,module_proof,probe,data,replacement_binding=replacement,capture_proof=capture_proof)
+    module_path=replacement/'new-module.so' if replacement else bundle_path/'input0.bin'
     originals=[(data/f'{key:08x}.bin').read_bytes() for key in range(0x30004,0x30008)]
     digest=hashlib.sha256(originals[0]).digest();build=status.BUILD_ID+bytes(24-len(status.BUILD_ID))
     wrapper=OUT/'reference.c';wrapper.write_text('''#include "a7-fl-color.h"
@@ -48,8 +58,29 @@ int generate(const uint8_t *base,const uint8_t *codec,const int *p,uint8_t *outp
  return a7_fl_adjust_lut(base,1280,expansion,codec+258,&values,output,1280);
 }
 ''')
+    if attested.capture_controls:
+        with wrapper.open('a') as f:f.write('''
+#include "a7-fl-capture-controls.h"
+static struct a7_capture_controls cc;
+static uint16_t cc_expand[129];
+static int dummy_size(uint32_t i){(void)i;return 1280;}
+static int dummy_attr(uint32_t i){(void)i;return 8;}
+static int dummy_read(uint32_t i,void*p){(void)i;(void)p;return -1;}
+static int dummy_write(uint16_t m,uint32_t i,const void*p){(void)m;(void)i;(void)p;return -1;}
+int prepare_capture(const uint8_t *tables,const uint8_t *codec){
+ for(unsigned i=0;i<129;i++)cc_expand[i]=codec[i*2]|(uint16_t)codec[i*2+1]<<8;
+ const uint8_t *stock[]={tables,tables+1280},*legacy[]={tables+2560,tables+3840};
+ struct a7_fl_api api={dummy_size,dummy_attr,dummy_read,dummy_write};
+ return a7_capture_prepare(&cc,&api,stock,legacy,cc_expand,codec+258);
+}
+int generate_capture(unsigned t,const int *p,uint8_t *out){
+ A7FLColorParams v={p[0],p[1],p[2],p[3],p[4]};return a7_capture_generate(&cc,t,&v,out);
+}
+''')
     subprocess.run(['cc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I',str(ROOT/'payloads'),str(wrapper),
-                    str(ROOT/'payloads/a7-fl-runtime.c'),str(ROOT/'payloads/a7-fl-runtime-prefs.c'),'-o',str(OUT/'reference.so')],check=True)
+                    str(ROOT/'payloads/a7-fl-runtime.c'),str(ROOT/'payloads/a7-fl-runtime-prefs.c'),
+                    *([str(ROOT/'payloads/a7-fl-capture-controls.c')] if attested.capture_controls else []),
+                    '-o',str(OUT/'reference.so')],check=True)
     lib=ctypes.CDLL(str(OUT/'reference.so'))
     lib.generate.argtypes=[ctypes.c_void_p]*4;lib.generate.restype=ctypes.c_int
     lib.a7_fl_preference_encode.argtypes=[ctypes.c_void_p,ctypes.POINTER(Preference),ctypes.c_void_p,ctypes.c_void_p]
@@ -67,6 +98,17 @@ int generate(const uint8_t *base,const uint8_t *codec,const int *p,uint8_t *outp
         generated=status.adjusted_lut(base,codec,p)
         check(generated==out.raw,'Python LUT calculation exactly matches actual C including signed division')
         check(generated[1215:]==base[1215:],'calibration property tail unchanged')
+    if attested.capture_controls:
+        cap_bytes=b''.join(originals[1:3])+b''.join(attested.capture[k] for k in status.CAPTURE_PROPERTIES)
+        lib.prepare_capture.argtypes=[ctypes.c_void_p]*2
+        lib.generate_capture.argtypes=[ctypes.c_uint,ctypes.c_void_p,ctypes.c_void_p]
+        check(lib.prepare_capture(cap_bytes,codec)==0,'actual C CAP preparation')
+        for p in cases:
+            for t,key in enumerate(status.CAPTURE_PROPERTIES):
+                out=ctypes.create_string_buffer(1280);values=(ctypes.c_int*5)(*p)
+                check(lib.generate_capture(t,values,out)==0,'actual C CAP generation')
+                check(out.raw==status.adjusted_capture(originals[t+1],attested.capture[key],t,codec,p),
+                      'Python CAP readback matches C for both source encodings')
     for p in ([-10,0,0,0,0],[0,0,0,-1,0],[0,0,0,10,0],[0,0,0,0,10]):
         rejects(lambda:status.adjusted_lut(base,codec,p),'invalid control rejected')
     def preference(parameters,generation=5,enabled=1):
@@ -93,7 +135,7 @@ int generate(const uint8_t *base,const uint8_t *codec,const int *p,uint8_t *outp
         damaged=bytearray(pref);struct.pack_into('<I',damaged,offset,value);struct.pack_into('<I',damaged,124,zlib.crc32(damaged[:124]));out=Preference()
         native=lib.a7_fl_preference_decode(ctypes.byref(out),bytes(damaged),128,digest,build)
         check(native!=0 and status.decode_preference(bytes(damaged),digest.hex())['state']=='invalid','valid-checksum invalid preference values rejected by Python and C')
-    module=ELF(bundle.directory/'input0.bin');symbols={'bootstrap_symbol':module.symbols['a7_fl_bootstrap_status']['value'],'runtime_symbol':module.symbols['a7_fl_status']['value']}
+    symbols=attested.symbols
     def report(mode=1,loaded=1,stable=1,installed=1,ready=1,dirty=0,parameters=params):
         header=struct.pack('<IIi4Ii3I',0x41374653,1,loaded,0x40000000,0x70000000,
                            0x70000000+symbols['bootstrap_symbol'],0x70000000+symbols['runtime_symbol'],0,36,68,stable)
@@ -116,18 +158,30 @@ int generate(const uint8_t *base,const uint8_t *codec,const int *p,uint8_t *outp
     damaged=bytearray(raw);struct.pack_into('<i',damaged,108,-7)
     check(status.decode_report(bytes(damaged),symbols)['state']=='module-reported-error','last native failure remains visible')
     profile=types.SimpleNamespace(original=originals,base=base,codec=codec,original_sha=digest.hex(),symbols=symbols,
-                                  bundle=bundle,payload=b'mock-readonly-NOLOAD-probe')
+                                  module_record=attested.module_record,capture=attested.capture,capture_controls=attested.capture_controls,payload=b'mock-readonly-NOLOAD-probe')
     candidate=status.adjusted_lut(base,codec,params[:5]);tables=[candidate,*originals[1:]]
+    for key,capture_table in profile.capture.items():
+        i=key-0x30004
+        tables[i]=status.adjusted_capture(originals[i],capture_table,i-1,codec,params[:5]) if profile.capture_controls else capture_table
     result=status.observations(profile,decoded,[pref,None],tables)
-    check(result['active_table_matches_runtime'] and result['other_three_tables_original'] and result['runtime_matches_saved_preferences'],
+    check(result['active_table_matches_runtime'] and result['untouched_table3_original'] and result['runtime_matches_saved_preferences'],
           'nonzero control LUT and saved settings verified exactly')
+    check(result['capture_tables_match_runtime']==(True if profile.capture else None) and
+          result['other_three_tables_original']==(not profile.capture) and not result['jpeg_application_verified'],
+          'readback distinguishes capture vs legacy and never certifies JPEG application')
     off=status.observations(profile,status.decode_report(report(mode=0),symbols),[preference(params,enabled=0),None],originals)
     check(off['active_table_matches_runtime'] and off['runtime_matches_saved_preferences'],'Off verifies original table and saved mode')
+    if profile.capture:
+        for i in (1,2):
+            partial=list(tables);partial[i]=originals[i]
+            mismatch=status.observations(profile,decoded,[pref,None],partial)
+            check(mismatch['preview_table_matches_runtime'] and not mismatch['capture_tables_match_runtime'] and
+                  not mismatch['active_table_matches_runtime'],'either wrong capture table invalidates active readback')
     absent=status.observations(profile,status.decode_report(report(loaded=0),symbols),[None,None],tables)
     check(absent['active_table_matches_runtime'] is None and absent['runtime_matches_saved_preferences'] is None,
           'recognized table bytes alone never imply a loaded module')
     changed=list(tables);changed[3]=bytes([tables[3][0]^1])+tables[3][1:]
-    check(not status.observations(profile,decoded,[pref,None],changed)['other_three_tables_original'],'unrelated calibration mutation detected')
+    check(not status.observations(profile,decoded,[pref,None],changed)['untouched_table3_original'],'unrelated calibration mutation detected')
     check(not status.observations(profile,decoded,[pref,None],originals)['active_table_matches_runtime'],'enabled but original table mismatch detected')
     result=status.observations(profile,status.decode_report(report(dirty=1),symbols),[pref,None],tables)
     check(result['active_table_matches_runtime'] and result['runtime_matches_saved_preferences'] is False,'unsaved preview distinguished from persisted setting')
@@ -137,7 +191,7 @@ int generate(const uint8_t *base,const uint8_t *codec,const int *p,uint8_t *outp
         missing=(0,0x10000006)
         def __init__(self):self.calls=[]
         def contents(self,path):
-            self.calls.append(('contents',path));return status.BUILD_ID if path=='/version.txt' else (bundle.directory/'input0.bin').read_bytes()
+            self.calls.append(('contents',path));return status.BUILD_ID if path=='/version.txt' else module_path.read_bytes()
         def run(self,payload,name):
             self.calls.append(('run',name));check(payload==profile.payload and name=='a7status.bin','only attested NOLOAD probe invoked');return raw
         def read(self,path,maximum):
@@ -173,17 +227,20 @@ native_status.main()
 assert not any(n.startswith(('usb','pmca')) or n in ('camera.service','camera.handoff') for n in sys.modules)
 '''
     offline_outputs=[]
+    cli=['--replacement-binding',str(replacement)] if replacement else ['--bundle',str(bundle_path)]
+    cli+=['--module-proof',str(module_proof),'--probe',str(probe)]
+    if capture_proof:cli+=['--capture-proof',str(capture_proof)]
     for args in (['--offline'],['--decode',str(OUT/'resident-fixture.bin')]):
-        run=subprocess.run([sys.executable,'-c',guard,'--bundle',str(bundle_path),*args],cwd=ROOT,check=True,capture_output=True,text=True)
+        run=subprocess.run([sys.executable,'-c',guard,*cli,*args],cwd=ROOT,check=True,capture_output=True,text=True)
         output=json.loads(run.stdout);check(output['camera_contacted'] is False,'actual offline/decode CLI never imports transport')
         offline_outputs.append(output)
     h=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
     sources=['camera/native_status.py','research/native_status_test.py','camera/native_install.py','payloads/a7-fl-color.h',
              'payloads/a7-fl-runtime.c','payloads/a7-fl-runtime-prefs.c','payloads/a7-fl-runtime-prefs.h','payloads/a7-fl-runtime.h']
     proof={'source_sha256':{p:h(ROOT/p) for p in sources},'checks':checks,'color_cases':len(cases),
-           'module_sha256':bundle.files[0]['sha256'],'camera_contacted':False,
-           'probe_proof_sha256':h(ROOT/'.lab/native-inspect/proof.json'),
-           'bundle_manifest_sha256':h(bundle.manifest_path),'offline_outputs':offline_outputs,
+           'module_sha256':attested.module_record['sha256'],'camera_contacted':False,
+           'probe_proof_sha256':h(probe/'proof.json'),
+           'bundle_manifest_sha256':h((replacement or bundle_path)/'manifest.json'),'offline_outputs':offline_outputs,
            'scope':'Actual C LUT generator and preference codec compared with host decoder; report corruption and mocked read-only Factory workflow. No USB or live camera writes.'}
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
     print('NATIVE_STATUS_CHECKS',checks,'COLOR_CASES',len(cases));print('NATIVE_STATUS_TESTS_PASSED')

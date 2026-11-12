@@ -23,6 +23,7 @@ static uint8_t other_tables_data[3][1280];
 static unsigned identity_calls,identity_failure;
 static unsigned properties_size,attributes,callback_count,write_calls,rpc_calls;
 static unsigned lock_depth,saves,scenario,failure,reentrant,tests;
+static uint32_t write_property;
 static uint32_t header[16],property[16];
 #ifdef A7_FL_SEPARATE_KERNEL_STACK
 extern int call_kernel_writer(unsigned,unsigned,const void *);
@@ -45,22 +46,27 @@ static int same(const void *a,const void *b,unsigned n) {for(unsigned i=0;i<n;i+
 void *mock_header(void) {return header;}
 void mock_lock(void *p) {check(p==mock_locks+3*28 && lock_depth==0,"kernel subsystem lock");lock_depth=1;}
 void mock_unlock(void *p) {check(p==mock_locks+3*28 && lock_depth==1,"kernel unlock");lock_depth=0;}
-void *mock_search(uint32_t id) {return id==A7_FL_PROPERTY?property:0;}
+void *mock_search(uint32_t id) {
+    return id==write_property && id>=A7_FL_PROPERTY && id<=A7_FL_PROPERTY+2?property:0;
+}
+static uint8_t *write_destination(void) {
+    return write_property==A7_FL_PROPERTY?data_guarded+1:other_tables_data[write_property-A7_FL_PROPERTY-1];
+}
 unsigned mock_attr(void *p) {check(p==property,"kernel attr token");return attributes;}
 unsigned mock_id1(void *p) {check(p==header,"kernel header token");return 1;}
 unsigned mock_vmax(void *p) {check(p==property,"kernel size token");return 0;}
 unsigned mock_size(void *p) {check(p==property,"kernel fixed-size token");return properties_size;}
 void *mock_size_ptr(void *p) {(void)p;check(0,"fixed-size LUT must not resize");return 0;}
-void *mock_data(void *p) {check(p==property && lock_depth==1,"kernel data under lock");return data_guarded+1;}
+void *mock_data(void *p) {check(p==property && lock_depth==1,"kernel data under lock");return write_destination();}
 void mock_log(void) {}
 void *mock_copy(void *d,const void *s,unsigned n) {
-    check(d==data_guarded+1 && n==1280 && lock_depth==1,"kernel write copy bounds");bytes(d,s,n);return d;
+    check(d==write_destination() && n==1280 && lock_depth==1,"kernel write copy bounds");bytes(d,s,n);return d;
 }
 unsigned mock_copy_user(void *d,const void *s,unsigned n) {mock_copy(d,s,n);return 0;}
 void mock_zero(void *d,unsigned n) {(void)d;(void)n;check(0,"unexpected bad user pointer");}
 void mock_notify(unsigned id,unsigned n,const void *p) {
-    check(id==A7_FL_PROPERTY && n==1280 && lock_depth==0,"callback after lock release");
-    check(same(data_guarded+1,p,1280),"callback sees committed RAM");callback_count++;
+    check(id==write_property && n==1280 && lock_depth==0,"callback after lock release");
+    check(same(write_destination(),p,1280),"callback sees committed RAM");callback_count++;
     if(reentrant) check(a7_fl_set(&context,0)==A7_FL_BUSY,"recursive UI entry refuses without deadlock");
 }
 int fake_rpc(int *result,unsigned queue,unsigned command,unsigned count,...) {
@@ -76,6 +82,8 @@ int fake_rpc(int *result,unsigned queue,unsigned command,unsigned count,...) {
     } else if(command==8) {
         check(count==3,"native write three arguments");write_calls++;
         if((failure==1&&write_calls==1)||(failure==4&&write_calls>=2)) {*result=-1;return 0;}
+        if(failure==6 && write_calls==2){*result=-1;return 0;}
+        write_property=a[1];
 #ifdef A7_FL_SEPARATE_KERNEL_STACK
         *result=call_kernel_writer(a[0],a[1],(const void *)(uintptr_t)a[2]);
 #else
@@ -95,6 +103,7 @@ static void reset(void) {
     clear(&context,sizeof context);bytes(data_guarded+1,ORIGINAL,1280);
     data_guarded[0]=data_guarded[1281]=0xa5;
     properties_size=1280;attributes=8;callback_count=write_calls=rpc_calls=lock_depth=saves=failure=reentrant=0;
+    write_property=A7_FL_PROPERTY;
     for(unsigned i=0;i<3;i++)bytes(other_tables_data[i],OTHER+i*1280,1280);
     identity_calls=identity_failure=0;
 }
@@ -234,7 +243,13 @@ static void test_preview(void) {
     control_reset();failure=1;
     check(a7_fl_control_preview(&control,8,1)==0 && control.fault && context.state==A7_FL_OFF && stored==0,"preview write failure restores factory without file write");tests++;
     control_reset();check(a7_fl_control_preview(&control,0,3)==1 && a7_fl_control_preview(&control,0,0)==1 && !control.dirty && stored==0,"return to committed value clears dirty state");tests++;
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+    before=write_calls;
+    check(a7_fl_control_preview(&control,5,1)==1 && control.dirty &&
+          control.preference.parameters[5]==1 && write_calls==before && stored==0,"spatial preview only edits preference");tests++;
+#else
     check(a7_fl_control_preview(&control,5,1)==0 && stored==0,"preview rejects unsupported sharpness");tests++;
+#endif
     control_reset();check(a7_fl_control_preview(&control,0,2)==1,"confirmed adapter pending fixture");
     check(a7_fl_control_apply(&control,0,2)==1 && stored==1 && !control.dirty && saved.parameters[0]==2,"confirmed adapter commits an already previewed value");tests++;
 }
@@ -245,12 +260,12 @@ static int identity_guard(void *opaque) {
     if(identity_calls==2 && identity_failure==4)data_guarded[1]^=1;
     return 1;
 }
-static struct a7_fl_recovery recovery_inputs(void) {
-    struct a7_fl_recovery r;
-    r.api=&api;r.original[0]=ORIGINAL;r.original_crc[0]=a7_fl_crc(ORIGINAL,1280);
-    for(unsigned i=1;i<4;i++) {r.original[i]=OTHER+(i-1)*1280;r.original_crc[i]=a7_fl_crc(r.original[i],1280);}
-    r.base_fl=CANDIDATE;r.base_fl_crc=a7_fl_crc(CANDIDATE,1280);r.expand=EXPAND;r.compress=COMPRESS;
-    r.identity_guard=identity_guard;r.identity_context=&identity_calls;return r;
+static void recovery_inputs(struct a7_fl_recovery *r) {
+    r->api=&api;r->original[0]=ORIGINAL;r->original_crc[0]=a7_fl_crc(ORIGINAL,1280);
+    for(unsigned i=1;i<4;i++) {r->original[i]=OTHER+(i-1)*1280;r->original_crc[i]=a7_fl_crc(r->original[i],1280);}
+    r->base_fl=CANDIDATE;r->base_fl_crc=a7_fl_crc(CANDIDATE,1280);r->expand=EXPAND;r->compress=COMPRESS;
+    r->identity_guard=identity_guard;r->identity_context=&identity_calls;
+    r->capture_alternate[0]=0;r->capture_alternate[1]=0;
 }
 static void test_recognition(void) {
     uint8_t generated[1280],again[1280];int found[5];unsigned trials;
@@ -275,7 +290,7 @@ static void test_recognition(void) {
     check(a7_fl_recognize(generated,CANDIDATE,EXPAND,COMPRESS,found,&trials)==0 && trials==68590,"foreign tone exhaustive bounded rejection");tests++;
 }
 static void test_recovery(void) {
-    int found[5];reset();struct a7_fl_recovery r=recovery_inputs();
+    int found[5];reset();struct a7_fl_recovery r;recovery_inputs(&r);
     check(a7_fl_restore_baseline(&r,found)==0 && write_calls==0,"factory baseline never rewritten");tests++;
     bytes(data_guarded+1,CANDIDATE,1280);
     check(a7_fl_restore_baseline(&r,found)==1 && write_calls==1 && same(data_guarded+1,ORIGINAL,1280) && saves==0,"known base candidate restored with all guards");tests++;

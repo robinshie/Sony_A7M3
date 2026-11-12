@@ -5,7 +5,7 @@ from pathlib import Path
 from elf32 import ELF
 ROOT=Path(__file__).resolve().parents[1];LAB=ROOT/'.lab'
 sys.path.insert(0,str(ROOT))
-from camera.native_module_replace import REVISIONS
+from camera.native_module_replace import REVISIONS,require_capture_release
 OLD='2478cec27f88e838f03915da36ac09c66efff9d6a3bd53d59fc487f6cd345aac'
 VIEW='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 FLAGS=['-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access','-fPIC','-Os','-ffreestanding','-fno-builtin','-fno-stack-protector','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-I',str(ROOT/'research')]
@@ -21,6 +21,7 @@ def bind(old,module,proof,view,out,revision=1):
  old,module,proof,view,out=map(lambda p:Path(p).resolve(),(old,module,proof,view,out))
  p=json.loads(proof.read_text());pin(p)
  if p.get('placeholder') is not False or p.get('ready_for_staging') is not True or p['module_sha256']!=sha(module):raise ValueError('Unattested module')
+ require_capture_release(revision,p)
  for n,d in p['dependency_proof_sha256'].items():
   if sha(LAB/n)!=d:raise ValueError('Module dependency changed: '+n)
   pin(json.loads((LAB/n).read_text()))

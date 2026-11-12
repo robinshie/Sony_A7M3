@@ -6,9 +6,7 @@
 #include "a7-fl-module.h"
 #define a7_fl_install a7_fl_install_prepared
 #include "native_adjust.h"
-#ifdef A7_FL_TEST_SAVED_BOOT
 #include "a7-fl-module-data.h"
-#endif
 extern int stock_get(void *,int,int *);
 extern int stock_set(void *,int,int);
 extern void original_action(void *);
@@ -21,6 +19,31 @@ static a7_menu_node parent,creative,siblings[5],*parent_children[6];
 static uint8_t action_view[0x248];static a7_menu_node *action_selected;
 static unsigned stock_actions,action_flags,action_fallbacks;
 static void test(int ok,const char *message) {module_checks++;check(ok,message);}
+#ifdef A7_FL_CAPTURE_LOOK
+#ifdef A7_FL_CAPTURE_CONTROLS
+#include "a7-fl-capture-controls.h"
+static struct a7_capture_controls expected_capture;
+#endif
+static int capture_matches(int enabled) {
+#ifdef A7_FL_CAPTURE_CONTROLS
+    const struct a7_fl_module_status *s=a7_fl_status();
+    A7FLColorParams p={s->parameters[0],s->parameters[1],s->parameters[2],s->parameters[3],s->parameters[4]};
+    const uint8_t *stock[]={a7_pkg_original[1],a7_pkg_original[2]},*legacy[]={a7_pkg_capture1,a7_pkg_capture2};
+    if(!expected_capture.prepared&&a7_capture_prepare(&expected_capture,&api,stock,legacy,EXPAND,COMPRESS))return 0;
+    uint8_t expected[1280];
+    for(unsigned i=0;i<2;i++) {
+        if(enabled) {if(a7_capture_generate(&expected_capture,i,&p,expected))return 0;}
+        else bytes(expected,stock[i],1280);
+        if(!same(expected,other_tables_data[i],1280))return 0;
+    }
+    return same(other_tables_data[2],a7_pkg_original[3],1280);
+#else
+    return same(other_tables_data[0],enabled?a7_pkg_capture1:a7_pkg_original[1],1280) &&
+           same(other_tables_data[1],enabled?a7_pkg_capture2:a7_pkg_original[2],1280) &&
+           same(other_tables_data[2],a7_pkg_original[3],1280);
+#endif
+}
+#endif
 void unexpected(void) {check(0,"unexpected original node dependency");}
 void *allocate(unsigned n) {
     n=(n+3)/4;if(!n)n=1;check(heap_used+n<262144,"original heap fixture bounds");
@@ -87,19 +110,37 @@ void guest_main(void) {
     platform.event=event_guard;platform.readable=memory_guard;platform.opaque=&identity_calls;
 #ifdef A7_FL_TEST_SAVED_BOOT
     platform.view_manager=0;parent.depth=0;
-    struct a7_fl_preference saved_boot={7,1,{2,-3,4,5,-2,0,1,0},0};
+    struct a7_fl_preference saved_boot={7,1,{2,-3,4,5,-2,
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+        -2,4,7
+#else
+        0,1,0
+#endif
+    },0};
     A7FLColorParams desired={2,-3,4,5,-2};uint8_t desired_table[1280];
     check(a7_fl_adjust_lut(CANDIDATE,1280,EXPAND,COMPRESS,&desired,desired_table,1280)==0,"saved boot generation");
     saved_boot.candidate_crc=a7_fl_crc(desired_table,1280);
     check(a7_fl_preference_encode(slot_bytes[0],&saved_boot,a7_pkg_original_sha,a7_pkg_build)==0,"saved boot record");slot_exists[0]=1;
     A7FLColorParams previous_preview={-7,8,-5,6,7};
     check(a7_fl_adjust_lut(CANDIDATE,1280,EXPAND,COMPRESS,&previous_preview,data_guarded+1,1280)==0,"old serialized preview");
+    unsigned boot_writes=2;
+#ifdef A7_FL_CAPTURE_LOOK
+    /* A native global save might serialize only one of the two preview tables. */
+    bytes(other_tables_data[0],a7_pkg_capture1,1280);boot_writes++;
+#ifdef A7_FL_CAPTURE_CONTROLS
+    boot_writes++; /* Legacy CAP1 also migrates to the stronger dynamic recipe. */
+#endif
+#endif
     test(a7_fl_prepare(&platform)==0,"boot prepare without ViewManager");parent.vtable=0;
-    test(a7_fl_initialize_color_prepared()==0 && a7_fl_status()->runtime_ready && !a7_fl_status()->installed && a7_fl_status()->mode==1 && write_calls==2 && slot_writes==0 && same(data_guarded+1,desired_table,1280),"cold boot recovers historic preview and applies durable ON recipe without any menu");
+    test(a7_fl_initialize_color_prepared()==0 && a7_fl_status()->runtime_ready && !a7_fl_status()->installed && a7_fl_status()->mode==1 && write_calls==boot_writes && slot_writes==0 && same(data_guarded+1,desired_table,1280),"cold boot recovers historic preview and applies durable ON recipe without any menu");
+#ifdef A7_FL_CAPTURE_LOOK
+    test(capture_matches(1),"cold boot reconciles mixed stock and CAP preimages");
+    put("NATIVE_FL_CAPTURE_BOOT_PASSED\n");
+#endif
     parent.vtable=platform.parent_vtable;platform.view_manager=process_element;
     struct a7_fl_platform changed=platform;changed.backup.read=0;
     test(a7_fl_configure_menu(&changed)==A7_FL_MODULE_PLATFORM,"menu configure cannot replace backend");
-    test(a7_fl_configure_menu(&platform)==0 && a7_fl_install(0x40000000,process_element)==0 && write_calls==2 && slot_writes==0,"first MENU config adopts real ViewManager without repeating color init");
+    test(a7_fl_configure_menu(&platform)==0 && a7_fl_install(0x40000000,process_element)==0 && write_calls==boot_writes && slot_writes==0,"first MENU config adopts real ViewManager without repeating color init");
     a7_menu_node *cold_look=parent.children[3];
     test(parent.depth==0 && !cold_look->parent,"cold menu templates await original main root initialization");
     typedef int (*DeepInit)(void *,void *,int,int);
@@ -109,7 +150,16 @@ void guest_main(void) {
     test(((GetSelected)0x40682951)(look_row(cold_look,0),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==1,"late original graph init retains saved ON cursor");
     test(((GetSelected)0x40682951)(look_row(cold_look,1),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==11,"late original graph init retains saved scalar cursor as unsigned UI enum");
     unsigned char grayout=0;
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+    const int saved_spatial_enums[]={1,3,7};
+    for(unsigned i=0;i<3;i++)
+        test(((int(*)(void *,unsigned char *))0x40682d0b)(look_row(cold_look,6+i),&grayout)==0 &&
+             ((GetSelected)0x40682951)(look_row(cold_look,6+i),&selected)==1 &&
+             ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==saved_spatial_enums[i],
+             "cold menu restores saved spatial cursor without grayout");
+#else
     test(((int(*)(void *,unsigned char *))0x40682d0b)(look_row(cold_look,6),&grayout)==1,"late init keeps unsupported sharpness gray");
+#endif
     put("NATIVE_FL_MODULE_BOOT_PASSED: historical disk recovery, saved ON parameters before MENU, first-MENU configuration, late native graph init/cursors\n");finish();
 #endif
     test(a7_fl_install(0x40000000,process_element)==A7_FL_MODULE_PLATFORM && slot_writes==0,"missing platform refuses activation");
@@ -136,22 +186,61 @@ void guest_main(void) {
     for(int id=0;id<618;id++)check(get_value(id,&value)==1&&value==id+1000&&set_value(id,id-300)==1&&stock_value==id-300,"all stock IDs preserve original dispatch");
     test(stock_calls==1236,"stock model routes remain intact");
     test(set_value(0x7000,1)==1 && state->mode==1 && state->dirty && slot_writes==1,"native mode setter performs RAM preview only");
+#ifdef A7_FL_CAPTURE_LOOK
+    test(capture_matches(1),"FL switch writes both still capture properties");
+    test(a7_fl_cancel()==0 && capture_matches(0) && state->mode==0,"cancel restores both CAP tables");
+    test(set_value(0x7000,1)==1 && capture_matches(1),"FL switch reapplies both CAP tables");
+#endif
     test(set_value(0x7001,12)==1 && get_value(0x7001,&value)==1 && value==12 && state->parameters[0]==3 && slot_writes==1,"native contrast enum reaches signed LUT backend");
+#ifdef A7_FL_CAPTURE_CONTROLS
+    test(capture_matches(1),"contrast dispatch updates both actual CAP properties");
+#endif
     unsigned unchanged_writes=write_calls;
     test(set_value(0x7001,-1)==0 && set_value(0x7001,19)==0 && set_value(0x7000,2)==0 && write_calls==unchanged_writes && state->parameters[0]==3 && slot_writes==1,"invalid native enums never reach LUT or preference writes");
     unsigned writes_before=write_calls;
     test(a7_fl_initialize_color_prepared()==0 && write_calls==writes_before && state->mode==1 && state->dirty && state->parameters[0]==3 && slot_writes==1,"later still-view entry preserves unsaved RAM preview");
     unsigned char gray=0;
     typedef int(*GetGray)(void *,unsigned char *);
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+    const int chosen_enum[]={1,3,7},chosen_value[]={-2,4,7},max_enum[]={6,4,9};
+    uint8_t color_before[1280];bytes(color_before,data_guarded+1,1280);
+    for(unsigned i=0;i<3;i++) {
+        int id=0x7006+(int)i;
+        test(((GetGray)0x40682d0b)(look_row(look,6+i),&gray)==0,"spatial menu row enabled");
+        for(int e=0;e<=max_enum[i];e++)
+            test(set_value(id,e)==1 && get_value(id,&value)==1 && value==e,"spatial option adjustable");
+        test(set_value(id,chosen_enum[i])==1 && state->parameters[5+i]==chosen_value[i] &&
+             set_value(id,-1)==0 && set_value(id,max_enum[i]+1)==0 && state->parameters[5+i]==chosen_value[i],
+             "spatial menu enforces valid ranges");
+    }
+    test(slot_writes==1 && write_calls==writes_before && same(color_before,data_guarded+1,1280),"spatial edits never write LUT or persist before Save");
+#else
     test(((GetGray)0x40682d0b)(look_row(look,6),&gray)==1 && set_value(0x7006,4)==0,"unsupported sharpness visible gray and write rejected");
     test(set_value(0x7007,2)==0 && set_value(0x7008,1)==0,"range and clarity reject");
+#endif
     event_ok=0;test(a7_fl_confirm()==A7_FL_MODULE_EVENT && slot_writes==1,"unproven confirmation cannot persist");event_ok=1;
     *(uint32_t *)(action_view+0x130)=1;*(uintptr_t *)(action_view+0x150)=(uintptr_t)manager_words;*(int *)(action_view+0x158)=7;
     action_selected=look_row(look,9);original_action(action_view);
     test(slot_writes==2 && state->generation==2 && !state->dirty && action_flags==1 && action_fallbacks==0 && stock_actions==0,"original native Save action persists once");
     test(row_title(look,9)==0x0204ef85,"successful durable Save visibly becomes Complete");
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+    struct a7_fl_preference stored_recipe;
+    test(a7_fl_preference_choose(&stored_recipe,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0 &&
+         stored_recipe.generation==2 && write_calls==writes_before && same(color_before,data_guarded+1,1280),"Save stores only preference; active LUT unchanged");
+    for(unsigned i=0;i<3;i++)
+        test(stored_recipe.parameters[5+i]==chosen_value[i],"saved slot has exact spatial values");
+    test(set_value(0x7008,9)==1 && a7_fl_cancel()==0 && get_value(0x7008,&value)==1 &&
+         value==7 && slot_writes==2 && write_calls==writes_before,"cancel restores saved spatial cursor without writing");
+#endif
     uint8_t committed[1280];bytes(committed,data_guarded+1,1280);
     test(set_value(0x7001,6)==1 && state->parameters[0]==-3 && a7_fl_cancel()==0 && get_value(0x7001,&value)==1 && value==12 && same(data_guarded+1,committed,1280) && slot_writes==2,"cancel restores committed signed LUT and native enum cursor state");
+#ifdef A7_FL_CAPTURE_CONTROLS
+    test(capture_matches(1),"cancel restores dynamic CAP recipe with same enabled state");
+    for(unsigned f=1;f<5;f++) {
+        test(set_value(0x7001+(int)f,5)==1&&capture_matches(1),"each color slider dispatch changes expected CAP source");
+        test(a7_fl_cancel()==0&&capture_matches(1),"each color slider cancels back to committed CAP source");
+    }
+#endif
     test(set_value(0x7001,8)==1 && get_value(0x7001,&value)==1 && value==8 && state->parameters[0]==-1 && a7_fl_cancel()==0,"backend minus one is representable without missing-value sentinel");
     test(set_value(0x7002,13)==1 && state->parameters[1]==4,"highlight enum preview");slot_failed=1;
     test(row_title(look,9)==0x0204eaab,"editing restores Save label");
@@ -160,6 +249,14 @@ void guest_main(void) {
     original_action(action_view);
     test(slot_writes==3 && state->generation==3 && row_title(look,9)==0x0204ef85,"native Save retry visibly succeeds");
     test(set_value(0x7000,0)==1 && a7_fl_confirm()==0 && same(data_guarded+1,ORIGINAL,1280) && state->mode==0,"Off restores original and records Off preference");
+#ifdef A7_FL_CAPTURE_LOOK
+    test(capture_matches(0),"Off exactly restores stock in both CAP properties");
+    write_calls=0;failure=6;
+    test(set_value(0x7000,1)==0 && state->fault && state->mode==0 && write_calls==3 &&
+         capture_matches(0) && same(data_guarded+1,ORIGINAL,1280),"failed second CAP write restores first and rejects FL toggle");
+    failure=0;
+    put("NATIVE_FL_CAPTURE_MODULE_PASSED\n");
+#endif
     test(a7_fl_uninstall()==0 && parent.count==6 && parent.children==parent_children && parent.children[3]->index==4 && manager_words[0]==(uintptr_t)(manager_vtable_words+2),"uninstall restores native parent model and stock indices");
     test(saves==0,"module never requests calibration sync");
     put("NATIVE_FL_MODULE_PASSED: original nodes + 618 stock routes + runtime421checks; integrated preview/commit/cancel/store/rollback\n");

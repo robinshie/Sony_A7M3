@@ -15,11 +15,15 @@ import shutil
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 
-parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--revision',type=int,choices=(1,2),default=1);REV=parser.parse_args().revision
-ROOT=Path(__file__).resolve().parents[1];OUT=ROOT/('.lab/native-module-replace-test'+('' if REV==1 else '-r2'))
-TEMP=f'.a7fl-r{REV}.new';BACKUP='.a7fl-2478cec2.orig' if REV==1 else '.a7fl-e64867d2.orig';JOURNAL=f'A7FLUP{REV}.LOG'
+ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
+from camera.native_module_replace import REVISIONS
+
+parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--revision',type=int,choices=sorted(REVISIONS),default=1);REV=parser.parse_args().revision
+OUT=ROOT/('.lab/native-module-replace-test'+('' if REV==1 else f'-r{REV}'))
+TEMP=REVISIONS[REV]['temporary'];BACKUP=REVISIONS[REV]['backup'];JOURNAL=REVISIONS[REV]['journal']
 checks=0
 def check(ok,why):
  global checks
@@ -39,8 +43,9 @@ class Env:
  def __init__(self,folder):
   self.root=Path(folder);self.lib=self.root/'usr/lib';self.setting=self.root/'setting';self.lib.mkdir(parents=True);self.setting.mkdir()
   (self.lib/'a7fl.so').write_bytes(OLD);(self.lib/'viewUnified2.so').write_bytes(VIEW)
-  if REV==2:
-   (self.lib/'.a7fl-2478cec2.orig').write_bytes(b'previous module');(self.setting/'A7FLUP1.LOG').write_bytes(b'previous journal')
+  for revision in range(1,REV):
+   (self.lib/REVISIONS[revision]['backup']).write_bytes(b'previous module')
+   (self.setting/REVISIONS[revision]['journal']).write_bytes(b'previous journal')
   self.calls=0;self.fail_at=0;self.fds={};self.ro=True;self.fail_ro=False;self.chunk=0;self.stage_writes=0;self.partial_failure=False;self.error=None
   self.model=1;self.version=b'37114_13.2026020901';self.block_ro=0;self.space=10000;self.owner_overrides={}
   self.callback=CALL(self.invoke);self.identity=IDENTITY(lambda _:self.model)
@@ -60,7 +65,8 @@ class Env:
   path=self.lib/'a7fl.so'
   if not path.is_symlink():check(path.read_bytes() in (OLD,NEW),'published module always complete old or new')
   check((self.lib/'viewUnified2.so').read_bytes()==VIEW,'view library never changed')
-  if REV==2:check((self.lib/'.a7fl-2478cec2.orig').read_bytes()==b'previous module' and (self.setting/'A7FLUP1.LOG').read_bytes()==b'previous journal','prior revision backup and journal preserved')
+  for revision in range(1,REV):
+   check((self.lib/REVISIONS[revision]['backup']).read_bytes()==b'previous module' and (self.setting/REVISIONS[revision]['journal']).read_bytes()==b'previous journal','prior revision backup and journal preserved')
  def invoke(self,ctx,nr,a,b,c,d,e,f):
   try:
    self.calls+=1

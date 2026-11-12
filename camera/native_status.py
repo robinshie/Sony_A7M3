@@ -10,6 +10,7 @@ from pathlib import Path
 import struct
 import time
 import zlib
+from functools import lru_cache
 
 from local import BUILD_ID, LAB, ROOT, file_sha, require, sha
 from camera.native_install import Bundle, pin_sources, save, save_json
@@ -19,6 +20,7 @@ PREFERENCES=('/setting/A7FL0.CFG','/setting/A7FL1.CFG')
 PARAMETERS=('contrast','highlights','shadows','fade','saturation','sharpness','sharpness_range','clarity')
 LOW=(-9,-9,-9,0,-9,-3,1,0)
 HIGH=(9,9,9,9,9,3,5,9)
+CAPTURE_PROPERTIES=(0x30005,0x30006)
 
 
 def trunc_div(value,divisor):
@@ -66,6 +68,39 @@ def adjusted_lut(base,codec,parameters):
                         new=(-1 if scaled<0 else 1)*compress[clamp(abs(scaled),0,512)]
                         value+=round_div((new-compressed)*4,3)
                         result[index]=clamp(value,-64,63)&255
+    return bytes(result)
+
+
+@lru_cache(maxsize=4)
+def capture_control_base(stock,legacy,table):
+    """Independent host equivalent of the r5 bounded CAP projection."""
+    require(table in (0,1) and len(stock)==len(legacy)==1280 and stock[1215:]==legacy[1215:],
+            'Invalid capture base inputs.')
+    decode=lambda v: (v&127) if (v&127)<64 else (v&127)-128
+    encode=lambda v: v&(127 if table else 255)
+    def packed(raw,level):
+        value=raw if raw<128 else raw-256
+        return decode(value if level==8 else value*level//8)
+    def allowed(raw,value,limit):
+        return -64<=value<=63 and all(abs(packed(encode(value),level)-packed(raw,level))<=limit for level in range(1,9))
+    base=bytearray(stock);bounds=[]
+    for i,(a,b) in enumerate(zip(stock[:1215],legacy[:1215])):
+        require((a<128 and b<128) if table else ((a<64 or a>=192) and (b<64 or b>=192)), 'Invalid CAP encoding.')
+        require(allowed(a,decode(b),8 if i<405 else 12),'Invalid legacy CAP bounds.')
+        low=high=decode(a);limit=24 if i<405 else 32
+        while allowed(a,low-1,limit):low-=1
+        while allowed(a,high+1,limit):high+=1
+        base[i]=min(max(decode(a)+round_div((decode(b)-decode(a))*3,2),low),high)&255
+        bounds.append((low,high))
+    return bytes(base),tuple(bounds)
+
+
+def adjusted_capture(stock,legacy,table,codec,parameters):
+    base,bounds=capture_control_base(stock,legacy,table)
+    result=bytearray(adjusted_lut(base,codec,parameters))
+    for i,(low,high) in enumerate(bounds):
+        value=result[i] if result[i]<128 else result[i]-256
+        result[i]=min(max(value,low),high)&(127 if table else 255)
     return bytes(result)
 
 
@@ -132,12 +167,56 @@ def decode_report(raw,expected_symbols=None):
                 physical_menu_verified=False,cold_power_verified=False)
 
 
+def capture_candidates(proof_path,module_proof,originals):
+    """Read only the exact fixed capture tables bound to the installed module proof."""
+    capture=module_proof.get('capture_look')
+    if capture is None:
+        require(proof_path is None,'This module has no attested capture tables.')
+        return {}
+    dynamic=capture.get('dynamic_capture_controls') is True if isinstance(capture,dict) else False
+    require(isinstance(capture,dict) and (capture.get('fixed_capture_tables') is True or dynamic) and
+            capture.get('arm_transaction_verified') is True and
+            capture.get('property_ids')==list(CAPTURE_PROPERTIES),'Invalid module capture-table attestation.')
+    require(proof_path is not None,'This module requires the bound --capture-proof.')
+    raw=proof_path.read_bytes()
+    require(sha(raw)==capture.get('source_qemu_proof_sha256'),'Capture proof differs from the installed module proof.')
+    proof=json.loads(raw);pin_sources(proof)
+    records=proof.get('capture_candidates')
+    require(isinstance(records,list) and len(records)==len(CAPTURE_PROPERTIES) and capture.get('tables')==records,
+            'Incomplete or mismatched capture-table proof.')
+    result={}
+    for key,record in zip(CAPTURE_PROPERTIES,records):
+        index=key-0x30004
+        name=f'offline-capture-table{index}.bin'
+        require(isinstance(record,dict) and record.get('property')==hex(key) and record.get('file')==name and
+                record.get('bytes')==1280 and record.get('original_sha256')==sha(originals[index]) and
+                record.get('original_packed_table_restored') is True,'Unexpected capture proof record: '+hex(key))
+        path=proof_path.parent/name
+        require(path.resolve().parent==proof_path.parent.resolve(),'Capture candidate escaped its proof directory.')
+        candidate=path.read_bytes()
+        require(len(candidate)==1280 and candidate!=originals[index] and candidate[1215:]==originals[index][1215:] and
+                sha(candidate)==record.get('candidate_sha256'),'Capture candidate differs from proof: '+hex(key))
+        result[key]=candidate
+    return result
+
+
 class Profile:
-    def __init__(self,bundle_directory,module_proof,probe_directory,data_directory):
-        self.bundle=Bundle(bundle_directory,module_proof,LAB/'creative-icons-belt',LAB/'native-fl-strings')
+    def __init__(self,bundle_directory,module_proof,probe_directory,data_directory,*,replacement_binding=None,capture_proof=None):
+        if replacement_binding is None:
+            self.bundle=Bundle(bundle_directory,module_proof,LAB/'creative-icons-belt',LAB/'native-fl-strings')
+            self.module_record=self.bundle.files[0]
+            module_path=bundle_directory/'input0.bin'
+        else:
+            from camera.native_module_replace import Bundle as ReplacementBundle
+            self.bundle=ReplacementBundle(replacement_binding)
+            require(file_sha(module_proof)==self.bundle.manifest['module_proof_sha256'],
+                    'Inspector module proof differs from replacement binding.')
+            self.module_record=self.bundle.manifest['new']
+            module_path=replacement_binding/'new-module.so'
         self.proof_path=probe_directory/'proof.json';self.proof=json.loads(self.proof_path.read_text());p=self.proof
         pin_sources(p)
-        require(p['module_sha256']==self.bundle.files[0]['sha256'],'Inspector/module identity mismatch.')
+        require(p['module_sha256']==self.module_record['sha256'] and p['module_proof_sha256']==file_sha(module_proof),
+                'Inspector/module identity mismatch.')
         self.payload=(probe_directory/'inspect.so').read_bytes()
         require(52<len(self.payload)<=65536 and sha(self.payload)==p['payload_sha256'] and
                 self.payload[:7]==b'\x7fELF\x01\x01\x01','Inspector payload changed.')
@@ -148,7 +227,9 @@ class Profile:
                 sha(self.base)==p['base_fl_sha256'] and sha(self.codec)==p['codec_sha256'] and
                 p['build'].encode()==BUILD_ID and p['original_sha256']==sha(self.original[0]),'Private diagnostic data identity mismatch.')
         self.original_sha=sha(self.original[0])
-        module=ELF(bundle_directory/'input0.bin')
+        self.capture=capture_candidates(capture_proof,json.loads(module_proof.read_text()),self.original)
+        self.capture_controls=json.loads(module_proof.read_text()).get('capture_look',{}).get('dynamic_capture_controls') is True
+        module=ELF(module_path)
         self.symbols={key:module.symbols[name]['value'] for key,name in
                       (('bootstrap_symbol','a7_fl_bootstrap_status'),('runtime_symbol','a7_fl_status'))}
         require(all(self.symbols.values()),'Module lacks resident status exports.')
@@ -166,24 +247,38 @@ def observations(profile,report,prefs,tables):
             runtime and runtime['runtime_ready'] and not runtime['fault']):
         if runtime['mode']==0:expected=profile.original[0]
         elif runtime['mode']==1:expected=adjusted_lut(profile.base,profile.codec,runtime['parameters'][:5])
-    table_states=[]
+    capture=profile.capture
+    table_states=[];capture_matches=[]
     for i,(actual,original) in enumerate(zip(tables,profile.original)):
+        key=0x30004+i
         state='original' if actual==original else 'foreign'
         if i==0 and actual==profile.base:state='base-FL'
         if i==0 and candidate is not None and actual==candidate:state='saved-FL'
         if i==0 and expected is not None and actual==expected:state='runtime-expected'
-        table_states.append(dict(property=f'{0x30004+i:08x}',state=state,sha256=sha(actual)))
+        record=dict(property=f'{key:08x}',state=state,sha256=sha(actual))
+        if key in capture:
+            dynamic=getattr(profile,'capture_controls',False)
+            target=adjusted_capture(original,capture[key],key-0x30005,profile.codec,runtime['parameters'][:5]) if dynamic and expected is not None else capture[key]
+            record['state']=('adjustable-capture-FL' if dynamic else 'fixed-capture-FL') if actual==target else state
+            record['matches_runtime']=None if expected is None else actual==(target if runtime['mode'] else original)
+            capture_matches.append(record['matches_runtime'])
+        table_states.append(record)
     saved_match=None
     if selection['selected'] is not None and expected is not None:
         p=selection['preference']
         saved_match=(not runtime['dirty'] and runtime['generation']==p['generation'] and
                      runtime['mode']==p['enabled'] and runtime['parameters']==p['parameters'] and
                      selection['candidate_crc_matches'])
+    preview_match=None if expected is None else tables[0]==expected
+    capture_match=None if not capture or expected is None else all(capture_matches)
     return dict(preferences=selection,tables=table_states,
-                active_table_matches_runtime=None if expected is None else tables[0]==expected,
+                active_table_matches_runtime=None if preview_match is None else preview_match and capture_match is not False,
+                preview_table_matches_runtime=preview_match,
+                capture_tables_match_runtime=capture_match,
+                untouched_table3_original=tables[3]==profile.original[3],
                 other_three_tables_original=all(a==b for a,b in zip(tables[1:],profile.original[1:])),
                 runtime_matches_saved_preferences=saved_match,
-                physical_menu_verified=False,cold_power_verified=False)
+                jpeg_application_verified=False,physical_menu_verified=False,cold_power_verified=False)
 
 
 def inspect_camera(camera,profile,evidence,report_only=False):
@@ -192,7 +287,7 @@ def inspect_camera(camera,profile,evidence,report_only=False):
     require(factory.contents('/version.txt')==BUILD_ID and bytes(camera.readBackup(0x3e0005))==b'ILCE-7M3'+bytes(8),
             'Camera model/build mismatch.')
     module=factory.contents('/usr/lib/a7fl.so')
-    require(sha(module)==profile.bundle.files[0]['sha256'],'Installed module differs from attested artifact.')
+    require(sha(module)==profile.module_record['sha256'],'Installed module differs from attested artifact.')
     raw=factory.run(profile.payload,'a7status.bin');save(evidence/'resident.bin',raw)
     result=decode_report(raw,profile.symbols)
     if not report_only:
@@ -218,16 +313,24 @@ def main():
     parser.add_argument('--offline',action='store_true',help='Verify local probe/module proofs only')
     parser.add_argument('--report-only',action='store_true',help='Read resident report without preferences/calibration tables')
     parser.add_argument('--direct',action='store_true')
-    parser.add_argument('--bundle',type=Path,default=LAB/'native-install-bound')
-    parser.add_argument('--module-proof',type=Path,default=LAB/'native-module/proof.json')
+    bundle=parser.add_mutually_exclusive_group()
+    bundle.add_argument('--bundle',type=Path,help='Original module installation bundle')
+    bundle.add_argument('--replacement-binding',type=Path,help='Attested single-module replacement binding')
+    parser.add_argument('--module-proof',type=Path,help='Module proof; defaults to the proof in the replacement binding when supplied')
     parser.add_argument('--probe',type=Path,default=LAB/'native-inspect')
     parser.add_argument('--data',type=Path,default=LAB/'native-fl-01')
+    parser.add_argument('--capture-proof',type=Path,help='Exact offline capture-table proof named by the module proof')
     args=parser.parse_args()
     require(not(args.offline and args.decode),'Choose --offline or --decode, not both.')
-    profile=Profile(args.bundle.resolve(),args.module_proof.resolve(),args.probe.resolve(),args.data.resolve())
+    replacement=args.replacement_binding.resolve() if args.replacement_binding else None
+    module_proof=(args.module_proof.resolve() if args.module_proof else
+                  replacement/'module-proof.json' if replacement else LAB/'native-module/proof.json')
+    profile=Profile((args.bundle or LAB/'native-install-bound').resolve(),module_proof,args.probe.resolve(),args.data.resolve(),
+                    replacement_binding=replacement,capture_proof=args.capture_proof.resolve() if args.capture_proof else None)
     if args.offline:
         print(json.dumps(dict(local_proofs_verified=True,camera_contacted=False,probe_loads_module=False,
-                              module_sha256=profile.bundle.files[0]['sha256']),indent=2));return 0
+                              module_sha256=profile.module_record['sha256'],
+                              capture_properties=[hex(key) for key in profile.capture]),indent=2));return 0
     if args.decode:
         result=decode_report(args.decode.read_bytes(),profile.symbols);result['camera_contacted']=False
         print(json.dumps(result,indent=2));return 0

@@ -10,6 +10,12 @@ enum {NOFOLLOW=0x8000,NONBLOCK=0x800,DIRECTORY=0x4000,CREAT=64,EXCL=128};
 static const char temporary[]=".a7fl-r1.new",backup[]=".a7fl-2478cec2.orig",logname[]="A7FLUP1.LOG";
 #elif NMR_REVISION == 2
 static const char temporary[]=".a7fl-r2.new",backup[]=".a7fl-e64867d2.orig",logname[]="A7FLUP2.LOG";
+#elif NMR_REVISION == 3
+static const char temporary[]=".a7fl-r3.new",backup[]=".a7fl-f3e2d657.orig",logname[]="A7FLUP3.LOG";
+#elif NMR_REVISION == 4
+static const char temporary[]=".a7fl-r4.new",backup[]=".a7fl-bd01f7b1.orig",logname[]="A7FLUP4.LOG";
+#elif NMR_REVISION == 5
+static const char temporary[]=".a7fl-r5.new",backup[]=".a7fl-1216dda3.orig",logname[]="A7FLUP5.LOG";
 #else
 #error Unsupported module replacement revision
 #endif

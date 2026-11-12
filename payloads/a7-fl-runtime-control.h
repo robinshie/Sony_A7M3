@@ -3,6 +3,11 @@
 #define A7_FL_RUNTIME_CONTROL_H
 #include "a7-fl-runtime.h"
 #include "a7-fl-runtime-prefs.h"
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+#define A7_FL_EDITABLE_MASK 0xffu
+#else
+#define A7_FL_EDITABLE_MASK 0x1fu
+#endif
 enum a7_fl_control_error {
     A7_FL_CONTROL_OK=0, A7_FL_CONTROL_ARGUMENT=-20,
     A7_FL_CONTROL_BIND=-21, A7_FL_CONTROL_UNSUPPORTED=-22,
@@ -25,7 +30,7 @@ struct a7_fl_control {
 /* Zero-initialized context required. Initial preference/table must ALREADY have
  * been reconciled at boot, including generation, mode and all parameters.
  * This reads/verifies only, never writes a preference or backup property.
- * Returns zero on success. Sharpness, range and clarity are carried but disabled.
+ * Returns zero on success. Spatial settings do not alter the image pipeline.
  */
 int a7_fl_control_init(struct a7_fl_control *,struct a7_fl_context *,
                        const uint8_t base_fl[1280],const uint16_t expand[129],
@@ -39,7 +44,8 @@ int a7_fl_control_init(struct a7_fl_control *,struct a7_fl_context *,
  */
 int a7_fl_control_apply(void *,unsigned field,int value);
 /* Preview-compatible native_adjust callback: 1 accepted, 0 rejected. Never
- * invokes store. It changes backup RAM and updates preference, preserving the
+ * invokes store. LUT controls change backup RAM; the opt-in spatial settings
+ * demo only updates preferences for fields 5..7. Preview preserves the
  * last durable record in committed. Recovery must recognize historic generated
  * candidates because unrelated native saves may serialize a transient preview.
  */

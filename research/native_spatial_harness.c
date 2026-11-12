@@ -8,8 +8,8 @@
 #define W 35u
 #define H 33u
 #define STRIDE 39u
-static unsigned char input[STRIDE*H+16],output[STRIDE*H+16],blurs[6][W*H];
-static uint32_t memory[W*70/4+8];
+static unsigned char input[STRIDE*H+16],output[STRIDE*H+16],inplace[STRIDE*H+16],blurs[6][W*H];
+static uint32_t memory[W*96/4+8];
 static unsigned cases,checks;
 static void put(const char *s) {
 #ifdef A7_SPATIAL_QEMU
@@ -73,6 +73,16 @@ static void exercise(unsigned w,unsigned h,unsigned pattern) {
             if(pattern<=2||(!s&&!c))check(value==original,"constant/identity invariance");
         }
         for(unsigned i=0;i<sizeof output;i++)if(i/STRIDE>=h||i%STRIDE>=w)check(output[i]==0xa5,"destination padding");
+        for(unsigned i=0;i<sizeof input;i++)inplace[i]=input[i];
+        for(unsigned i=0;i<sizeof memory/4;i++)memory[i]=0xdeadbeef;
+        wn=a7_fl_spatial_inplace_workspace(w);
+        check(a7_fl_spatial_inplace(inplace,sizeof inplace,STRIDE,w,h,&p,memory+1,wn)==0,"in-place apply");
+        check(memory[0]==0xdeadbeef,"in-place workspace prefix");
+        for(size_t i=4+wn;i<sizeof memory;i++)check(((unsigned char *)memory)[i]==((unsigned char *)memory)[i%4],"in-place workspace suffix");
+        for(unsigned i=0;i<sizeof inplace;i++) {
+            unsigned active=i/STRIDE<h&&i%STRIDE<w;
+            check(inplace[i]==(active?output[i]:input[i]),"in-place oracle or padding");
+        }
         cases++;
     }
 }
@@ -97,6 +107,12 @@ void guest_main(void) {
     check(a7_fl_spatial_luma(input,sizeof input,STRIDE,alias.bytes,sizeof alias,2,2,2,&alias.p,memory,sizeof memory)<0,"parameters overlap output");
     check(a7_fl_spatial_luma(input,sizeof input,STRIDE,output,sizeof output,STRIDE,2,2,&alias.p,alias.words,sizeof alias)<0,"parameters overlap workspace");
     for(unsigned i=0;i<sizeof output;i++)check(output[i]==0xa5,"reject before output mutation");
+    p.sharpness=3;p.clarity=9;
+    check(a7_fl_spatial_inplace(output,sizeof output,STRIDE,W,H,&p,memory,2)<0,"in-place short workspace");
+    check(a7_fl_spatial_inplace(output,1,STRIDE,W,H,&p,memory,sizeof memory)<0,"in-place short plane");
+    check(a7_fl_spatial_inplace(output,sizeof output,STRIDE,W,H,&p,memory+1,a7_fl_spatial_inplace_workspace(W)-1)<0,"in-place exact scratch boundary");
+    check(a7_fl_spatial_inplace((void *)memory,sizeof memory,STRIDE,W,H,&p,memory,sizeof memory)<0,"in-place workspace alias");
+    for(unsigned i=0;i<sizeof output;i++)check(output[i]==0xa5,"reject before in-place mutation");
     put("SPATIAL_REFERENCE_PASSED cases=");number(cases);put(" checks=");number(checks);put("\n");
     put("EXPERIMENTAL_REFERENCE_ONLY; NO_CAMERA_BUFFER_HOOK; NO_SONY_FL_EQUIVALENCE\n");stop(0);
 }

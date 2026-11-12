@@ -73,9 +73,20 @@ int a7_fl_control_preview(void *opaque,unsigned field,int value) {
     struct a7_fl_control *c=opaque;if(!c)return 0;
     if(__atomic_exchange_n(&c->lock,1,__ATOMIC_ACQUIRE))return 0;
     if(!c->initialized||c->fault) {finish(c,A7_FL_CONTROL_FAULT);return 0;}
-    if((field>=5&&field!=8)||(field==8&&value!=0&&value!=1)) {finish(c,A7_FL_CONTROL_UNSUPPORTED);return 0;}
+    if((field!=8&&(field>=8||!(A7_FL_EDITABLE_MASK&(1u<<field))))||
+       (field==8&&value!=0&&value!=1)) {finish(c,A7_FL_CONTROL_UNSUPPORTED);return 0;}
     if(a7_fl_read_status(c->runtime)) {c->fault=1;finish(c,c->runtime->last_error);return 0;}
     if(c->runtime->state!=c->preference.enabled) {c->fault=1;finish(c,A7_FL_CONTROL_BIND);return 0;}
+#ifdef A7_FL_SPATIAL_SETTINGS_ONLY
+    if(field>=5&&field<=7) {
+        static const int minimum[3]={-3,1,0},maximum[3]={3,5,9};
+        if(value<minimum[field-5]||value>maximum[field-5]) {finish(c,A7_FL_CONTROL_ARGUMENT);return 0;}
+        /* Only edit the existing preference record; no LUT, frame or ISP write. */
+        c->preference.parameters[field]=value;
+        c->dirty=differs(&c->preference,&c->committed);
+        finish(c,0);return 1;
+    }
+#endif
     struct a7_fl_preference next=c->preference;
     if((field==8&&next.enabled==value)||(field<5&&next.parameters[field]==value)) {finish(c,0);return 1;}
     if(field==8)next.enabled=value;else next.parameters[field]=value;

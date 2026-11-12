@@ -13,6 +13,8 @@ struct a7_fl_recovery {
      * package; 1 verified, any other result refuses all writes. */
     int (*identity_guard)(void *);
     void *identity_context;
+    /* Exact optional, immutable alternate preimages for LUT1 and LUT2. */
+    const uint8_t *capture_alternate[2];
 };
 enum a7_fl_recovery_error {
     A7_FL_RECOVERY_IDENTITY=-30, A7_FL_RECOVERY_OTHER_TABLE=-31,

@@ -54,7 +54,9 @@ static int other_tables(const struct a7_fl_recovery *r,uint8_t scratch[1280]) {
     for(unsigned i=1;i<4;i++) {
         uint32_t id=A7_FL_PROPERTY+i;
         if(r->api->size(id)!=1280||r->api->attr(id)!=8||r->api->read(id,scratch)!=1280||
-           !same(scratch,r->original[i],1280))return A7_FL_RECOVERY_OTHER_TABLE;
+           (!same(scratch,r->original[i],1280) &&
+            !(i<=2 && r->capture_alternate[i-1] && same(scratch,r->capture_alternate[i-1],1280))))
+            return A7_FL_RECOVERY_OTHER_TABLE;
     }
     return 0;
 }
