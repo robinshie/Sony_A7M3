@@ -10,9 +10,9 @@ from camera.native_module_replace import REVISIONS
 from local import ROOT, file_sha
 
 LAB = ROOT / '.lab'  # The native builders use this repository-local directory.
-REVISION = 5
-BASELINE = (LAB / 'native-fl-releases/update-r4-4396_3_9/binding' /
-            'replace-1794449171444488000')
+REVISION = 6
+BASELINE = (LAB / 'native-fl-releases/update-r5-odckcjqr/binding' /
+            'replace-1794450652277230000')
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
         parser.error('The candidate is identical to the installed baseline; no update package will be produced.')
     baseline_module, baseline_view = BASELINE / 'new-module-readback.so', BASELINE / 'view-after.so'
     if not baseline_module.is_file() or not baseline_view.is_file():
-        parser.error('The verified revision 4 camera readback is missing.')
+        parser.error('The verified revision 5 camera readback is missing.')
 
     def run(*command):
         subprocess.run([sys.executable, *map(str, command)], cwd=ROOT, check=True)

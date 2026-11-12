@@ -6,6 +6,9 @@
 #include "a7-fl-color.h"
 #include "native_adjust.h"
 #include "a7-fl-module-data.h"
+#ifdef A7_FL_SAVE_DIALOG
+#include "a7-fl-dialog.h"
+#endif
 #ifdef A7_FL_CAPTURE_LOOK
 #include "a7-fl-capture.h"
 static const uint8_t *const capture_stock[]={a7_pkg_original[1],a7_pkg_original[2]};
@@ -182,10 +185,10 @@ static int model_write(void *unused,int id,int value) {
     if(module.control.dirty)save_feedback(0x0204eaab); /* Save */
     leave(0);return 1;
 }
-static int model_action(void *unused,int id) {
-    (void)unused;if(id!=0x7009||!enter())return 0;
+static int save_commit(void) {
+    if(!enter())return A7_FL_MODULE_BUSY;
     if(!module.status.installed||module.status.fault||module.platform.identity(module.platform.opaque)!=1) {
-        leave(A7_FL_MODULE_EVENT);return 0;
+        return leave(A7_FL_MODULE_EVENT);
     }
     /* This callback is bound only to the native execProc slot for our explicit
      * Save node. It is never reached by scalar preview setters. External confirm
@@ -194,7 +197,20 @@ static int model_action(void *unused,int id) {
     /* The native action handler marks the model changed and refreshes the row.
      * Only a successful durable commit may show Complete; edits restore Save. */
     save_feedback(rc?0x0204ef87:0x0204ef85); /* Not Complete / Complete */
-    leave(rc);return rc==0;
+    return leave(rc);
+}
+static int model_action(void *unused,int id) {
+    (void)unused;if(id!=0x7009)return 0;
+#ifdef A7_FL_SAVE_DIALOG
+    if(!enter())return 0;
+    if(!module.status.installed||module.status.fault||module.platform.identity(module.platform.opaque)!=1) {
+        leave(A7_FL_MODULE_EVENT);return 0;
+    }
+    int rc=a7_fl_dialog_open(module.platform.view_base,module.platform.view_manager,save_commit);
+    return leave(rc)==0;
+#else
+    return save_commit()==0;
+#endif
 }
 static int rollback(void) {
     int error=0;

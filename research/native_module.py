@@ -38,6 +38,7 @@ def main():
     ap.add_argument('--spatial-settings-only',action='store_true',help='Build a separate demo with editable and savable spatial settings, without image processing')
     ap.add_argument('--capture-look-proof',type=Path,help='Bind the two QEMU-verified fixed CAP looks')
     ap.add_argument('--capture-controls',action='store_true',help='Stronger CAP default and five capture controls; preserves legacy preferences')
+    ap.add_argument('--save-dialog',action='store_true',help='Native Confirm/Cancel before saving, then completion feedback')
     args=ap.parse_args()
     if args.spatial_settings_only:OUT=OUT.with_name('native-module-spatial-settings-only')
     if args.capture_look_proof:
@@ -47,6 +48,9 @@ def main():
     if args.capture_controls:
         if not args.capture_look_proof:ap.error('--capture-controls requires --capture-look-proof')
         OUT=OUT.with_name('native-module-capture-controls')
+    if args.save_dialog:
+        if not args.capture_controls:ap.error('--save-dialog requires the accepted capture-controls build')
+        OUT=OUT.with_name('native-module-save-dialog')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -69,6 +73,10 @@ def main():
     header+=array('a7_pkg_original_sha',hashlib.sha256(originals[0]).digest())
     header+='static const char a7_pkg_build[24]="37114_13.2026020901";\n'
     capture_look=None;dependency_proofs={}
+    if args.save_dialog:
+        run([sys.executable,str(ROOT/'research/native_save_dialog.py'),'--usr',str(args.usr)])
+        dp=ROOT/'.lab/native-save-dialog/proof.json'
+        dependency_proofs['native-save-dialog/proof.json']=sha(dp.read_bytes())
     if args.capture_look_proof:
         path=args.capture_look_proof.resolve()
         key=str(path.relative_to(ROOT/'.lab'))
@@ -184,8 +192,12 @@ call_kernel_writer:
     if args.spatial_settings_only:flags+=['-DA7_FL_SPATIAL_SETTINGS_ONLY']
     if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
     if args.capture_controls:flags+=['-DA7_FL_CAPTURE_CONTROLS']
+    if args.save_dialog:flags+=['-DA7_FL_SAVE_DIALOG','-I',str(ROOT/'.lab/native-save-dialog')]
     run(['arm-none-eabi-gcc',*flags,'-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
          str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources],'-lgcc','-o','module-test.elf'],cwd=OUT)
+    # The module integration fixture models opening/answering the dialog;
+    # native dialog lifecycle instructions are exercised by its own fixture.
+    if args.save_dialog:sources+=['payloads/a7-fl-dialog.c']
     objects=[]
     for i,path in enumerate(sources):
         name=f'part-{i}.o';objects.append(name)
@@ -195,7 +207,7 @@ call_kernel_writer:
     log=result.stdout+result.stderr;(OUT/'qemu.log').write_bytes(log);print(log.decode(),end='')
     if b'NATIVE_FL_MODULE_PASSED' not in log or b'FAIL ' in log:raise ValueError('Integration fixture failed')
     run(['arm-none-eabi-gcc',*flags,'-DA7_FL_TEST_SAVED_BOOT','-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
-         str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
+         str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p!='payloads/a7-fl-dialog.c'],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
     boot_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     boot_log=boot_run.stdout+boot_run.stderr;(OUT/'boot.log').write_bytes(boot_log);print(boot_log.decode(),end='')
     if b'NATIVE_FL_MODULE_BOOT_PASSED' not in boot_log or b'FAIL ' in boot_log:raise ValueError('Cold boot integration fixture failed')
@@ -209,6 +221,7 @@ call_kernel_writer:
     if args.with_bootstrap:source_files+=['payloads/a7-fl-bootstrap.h','payloads/a7-fl-posix.h','research/native_bootstrap.py','research/native_bootstrap_test.py','research/native_bootstrap_test_harness.c']
     if capture_look:source_files+=['payloads/a7-fl-capture.h']
     if args.capture_controls:source_files+=['payloads/a7-fl-capture-controls.h']
+    if args.save_dialog:source_files+=['payloads/a7-fl-dialog.h']
     proof={'scope':'Original Sony generic nodes, process-manager dispatch and backup writer with modeled platform/OSAL/kernel/filesystem; resident FL integration',
            'original_caution_sha256':CAUTION_SHA,'original_view_sha256':VIEW_SHA,'original_ranges':ranges,
            'source_sha256':{p:sha((ROOT/p).read_bytes()) for p in source_files},
@@ -218,6 +231,7 @@ call_kernel_writer:
            'platform_bootstrap_guard_fixture_verified':args.with_bootstrap,
            'live_platform_bootstrap_verified':False,'camera_integration':False,'flash_ready':False,
            'spatial_settings_only':args.spatial_settings_only,
+           'save_confirmation_dialog':args.save_dialog,
            'feature_scope':('Still-photo Creative Look menu with native Page hierarchy and nonnegative selection enums; FL-inspired LUT with five signed backend controls and explicit Save; '+
                             ('three editable spatial settings persisted as preferences only; no spatial image effect' if args.spatial_settings_only else 'last three spatial controls disabled')),
            'hardware_validation_required':['Actual still-view boot Backup API readiness','Physical menu navigation and Save action','Cold-power persistence and calibration readback']}

@@ -18,6 +18,16 @@ static uint32_t node_heap[262144];
 static a7_menu_node parent,creative,siblings[5],*parent_children[6];
 static uint8_t action_view[0x248];static a7_menu_node *action_selected;
 static unsigned stock_actions,action_flags,action_fallbacks;
+#ifdef A7_FL_SAVE_DIALOG
+static int (*dialog_commit)(void);
+static int dialog_open_fail;
+int a7_fl_dialog_open(uintptr_t base,void*manager,int(*commit)(void)) {
+    check(base==0x40000000&&manager==process_element&&commit,"dialog receives exact native platform");
+    if(dialog_open_fail)return -1;
+    dialog_commit=commit;return 0;
+}
+static int confirm_dialog(void){int(*commit)(void)=dialog_commit;dialog_commit=0;return commit?commit():-1;}
+#endif
 static void test(int ok,const char *message) {module_checks++;check(ok,message);}
 #ifdef A7_FL_CAPTURE_LOOK
 #ifdef A7_FL_CAPTURE_CONTROLS
@@ -221,6 +231,14 @@ void guest_main(void) {
     event_ok=0;test(a7_fl_confirm()==A7_FL_MODULE_EVENT && slot_writes==1,"unproven confirmation cannot persist");event_ok=1;
     *(uint32_t *)(action_view+0x130)=1;*(uintptr_t *)(action_view+0x150)=(uintptr_t)manager_words;*(int *)(action_view+0x158)=7;
     action_selected=look_row(look,9);original_action(action_view);
+#ifdef A7_FL_SAVE_DIALOG
+    test(slot_writes==1&&state->dirty&&dialog_commit,"Save opens dialog without durable write");
+    dialog_commit=0;
+    test(slot_writes==1&&state->dirty&&state->parameters[0]==3,"dialog cancel retains unsaved preview");
+    original_action(action_view);
+    test(confirm_dialog()==0&&confirm_dialog()!=0,"confirm callback persists once");
+    action_flags--; /* two menu actions, one commit */
+#endif
     test(slot_writes==2 && state->generation==2 && !state->dirty && action_flags==1 && action_fallbacks==0 && stock_actions==0,"original native Save action persists once");
     test(row_title(look,9)==0x0204ef85,"successful durable Save visibly becomes Complete");
 #ifdef A7_FL_SPATIAL_SETTINGS_ONLY
@@ -245,8 +263,14 @@ void guest_main(void) {
     test(set_value(0x7002,13)==1 && state->parameters[1]==4,"highlight enum preview");slot_failed=1;
     test(row_title(look,9)==0x0204eaab,"editing restores Save label");
     original_action(action_view);
+#ifdef A7_FL_SAVE_DIALOG
+    test(confirm_dialog()==A7_FL_CONTROL_PERSIST,"dialog commit reports storage failure");
+#endif
     test(state->last_error==A7_FL_CONTROL_PERSIST && state->dirty && state->generation==2 && row_title(look,9)==0x0204ef87,"failed native Save shows Not Complete and retains unsaved state");slot_failed=0;
     original_action(action_view);
+#ifdef A7_FL_SAVE_DIALOG
+    test(confirm_dialog()==0,"new confirmation retries failed save");
+#endif
     test(slot_writes==3 && state->generation==3 && row_title(look,9)==0x0204ef85,"native Save retry visibly succeeds");
     test(set_value(0x7000,0)==1 && a7_fl_confirm()==0 && same(data_guarded+1,ORIGINAL,1280) && state->mode==0,"Off restores original and records Off preference");
 #ifdef A7_FL_CAPTURE_LOOK
