@@ -12,7 +12,8 @@ BASE={2:0x40000000,6:0x42000000,0:0x44000000}
 PIECES={6:[(0x1a7f8,8),(0x43798,0x64),(0x437fc,0x3c),(0x4391e,0x24),
            (0x4394c,0x142),(0x43a8e,6),(0x43a94,0x80),(0x43b14,0x2e),
            (0x42b6e,0x26),(0x6edd5,6)],
-        0:[(0x12fdcc,0xdc)]}
+        0:[(0x12fdcc,0xdc)],
+        2:[(0x5944ac,0x260),(0x59320a,0x14),(0x5932a0,10)]}
 def sha(b):return hashlib.sha256(b).hexdigest()
 def run(args,**kw):return subprocess.run(args,check=True,**kw)
 def main():
@@ -24,7 +25,9 @@ def main():
         if sha(e[i].data)!=h:raise ValueError('Foreign dialog input')
     O.mkdir(parents=True,exist_ok=True);(O/'proof.json').unlink(missing_ok=True)
     ranges={2:[(0x15bf38,12),(0x15d958,12),(0x15c8dc,12),(0x587be8,12),(0x580994,12),
-               (0x2a8c80,24),(0x587ac6,16),(0x58060a,16)],
+               (0x2a8c80,24),(0x587ac6,16),(0x58060a,16),
+               (0x213ec4,0x78),(0x21fc80,0xf8),(0x21e374,24),
+               (0x592990,12),(0x5944ac,0x260),(0x59320a,0x14),(0x5932a0,10)],
             6:[(0x437fc,0x3c),(0x4391e,0x24),(0x43798,0x64),(0x43a5c,0x32),
                (0x43b14,0x2e),(0x43a94,0x80),(0x42b6e,0x26),(0x1a7f8,8)],
             0:[(0x12fdcc,0xdc),(0x12fd08,24),(0x12e4a8,24),(0x155656,24),
@@ -57,12 +60,23 @@ def main():
     (O/'vtable.bin').write_bytes(vt)
     add(BASE[6]+0x839b8,'vtable','.incbin "vtable.bin"','aw')
     add(BASE[6]+0x85630,'got','.word 0x420839b8','aw')
+    menu_vt=bytearray(e[2].read(0x87b5f8,0x180))
+    for off in range(0,len(menu_vt),4):
+        va=0x87b5f8+off;rel=e[2].relocations.get(va)
+        if rel and rel[0]==23:struct.pack_into('<I',menu_vt,off,e[2].word(va)+BASE[2])
+    (O/'menu-vtable.bin').write_bytes(menu_vt)
+    add(BASE[2]+0x87b5f8,'menu_vtable','.incbin "menu-vtable.bin"','aw')
+    add(BASE[2]+0x8e5f44,'menu_got','.word 0x4087b5f8','aw')
+    add(BASE[2]+0x7969cc,'row_icons','.space 20','a')
     stubs={
       6:{0x13f78:'base_ctor',0x13e84:'model_request',0x14314:'allocate',0x13c58:'unexpected',0x13dd8:'unexpected',
          0x1399c:'event_id',0x13f94:'close_view',0x140e0:'stock_write',0x14320:'get_highlight',0x139e8:'set_highlight',
          0x141b4:'get_widget',0x13eb4:'cast_widget',0x13a7c:'display',0x13d6c:'cast_footer',
          0x139b4:'wrap_ctor',0x13d9c:'wrap_enable',0x13d20:'wrap_destroy'},
-      2:{0x587be8:'cast_widget',0x580994:'cast_widget',0x2a8c80:'set_highlight'},
+      2:{0x587be8:'cast_widget',0x580994:'cast_widget',0x2a8c80:'set_highlight',
+         0x21fc80:'stock_menu_draw',0x21e374:'stock_menu_terminate',0x592990:'cast_widget',
+         0x15a3b8:'variant_noop',0x1581f8:'variant_noop',0x173304:'variant_copy',
+         0x5932f8:'popup_closed',0x5943b4:'row_set',0x594304:'footer_noop',0x159ba8:'unexpected'},
       0:{0x12e4a8:'get_widget',0x155656:'display',0x10d26a:'direct_text',0x862868:'redraw',0x12fd08:'close_view',
          0x104be4:'id_get',0x100a54:'allocate',0xffefc:'event_ctor',0x108c40:'param_ctor',
          0x101b94:'event_add',0xffce0:'push_event',0x101ff0:'unexpected',0x101ecc:'unexpected',
@@ -70,7 +84,7 @@ def main():
          0x121b52:'unexpected',0x121b62:'unexpected',0x103460:'unexpected'}}
     for lib,entries in stubs.items():
         for va,target in entries.items():
-            thumb=(lib==2 or (lib==0 and va in (0x12e4a8,0x155656,0x10d26a,0x862868,0x12fd08,0x108c40,0x121cd8,0x121bae,0x121b52,0x121b62)))
+            thumb=((lib==2 and va not in (0x15a3b8,0x1581f8,0x159ba8)) or (lib==0 and va in (0x12e4a8,0x155656,0x10d26a,0x862868,0x12fd08,0x108c40,0x121cd8,0x121bae,0x121b52,0x121b62)))
             # Veneers accept BLX to the standard +4 ARM PLT entry too.
             body=(f'.thumb\nldr.w ip,1f\nbx ip\n.balign 4\n1: .word {target}' if thumb else
                   f'.arm\nnop\nldr pc,[pc,#-4]\n.word {target}')

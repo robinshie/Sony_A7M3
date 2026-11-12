@@ -140,6 +140,18 @@ static void save_feedback(uint32_t title) {
     for(unsigned j=0;j<module.platform.parent_count;j++)
         (void)native_adjust_save_title(&module.trees[j],title);
 }
+#ifdef A7_FL_SAVE_DIALOG
+static int owns_menu_root(const void *ptr) {
+    const NativeAdjustNode *n=ptr;
+    if(!n||!readable((uintptr_t)n,sizeof *n))return 0;
+    for(unsigned j=0;j<module.platform.parent_count;j++) {
+        NativeAdjustTree *t=&module.trees[j];
+        if((n->vtable==t->node_vtable+2||n->vtable==t->clone_vtable+2)&&
+           n->properties==&t->root_properties)return 1;
+    }
+    return 0;
+}
+#endif
 static int synchronize(void) {
     for(unsigned j=0;j<module.platform.parent_count;j++) {
         if(!native_adjust_write(&module.trees[j],0x7000,module.control.preference.enabled,accept_applied,0))return 0;
@@ -194,7 +206,7 @@ static int save_commit(void) {
      * Save node. It is never reached by scalar preview setters. External confirm
      * remains separately witness-gated and may be disabled by the bootstrap. */
     int rc=commit_checked();
-    /* The native action handler marks the model changed and refreshes the row.
+    /* Async dialog commits also repopulate the cached native menu labels.
      * Only a successful durable commit may show Complete; edits restore Save. */
     save_feedback(rc?0x0204ef87:0x0204ef85); /* Not Complete / Complete */
     return leave(rc);
@@ -332,6 +344,11 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
         }
     }
     if(!synchronize()){module.status.fault=1;rollback();return leave(A7_FL_MODULE_NODES);}
+#ifdef A7_FL_SAVE_DIALOG
+    if(a7_fl_dialog_watch_menu(view_base,view_manager,owns_menu_root)) {
+        rollback();return leave(A7_FL_MODULE_MODEL);
+    }
+#endif
     module.status.installed=1;return leave(0);
 }
 int a7_fl_confirm(void) {

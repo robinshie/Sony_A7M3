@@ -21,6 +21,11 @@ static unsigned stock_actions,action_flags,action_fallbacks;
 #ifdef A7_FL_SAVE_DIALOG
 static int (*dialog_commit)(void);
 static int dialog_open_fail;
+static int (*dialog_owns_root)(const void*);
+int a7_fl_dialog_watch_menu(uintptr_t base,void*manager,int(*owns)(const void*)) {
+    check(base==0x40000000&&manager==process_element&&owns,"menu observer platform");
+    dialog_owns_root=owns;return 0;
+}
 int a7_fl_dialog_open(uintptr_t base,void*manager,int(*commit)(void)) {
     check(base==0x40000000&&manager==process_element&&commit,"dialog receives exact native platform");
     if(dialog_open_fail)return -1;
@@ -187,6 +192,9 @@ void guest_main(void) {
     test(state->installed && !state->fault && state->parents==1 && state->mode==0 && slot_writes==1,"resident module default Off with durable first record");
     test(parent.count==7 && parent.children[2]==&creative && parent.children[4]==siblings+2 && same(data_guarded+1,ORIGINAL,1280),"same-level insertion and historical baseline restored");
     a7_menu_node *look=parent.children[3];
+#ifdef A7_FL_SAVE_DIALOG
+    test(dialog_owns_root&&dialog_owns_root(look)&&!dialog_owns_root(&creative)&&!dialog_owns_root(0),"refresh limited to owned look root");
+#endif
     test(look!=&creative && look->count==2 && look->children[0]->count==6 && look->children[1]->count==4,"independent look root with two proper pages and explicit Save row");
     test(look->parent==&parent,"native parent ancestry");
     test(look->depth==3,"native root depth");

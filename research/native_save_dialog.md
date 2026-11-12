@@ -75,3 +75,44 @@ evidence are recorded separately in the r6 binding's
 `user-acceptance-2026-11-12.json`; automated physical-validation flags were not
 rewritten. This accepts r6 as the next development baseline, without claiming a
 new JPEG comparison or physical storage-failure test.
+
+## r7: repaint the cached Save row
+
+The asynchronous commit changed node property 0, but the underlying categorized
+menu retained its previous widget text. The stock action calls
+`setSettingMenuExistenceForCommonShootingSetting(true)`; this is not a generic
+model-change notification and cannot invalidate the cached row.
+
+Before SettingMenu construction, r7 pins and replaces two writable data slots:
+view2 `0x87b6fc` (draw, original `0x21fc81`) and `0x87b6e4` (termination,
+original `0x21e375`). Original callbacks always run. Observation requires vptr
+`0x87b600`, the same ViewManager, mode 3 and an owned root vtable/properties
+pair, including native owning clones. Leaving the category or terminating the
+view drops the observed pointer.
+
+After commit, widget `0xdabd8bcb` must pass the native categorized-list cast and
+its root at `0x124a8` must match the live menu category at `0x188`. Original
+row population `0x5944ad` reads title property 0 and repopulates the button
+labels. It does not change pages, selection or preferences. This happens while
+the result dialog is still visible, before its existing drawDirect call.
+
+The fixture now executes this original row population, including page/selection
+accessors and seven row setter calls. It verifies Complete before popup close,
+Not Complete on failure, unchanged page 2 / selected row 4, no repaint on Cancel,
+foreign category/widget exclusion and termination cleanup. Node property access,
+button setters and the renderer are modeled; the module fixture separately
+checks the real root ownership guard. This is not a physical display test.
+
+r7 write/readback completed on 2026-11-12, SHA-256
+`74d1df6c73ebd7d056ce741a28e3f459fdf2e7c5ac29063527e18b7111a64703`,
+63,524 bytes. Evidence is in
+`.lab/native-fl-releases/update-r7-yqrdhmaf/binding/replace-1794462136604332000/`.
+The user subsequently completed the requested cold-start workflow and reported
+that the returned menu immediately displays Complete, without moving the cursor.
+Acceptance and hashed evidence are recorded separately in the r7 binding's
+`user-acceptance-2026-11-12.json`. A subsequent read-only diagnostic attempt
+stopped because neither UTM nor the Mac detected the camera; no resident probe
+ran and no settings were written. Post-reboot resident/preferences/LUT status
+was therefore not re-read. The accepted r7 readback is the next update baseline.
+At the user's request, the v0.01 replacement package uses this accepted r7
+module. Its manifest revision and SHA-256 distinguish it from the prior r6 ZIP.

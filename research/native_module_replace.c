@@ -18,6 +18,8 @@ static const char temporary[]=".a7fl-r4.new",backup[]=".a7fl-bd01f7b1.orig",logn
 static const char temporary[]=".a7fl-r5.new",backup[]=".a7fl-1216dda3.orig",logname[]="A7FLUP5.LOG";
 #elif NMR_REVISION == 6
 static const char temporary[]=".a7fl-r6.new",backup[]=".a7fl-62c85626.orig",logname[]="A7FLUP6.LOG";
+#elif NMR_REVISION == 7
+static const char temporary[]=".a7fl-r7.new",backup[]=".a7fl-25d5f6f1.orig",logname[]="A7FLUP7.LOG";
 #else
 #error Unsupported module replacement revision
 #endif

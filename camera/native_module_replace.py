@@ -14,12 +14,13 @@ REVISIONS={1:dict(old_sha=OLD,old_size=42208,temporary='.a7fl-r1.new',backup='.a
            3:dict(old_sha='f3e2d657a83569f19ddafcd843a40601f1d953da0a20a8f8617c5e299e73a063',old_size=43160,temporary='.a7fl-r3.new',backup='.a7fl-f3e2d657.orig',journal='A7FLUP3.LOG'),
            4:dict(old_sha='bd01f7b1a0b6594c118613ca2b6c87debdcb17032bccd6ef43be14ffa8aaf274',old_size=43356,temporary='.a7fl-r4.new',backup='.a7fl-bd01f7b1.orig',journal='A7FLUP4.LOG'),
            5:dict(old_sha='1216dda332c42c6378fd993ccb89781d6229150c00798191835232de3923b675',old_size=48912,temporary='.a7fl-r5.new',backup='.a7fl-1216dda3.orig',journal='A7FLUP5.LOG'),
-           6:dict(old_sha='62c85626243e7009d78999ab16568163e9186934ccd820b70c7b3ea08ff7b5d0',old_size=55420,temporary='.a7fl-r6.new',backup='.a7fl-62c85626.orig',journal='A7FLUP6.LOG')}
+           6:dict(old_sha='62c85626243e7009d78999ab16568163e9186934ccd820b70c7b3ea08ff7b5d0',old_size=55420,temporary='.a7fl-r6.new',backup='.a7fl-62c85626.orig',journal='A7FLUP6.LOG'),
+           7:dict(old_sha='25d5f6f1f428cfbd92cae46be496b407eb746fbe06a4120215f5f2b87d508f31',old_size=60744,temporary='.a7fl-r7.new',backup='.a7fl-25d5f6f1.orig',journal='A7FLUP7.LOG')}
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
- if revision not in (4,5,6):return
+ if revision not in (4,5,6,7):return
  c=proof.get('capture_look');deps=proof.get('dependency_proof_sha256')
  require(isinstance(c,dict) and isinstance(deps,dict) and proof.get('spatial_settings_only') is True and
          c.get('arm_transaction_verified') is True and c.get('fixed_capture_tables') is (revision==4) and
@@ -29,7 +30,7 @@ def require_capture_release(revision,proof):
           c.get('base_delta_scale')==[3,2] and c.get('max_packed_delta')==[24,32,32] and
           c.get('controls_proof_sha256')==deps.get('native-capture-controls-test/proof.json'),
           'Revision 5 requires verified adjustable CAP controls.')
- if revision==6:
+ if revision>=6:
   require(proof.get('save_confirmation_dialog') is True and
           isinstance(deps.get('native-save-dialog/proof.json'),str),
           'Revision 6 requires the tested native confirmation dialog.')
