@@ -1,4 +1,14 @@
 #include "a7-fl-capture-controls.h"
+#include "a7-fl-runtime-prefs.h"
+#ifdef A7_FL_FILM_CONTROLS
+#include "a7-fl-fivepoint.h"
+#endif
+#ifdef A7_FL_DUAL_LOOK
+#include "a7-fl-cinema.h"
+#ifdef A7_FL_LEICA_LOOK
+#include "a7-fl-leica.h"
+#endif
+#endif
 static int equal(const uint8_t *a,const uint8_t *b,unsigned n) {
     for(unsigned i=0;i<n;i++)if(a[i]!=b[i])return 0;
     return 1;
@@ -44,28 +54,74 @@ int a7_capture_prepare(struct a7_capture_controls *c,const struct a7_fl_api *api
         }
         uint8_t scratch[1280];A7FLColorParams zero={0,0,0,0,0};
         if(a7_fl_adjust_lut(c->base[t],1280,expand,compress,&zero,scratch,1280))return A7_FL_TABLE;
+#ifdef A7_FL_DUAL_LOOK
+        for(unsigned i=0;i<1215;i++)scratch[i]=(uint8_t)decode(stock[t][i]);
+        if(a7_cinema_base(scratch,expand,compress,c->cinema[t]))return A7_FL_TABLE;
+#ifdef A7_FL_LEICA_LOOK
+        if(a7_leica_base(scratch,expand,compress,c->leica[t]))return A7_FL_TABLE;
+#endif
+#endif
     }
     c->prepared=1;return 0;
 }
-int a7_capture_generate(const struct a7_capture_controls *c,unsigned t,
-                        const A7FLColorParams *p,uint8_t out[1280]) {
+static const uint8_t *preset_base(const struct a7_capture_controls *c,unsigned t,int preset) {
+#ifdef A7_FL_DUAL_LOOK
+    if(preset==A7_FL_PRESET_CINEMA)return c->cinema[t];
+#ifdef A7_FL_LEICA_LOOK
+    if(preset==A7_FL_PRESET_LEICA)return c->leica[t];
+#endif
+#else
+    (void)preset;
+#endif
+    return c->base[t];
+}
+static int generate_with_curve(const struct a7_capture_controls *c,unsigned t,int preset,
+                        const A7FLColorParams *p,const int *curve,uint8_t out[1280]) {
     if(!c||!c->prepared||t>1||!out||!a7_fl_params_valid(p))return A7_FL_ARGUMENT;
     uint8_t next[1280];
-    if(a7_fl_adjust_lut(c->base[t],1280,c->expand,c->compress,p,next,1280))return A7_FL_TABLE;
+    if(a7_fl_adjust_lut(preset_base(c,t,preset),1280,c->expand,c->compress,p,next,1280))return A7_FL_TABLE;
     for(unsigned i=0;i<1215;i++)next[i]=encode(a7_fl_clamp(a7_fl_signed(next[i]),c->low[t][i],c->high[t][i]),t);
+#ifdef A7_FL_FILM_CONTROLS
+    if(curve&&a7_fl_fivepoint_lut(next,1280,next,1280,t,curve,c->low[t],c->high[t]))return A7_FL_TABLE;
+#else
+    (void)curve;
+#endif
     copy(out,next,1280);return 0;
 }
+static int generate(const struct a7_capture_controls *c,unsigned t,int preset,
+                    const A7FLColorParams *p,uint8_t out[1280]) {
+    return generate_with_curve(c,t,preset,p,0,out);
+}
+#ifdef A7_FL_FILM_CONTROLS
+int a7_capture_generate_curve(const struct a7_capture_controls *c,unsigned t,int preset,
+                const A7FLColorParams *p,const int curve[5],uint8_t out[1280]) {
+    if(preset<A7_FL_PRESET_FL||!a7_fl_preset_valid(preset)||!curve)return A7_FL_ARGUMENT;
+    return generate_with_curve(c,t,preset,p,curve,out);
+}
+#endif
+int a7_capture_generate(const struct a7_capture_controls *c,unsigned t,
+                        const A7FLColorParams *p,uint8_t out[1280]) {
+    return generate(c,t,A7_FL_PRESET_FL,p,out);
+}
+#ifdef A7_FL_DUAL_LOOK
+int a7_capture_generate_preset(const struct a7_capture_controls *c,unsigned t,int preset,
+                               const A7FLColorParams *p,uint8_t out[1280]) {
+    if(preset<A7_FL_PRESET_FL||!a7_fl_preset_valid(preset))return A7_FL_ARGUMENT;
+    return generate(c,t,preset,p,out);
+}
+#endif
 /* Fast exact tone comparison; final full generation is always required. */
-static int tone_equal(const struct a7_capture_controls *c,unsigned t,const uint8_t *table,const A7FLColorParams *p) {
+static int tone_equal(const struct a7_capture_controls *c,unsigned t,int preset,const uint8_t *table,const A7FLColorParams *p) {
+    const uint8_t *base=preset_base(c,t,preset);
     if(!p->contrast&&!p->highlights&&!p->shadows&&!p->fade) {
-        for(unsigned i=0;i<405;i++)if(table[i]!=encode(a7_fl_signed(c->base[t][i]),t))return 0;
+        for(unsigned i=0;i<405;i++)if(table[i]!=encode(a7_fl_clamp(a7_fl_signed(base[i]),c->low[t][i],c->high[t][i]),t))return 0;
         return 1;
     }
     for(int b=0;b<9;b++)for(int d=0;d<9;d++) {
         int previous=0;
         for(int a=0;a<5;a++) {
             unsigned i=(unsigned)(a*81+b*9+d);
-            int y=a7_fl_clamp(a*64+a7_fl_signed(c->base[t][i]),0,256);
+            int y=a7_fl_clamp(a*64+a7_fl_signed(base[i]),0,256);
             int lift=(p->highlights*y*y+p->shadows*(256-y)*(256-y))*6/65536;
             int adjusted=128+(y-128)*(256+p->contrast*14)/256+lift;
             adjusted=adjusted*(256-p->fade*5)/256+p->fade*4;
@@ -78,22 +134,32 @@ static int tone_equal(const struct a7_capture_controls *c,unsigned t,const uint8
     return 1;
 }
 static int ordered(unsigned n) {return n&1?-(int)((n+1)/2):(int)(n/2);}
-int a7_capture_recognize(const struct a7_capture_controls *c,unsigned t,const uint8_t table[1280]) {
+static int recognize(const struct a7_capture_controls *c,unsigned t,int preset,const uint8_t table[1280]) {
     if(!c||!c->prepared||t>1||!table)return A7_FL_ARGUMENT;
     if(!equal(table+1215,c->stock[t]+1215,65))return 0;
     uint8_t generated[1280];A7FLColorParams p={0,0,0,0,0};int saturation=99;
     for(unsigned s=0;s<19;s++) {
         p.saturation=ordered(s);
-        if(a7_capture_generate(c,t,&p,generated))return A7_FL_TABLE;
+        if(generate(c,t,preset,&p,generated))return A7_FL_TABLE;
         if(equal(table+405,generated+405,810)){saturation=p.saturation;break;}
     }
     if(saturation==99)return 0;
     p.saturation=saturation;
     for(unsigned a=0;a<19;a++)for(unsigned b=0;b<19;b++)for(unsigned d=0;d<19;d++)for(int f=0;f<10;f++) {
         p.contrast=ordered(a);p.highlights=ordered(b);p.shadows=ordered(d);p.fade=f;
-        if(tone_equal(c,t,table,&p)&&!a7_capture_generate(c,t,&p,generated)&&equal(table,generated,1280))return 1;
+        if(tone_equal(c,t,preset,table,&p)&&!generate(c,t,preset,&p,generated)&&equal(table,generated,1280))return 1;
     }
     return 0;
+}
+int a7_capture_recognize(const struct a7_capture_controls *c,unsigned t,const uint8_t table[1280]) {
+    int rc=recognize(c,t,A7_FL_PRESET_FL,table);
+#ifdef A7_FL_DUAL_LOOK
+    if(!rc)rc=recognize(c,t,A7_FL_PRESET_CINEMA,table);
+#endif
+#ifdef A7_FL_LEICA_LOOK
+    if(!rc)rc=recognize(c,t,A7_FL_PRESET_LEICA,table);
+#endif
+    return rc;
 }
 static int read_table(const struct a7_capture_controls *c,unsigned t,uint8_t *out) {
     uint32_t id=A7_FL_PROPERTY+1+t;
@@ -121,20 +187,21 @@ int a7_capture_adopt(struct a7_capture_controls *c,const A7FLColorParams *saved)
     c->initialized=1;return 0;
 }
 int a7_capture_verify(const struct a7_capture_controls *c,int mode,const A7FLColorParams *p) {
-    if(!c||!c->initialized||(mode!=0&&mode!=1)||!a7_fl_params_valid(p))return A7_FL_ARGUMENT;
+    if(!c||!c->initialized||!a7_fl_preset_valid(mode)||!a7_fl_params_valid(p))return A7_FL_ARGUMENT;
     uint8_t expected[1280];
     for(unsigned t=0;t<2;t++) {
-        if(mode) {if(a7_capture_generate(c,t,p,expected))return A7_FL_TABLE;}
+        if(mode) {if(generate(c,t,mode,p,expected))return A7_FL_TABLE;}
         else copy(expected,c->stock[t],1280);
         if(!equal(c->current[t],expected,1280))return A7_FL_VERIFY;
     }
     return unchanged(c);
 }
-int a7_capture_apply(struct a7_capture_controls *c,int mode,const A7FLColorParams *p) {
-    if(!c||!c->initialized||(mode!=0&&mode!=1)||!a7_fl_params_valid(p))return A7_FL_ARGUMENT;
+static int apply_with_curve(struct a7_capture_controls *c,int mode,const A7FLColorParams *p,
+                            const int *curve) {
+    if(!c||!c->initialized||!a7_fl_preset_valid(mode)||!a7_fl_params_valid(p))return A7_FL_ARGUMENT;
     uint8_t next[2][1280],scratch[1280];unsigned attempted=0;int rc;
     for(unsigned t=0;t<2;t++) {
-        if(mode) {if(a7_capture_generate(c,t,p,next[t]))return A7_FL_TABLE;}
+        if(mode) {if(generate_with_curve(c,t,mode,p,curve,next[t]))return A7_FL_TABLE;}
         else copy(next[t],c->stock[t],1280);
     }
     rc=unchanged(c);if(rc)return rc;
@@ -164,3 +231,13 @@ failed:
     }
     return unchanged(c)?A7_FL_RECOVERY:rc;
 }
+int a7_capture_apply(struct a7_capture_controls *c,int mode,const A7FLColorParams *p) {
+    return apply_with_curve(c,mode,p,0);
+}
+#ifdef A7_FL_FILM_CONTROLS
+int a7_capture_apply_curve(struct a7_capture_controls *c,int mode,const A7FLColorParams *p,
+                          const int curve[5]) {
+    if(mode!=A7_FL_PRESET_LEICA||!curve)return A7_FL_ARGUMENT;
+    return apply_with_curve(c,mode,p,curve);
+}
+#endif

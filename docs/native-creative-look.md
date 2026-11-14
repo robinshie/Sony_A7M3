@@ -10,6 +10,72 @@
 
 这是自制近似 FL。原厂非线性色度编解码、节点格式及 LUT 写入路径已有验证；A7 IV 的完整色彩算法和 ISP 处理没有复现。菜单和参数的 ARM 组件测试，也不等于模拟了相机传感器或 ISP。
 
+### r10：第二套外观 FL2 近似（已写入，名称与共享参数问题已复现）
+
+`MENU → 拍摄设置 1 → 第 14 页 → 创意外观` 第一行的第三项仍显示 `Cinema`，沿用机身现有文字，内容改为 FL2 近似。第一套 FL 的配方保持不变。两套外观共享五项色彩调节；三项空间参数仍只支持调节和保存。
+
+索尼说明 [A7 IV 不支持 FL2/FL3](https://www.sony.com/zh-cn/electronics/support/e-mount-body-ilce-7-series/ilce-7m5/articles/00410334)；[A7 V 支持两者](https://www.sony.com/en-cd/electronics/interchangeable-lens-cameras/ilce-7m5/specifications)。使用[索尼全球创意外观页](https://www.sony.com/en-jo/interchangeable-lens-cameras/creativelook#Comparing)的三组同源渲染（街景、河景、人像；ST／FL2）拟合亮度与色差，主要特征是略抬黑位和中间调、收住最亮端、降低蓝天与绿植的饱和度、保持灰白接近中性。没有添加颗粒或光晕。
+
+拟合后的三组样片每通道平均绝对误差分别为 7.34、4.61、4.03（8 位码值）。逐组留出后为 13.82、7.94、7.43，街景跨场景误差较大。数据来自已渲染的网页 JPEG，没有索尼的内部 LUT、RAW 运算或 ISP 参数。机内网格使用同一组拟合系数，但原厂工作色域和插值仍未确定，不能把桌面误差当作真机误差。
+
+在下方 r9 构建命令的 `--preview-cycle` 后加 `--dual-look`，并使用本次重新生成的色表验证记录 `.lab/lut3d-fl2-reference-private/proof.json`。候选模块位于 `.lab/native-module-fl2-reference/liba7-fl-module.so`，74,176 字节，SHA-256 `ff53734912f9a80a720de7105d4ef97a8166f5a1b9b70ab8009cb16b122396eb`。QEMU 验证三档选择、两套取景表和 JPEG 色表的切换、取消恢复、保存和模拟冷启动。尚未发布到 `v0.01`。
+
+2026-11-14，按用户指示从已验收的 r9 升级，完成写入和完整回读，事务阶段 100、无错误；旧 r9 备份一致，加载器及 WBI 未改变，`/usr` 恢复只读。绑定包为 `.lab/native-fl-releases/update-r10-csz2vfdv/binding/`，证据在其 `replace-1794634723196523000/` 子目录。机内备份 `/usr/lib/.a7fl-c2a8c2b9.orig`，日志 `/setting/A7FLUP10.LOG`。更新器通过 23,265 项检查及 126 个故障注入点，主机替换模拟通过 126 项检查，诊断解码及色表比对通过 2,816 项检查。第一次尝试因无盘 UTM 重启后未安装 Python，在维护模式切换前停止；用虚拟机中已有离线包补齐依赖后完成更新，没有重复写事务。
+
+用户冷启动后能选择第三项，但要求名称为 FL2，并指出切换后仍显示原 FL 参数。只读回查确认：第 40 代（FL）和第 41 代（模式 2）都是 `[8,3,-4,0,4,3,1,3]`，与旧版共享参数的实现一致。此反馈促成下方 r11 修复；不代表 FL2 色彩已完成实拍验收。不得重复运行 r10 更新包。
+
+### r11：FL2 名称及独立参数（真机冷启动验收通过）
+
+第三项改为 **FL2**。简体中文与英文各追加独立资源 `0x0204fda8`，保留所有原有 7,592 个资源及原厂 Cinema 标签。两套外观分别记忆八个调节值；切换后菜单、取景 LUT 与 JPEG LUT 使用同一套当前参数。确认保存会同时保存两组，取消会恢复上次保存的两组。关使用 FL 的参数组，关闭效果不会清除 FL2 设置。第二页三项仍只调节、保存，不改变空间处理效果。
+
+旧的 128 字节配置兼容读取。首次启动先核对旧版候选色表 CRC，再将原来共享的八项值完整保留给 FL；FL2 默认 `[0,0,0,0,0,0,3,0]`。新版配置格式版本为 2，使用原来 116–123 的八个保留字节保存另一组的有符号参数，文件长度不变，末尾 CRC 覆盖两组。双槽与递增代数继续工作。旧 r9/r10 不识别该格式，恢复旧模块前须单独评估并恢复相应配置备份，不能直接降级覆盖。
+
+构建在 r10 命令上增加 `--look-banks`，产物位于 `.lab/native-module-fl2-banks/`。先运行 `research/native_fl2_strings.py` 生成追加资源，再运行 `research/native_resource_fixture.py --usr <原厂 usr> --before .lab/native-fl-strings --after .lab/native-fl2-strings --fl2`，使用原厂 ARM 资源解析代码验证查找。完整构建命令：
+
+```sh
+python3 research/native_module.py --usr <原厂 usr 目录> --bundle .lab/native-fl-01 \
+  --with-bootstrap --spatial-settings-only \
+  --capture-look-proof .lab/lut3d-fl2-reference-private/proof.json \
+  --capture-controls --save-dialog --preview-cycle --dual-look --look-banks
+python3 research/native_module_replace_test.py --revision 1101
+python3 research/native_module_replace_test.py --revision 1102
+python3 research/native_module_replace_test.py --revision 11
+python3 deploy_fl2_banks.py --build-dir .lab/native-module-fl2-banks
+# 使用上一条打印的包路径；仅适用于尚未完成 r11 更新的对应 r10 相机：
+python3 deploy_fl2_banks.py --package <包路径> --write-device
+```
+
+本次包含语言资源变更，使用单独的 `deploy_fl2_banks.py` 一次性更新，不调用仍指向 r10 的 `deploy_fl.py`。顺序为中文追加资源、英文追加资源、最后更换模块；各文件独立预检、备份、原子替换与完整回读。前两步只是追加资源，尚未换模块时旧 r10 仍可使用原标签。失败即停，保留日志，不自动重试或续刷。更新前后分别读取两份配置并要求逐字节相同，迁移仅发生在新模块冷启动时。
+
+2026-11-14 已完成这三项真实写入：模块 75,148 字节，SHA-256 `70e12df533ecd928f3c9f48231622e112ac0acaae698a737ae93e314895372b2`。三个事务均阶段 100、无错误，完整新文件与原备份回读一致，加载器和 WBI 未改变，`/usr` 恢复只读。两份设置文件在写入前后完全一致。包与证据：`.lab/native-fl-releases/update-r11-banks-9lgrmahh/write-1794635719749850000/`。机内备份为 `/usr/lib/.a7fl-ff537349.orig`、`/usr/share/app/.a7fl2-zh.orig`、`/usr/share/app/.a7fl2-en.orig`；日志分别为 `/setting/A7FLUP11.LOG`、`/setting/A7FL2ZH.LOG`、`/setting/A7FL2EN.LOG`。**这台相机不能再次执行同一个包。**
+
+离线验证覆盖 FL/FL2 独立切换、取消、确认保存，旧 FL/FL2 配置迁移，已保存双组配置的模拟冷启动，127 个配置写入中断位置，以及三种文件更新各 126 个系统调用故障点；原厂资源解析检查 91,109 项，诊断检查 2,826 项。写入回读通过。用户随后断电冷启动，确认「名称和独立参数都正确」，并已接回 UTM。只读检查证明新模块驻留、无故障：第 42 代已迁移为双组格式，FL2 为默认值，原 FL 完整保留；第 43 代单独保存 FL2 `[5,3,-3,6,-3,1,3,1]`，另一组仍为原 FL `[8,3,-4,0,4,3,1,3]`。当前取景表及两张拍摄色表均与运行参数一致，第四张色表保持原厂。
+
+回读时用户又把 FL2 褪色从已保存的 6 调到 9，模块正确报告 `dirty=1`；这项变化尚未保存，未替用户提交。运行参数与保存记录不同是该待保存改动导致，不作为参数串组故障。证据在 `.lab/native-inspect-fl2-banks/read-1794636069315733000/`，验收记录在 `.lab/native-module-fl2-banks/acceptance.json`。本次确认菜单和独立参数功能，不代表 FL2 与 Sony 原版色彩匹配或 JPEG 实拍对比完成。
+
+后续更新应以本次验收的 r11 模块及其完整回读作为基线，使用新的更新修订号与独立日志；`deploy_fl.py` 尚指向历史 r9→r10 路线，不能用于此机的下一次更新。此版尚未提交或覆盖 GitHub 的 v0.01 / r9。
+
+[桌面配方](../recipes/fl2-reference-srgb.json)可用于 sRGB 照片。下方命令输出 33³ LUT 和对比图。照片无 ICC 时，确认是 sRGB 后再加 `--assume-srgb`。如需重做拟合，用 [拟合脚本](../research/fit_fl2_reference.py) 及上述官网三组对照的 1500×943 拼图，样片按页面顺序编号 `4_1/4_4`、`5_1/5_4`、`6_1/6_4.jpg`，每组取左图。
+
+```sh
+python3 research/fl_look.py preview --recipe recipes/fl2-reference-srgb.json \
+  --input /absolute/path/photo.jpg --out .lab/fl2-reference-photo
+```
+
+### r12：FL3（徕卡胶片）配色版（已写入、冷启动入口已确认）
+
+2026-11-14 已构建独立的第四个选项，名称为「FL3（徕卡胶片）」。使用自制暖色、较深红色和收敛蓝绿的配方；不是 Leica 官方 LUT。配置 schema 3 新增第三组原有八项参数，从 schema 1/2 迁移时保留已有 FL/FL2，第三组初始化为 `[0,0,0,0,0,0,3,0]`。ARM 夹具验证菜单选择、取消/保存、三组参数切换、保存后的冷启动、取景和两张拍摄表；中英文资源通过 91,121 项原厂解析检查，状态诊断通过 2,844 项检查。
+
+旧候选包 `.lab/native-fl-releases/update-r12-fl3-r0obrlwd/` 没有写入；源码后续扩展使其验证记录过期，保留为历史证据。用户随后要求先看到实际烧录结果，已重新构建 `.lab/native-module-fl3-leica/` 并验证所有依赖，生成新包 `.lab/native-fl-releases/update-r12-fl3-jww9bxu6/`。此版明确只含配色、名称和第三组原有参数。
+
+2026-11-14 已实际写入并完整回读：模块 79,840 字节，SHA-256 `b83d38c9867d50b3345b72813879b73b6659e375c36625a6f68e90d64bb493f7`。中文、英文、模块三个事务均阶段 100、错误为 0，新文件和旧备份均一致；加载器、WBI 与两份设置保持不变，`/usr` 恢复只读。证据为新包下 `write-1794655693474793000/`。备份 `/usr/lib/.a7fl-70e12df5.orig`、`/usr/share/app/.a7fl3-zh.orig`、`/usr/share/app/.a7fl3-en.orig`，日志 `/setting/A7FLUP12.LOG`、`/setting/A7FL3ZH.LOG`、`/setting/A7FL3EN.LOG`。写入后请求了用户冷启动检查，后续结果见下文；**写入回读成功不等于所有功能通过真机验收，这台相机也不能重复执行此包**。
+
+此次用 `deploy_fl3.py --package <新包路径> --host-identity-check --write-device`，沿用 r11 前像和三个独立文件事务。`--host-identity-check` 仅改在维护模式校验精确机型和构建号，避免客机扩展查询卡住；不会跳过身份或文件检查。无此参数时沿用客机查询。重建使用上方 r11 构建命令并增加 `--leica-look`；准备新相机更新时须重新确认其精确前像与事务状态，不能照抄本机已经执行的包。
+
+用户随后确认能看到 FL3，同时指出曲线、颗粒等未包含。冷启动只读核对 `.lab/native-inspect-fl3-r12/read-1794655927008558000/`：r12 正常驻留、无错误，当前模式 3，取景和两张拍摄表与 FL3 参数完全匹配，第四张原厂表不变。保存配置已迁移至第 44 代/schema 3，FL/FL2 原值保留；当前 FL3 选择尚未保存（`dirty=1`）。这证实入口和配色模块加载，不代表用户要求的新增七项已完成，实拍效果与完整功能验收仍未完成。后续替换须以实际 r12 文件为前像，不能再次套用 r11→r12 更新包。
+
+颗粒、光晕和黑位/暗部/中间调/亮部/白位五点曲线仍未包含在 r12。它们已有独立 C 内核、Mac/ARM 测试，尚未完成原厂实时帧接入、机内菜单及重启恢复。最新只读抽样成功还原 UYVY 画面，但调用来自解码缩放输出，不能据此声称取景/成片算法已接通。完整状态、复现命令和剩余工作见 [FL3 胶片调节](fl3-film-controls.md)。
+
 ### r9：调整创意外观后自动更新取景（已验收）
 
 2026-11-12，用户冷启动后保持创意风格不变，开启 FL，分别保存对比度 −9／+9 并等待 1 秒，反馈：**「不用切换风格，取景已随调节更新，原风格保留」**。r9 成为后续开发基线，按要求覆盖发布到 `v0.01`；版本号不变，以内部修订号及散列区分旧包。

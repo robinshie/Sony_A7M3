@@ -3,10 +3,27 @@
 #define NATIVE_ADJUST_H
 #include <stdint.h>
 
-#define NATIVE_ADJUST_FIELDS 8
+#define NATIVE_ADJUST_BASE_FIELDS 8
+#ifdef A7_FL_FILM_CONTROLS
+#define NATIVE_ADJUST_FIELDS 13
+#define NATIVE_ADJUST_PAGES 3
+#else
+#define NATIVE_ADJUST_FIELDS NATIVE_ADJUST_BASE_FIELDS
+#define NATIVE_ADJUST_PAGES 2
+#endif
 #define NATIVE_ADJUST_VALUES 31
+#define NATIVE_ADJUST_MODES 4
 #define NATIVE_ADJUST_ID_FIRST 0x7001
 #define NATIVE_ADJUST_SAVE_ID 0x7009
+#define NATIVE_ADJUST_CURVE_TITLE_FIRST 0x0204fdaau
+/* Keep the historical mode and Save dispatch IDs stable. */
+static inline int native_adjust_field_id(unsigned f) {
+    return NATIVE_ADJUST_ID_FIRST+(int)f+(f>=NATIVE_ADJUST_BASE_FIELDS);
+}
+static inline unsigned native_adjust_field_index(int id) {
+    if(id==NATIVE_ADJUST_SAVE_ID)return NATIVE_ADJUST_FIELDS;
+    return (unsigned)id-NATIVE_ADJUST_ID_FIRST-(id>NATIVE_ADJUST_SAVE_ID);
+}
 enum NativeAdjustField {
     NA_CONTRAST, NA_HIGHLIGHTS, NA_SHADOWS, NA_FADE, NA_SATURATION,
     NA_SHARPNESS, NA_SHARPNESS_RANGE, NA_CLARITY, NA_MODE
@@ -31,16 +48,16 @@ typedef struct {
     /* Original RTTI prefix + 65 slots + owner pointer. Heap-clone table retains
      * owning destructors; both tables restore capability grayout after init. */
     uintptr_t node_vtable[68], clone_vtable[68];
-    NativeAdjustNode root, mode, mode_values[2], fields[NATIVE_ADJUST_FIELDS], save;
+    NativeAdjustNode root, mode, mode_values[NATIVE_ADJUST_MODES], fields[NATIVE_ADJUST_FIELDS], save;
     NativeAdjustNode values[NATIVE_ADJUST_FIELDS][NATIVE_ADJUST_VALUES];
-    NativeAdjustNode *field_ptrs[NATIVE_ADJUST_FIELDS+2], *mode_ptrs[2];
+    NativeAdjustNode *field_ptrs[NATIVE_ADJUST_FIELDS+2], *mode_ptrs[NATIVE_ADJUST_MODES];
     NativeAdjustNode *value_ptrs[NATIVE_ADJUST_FIELDS][NATIVE_ADJUST_VALUES];
     NativeAdjustProperty root_props[4], field_props[NATIVE_ADJUST_FIELDS][5];
-    NativeAdjustProperty mode_props[5], mode_value_props[2][6];
+    NativeAdjustProperty mode_props[5], mode_value_props[NATIVE_ADJUST_MODES][6];
     NativeAdjustProperty save_props[5];
     NativeAdjustProperty value_props[NATIVE_ADJUST_FIELDS][NATIVE_ADJUST_VALUES][6];
     NativeAdjustProperties root_properties, field_properties[NATIVE_ADJUST_FIELDS];
-    NativeAdjustProperties mode_properties, mode_value_properties[2];
+    NativeAdjustProperties mode_properties, mode_value_properties[NATIVE_ADJUST_MODES];
     NativeAdjustProperties save_properties;
     NativeAdjustProperties value_properties[NATIVE_ADJUST_FIELDS][NATIVE_ADJUST_VALUES];
     NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS];
@@ -49,8 +66,8 @@ typedef struct {
     int current_mode;
     uintptr_t caution_base;
     /* Generic SettingMenu expects root -> pages -> fields -> value leaves. */
-    NativeAdjustNode pages[2];
-    NativeAdjustNode *page_ptrs[2];
+    NativeAdjustNode pages[NATIVE_ADJUST_PAGES];
+    NativeAdjustNode *page_ptrs[NATIVE_ADJUST_PAGES];
     NativeAdjustProperty page_props[1];
     NativeAdjustProperties page_properties;
 } NativeAdjustTree;
@@ -71,6 +88,7 @@ int native_adjust_build(NativeAdjustTree *, uintptr_t caution_base,
  * Save resource is 0x0204eaab. Process 0x7009 uses execution type 4, not a scalar
  * setter; integration must handle its original execProc dispatch explicitly.
  * Rejects a second append or a tree already attached to a parent. */
+int native_adjust_add_look(NativeAdjustTree *, uint32_t title_resid);
 int native_adjust_add_save(NativeAdjustTree *, uint32_t title_resid);
 /* Shared property storage is also used by native clones. Existing locale
  * resources provide Save, Complete and Not Complete without changing files. */
@@ -88,4 +106,8 @@ int native_adjust_write(NativeAdjustTree *, int process_id, int value,
 int native_adjust_encode(const NativeAdjustTree *,int process_id,int value,int *encoded);
 int native_adjust_decode(const NativeAdjustTree *,int process_id,int encoded,int *value);
 uint32_t native_adjust_number_resid(int value);
+#ifdef A7_FL_FILM_CONTROLS
+/* Fill the five new specs from the confirmed FL3 preference, before build. */
+int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const int8_t points[5]);
+#endif
 #endif

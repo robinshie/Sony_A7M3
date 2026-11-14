@@ -9,6 +9,12 @@ struct a7_fl_recovery {
     const uint8_t *base_fl,*compress;
     const uint16_t *expand;
     uint32_t base_fl_crc;
+#ifdef A7_FL_DUAL_LOOK
+    const uint8_t *base_cinema;
+#ifdef A7_FL_LEICA_LOOK
+    const uint8_t *base_leica;
+#endif
+#endif
     /* Must verify this camera identity AND firmware build against the immutable
      * package; 1 verified, any other result refuses all writes. */
     int (*identity_guard)(void *);

@@ -24,6 +24,9 @@ struct a7_fl_platform {
     unsigned parent_count;
     struct a7_fl_api backup;
     struct a7_fl_store_io storage;
+#ifdef A7_FL_FILM_CONTROLS
+    struct a7_fl_store_io film_storage;
+#endif
     /* Must prove camera identity+build and stable live mappings. */
     int (*identity)(void *);
     /* Install/uninstall: verified scheduler seam, menu idle, ownership and all

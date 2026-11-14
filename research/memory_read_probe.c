@@ -10,13 +10,15 @@ static long self_read(void*out,const void*in,unsigned n){
  struct Iov local={out,n},remote={(void*)in,n};
  return sc6(376,sc3(20,0,0,0),(long)&local,1,(long)&remote,1,0);
 }
-static struct {uint32_t magic,version;int32_t vm_read,vm_invalid,mem_open,mem_read,mem_invalid;uint32_t vm_matches,mem_matches;int32_t kernel_n,meminfo_n;char kernel[256],meminfo[2048];} result;
+static struct {uint32_t magic,version;int32_t vm_read,vm_invalid,mem_open,mem_read,mem_invalid;uint32_t vm_matches,mem_matches;int32_t kernel_n,meminfo_n,iomem_n;char kernel[256],meminfo[2048],iomem[8192];} result;
+_Static_assert(sizeof result==10544,"memory map report ABI");
 static unsigned char source[16],a[16],b[16];
 __attribute__((constructor)) static void capture(void){
  for(unsigned i=0;i<16;i++)source[i]=(unsigned char)(17+i*13);
- result.magic=0x41374d52;result.version=1;
+ result.magic=0x41374d52;result.version=2;
  result.kernel_n=read_proc("/proc/version",result.kernel,sizeof result.kernel-1);
  result.meminfo_n=read_proc("/proc/meminfo",result.meminfo,sizeof result.meminfo-1);
+ result.iomem_n=read_proc("/proc/iomem",result.iomem,sizeof result.iomem-1);
  result.vm_read=self_read(a,source,16);result.vm_invalid=self_read(a,(void*)1,16);
  long fd=sc3(5,(long)"/proc/self/mem",0,0);result.mem_open=fd;
  if(fd>=0){

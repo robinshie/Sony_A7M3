@@ -71,7 +71,15 @@ int a7_fl_restore_baseline(const struct a7_fl_recovery *r,int parameters[5]) {
     if(r->api->read(A7_FL_PROPERTY,current)!=1280)return A7_FL_READ;
     int rc=other_tables(r,scratch);if(rc)return rc;
     if(same(current,r->original[0],1280))return 0;
-    if(a7_fl_recognize(current,r->base_fl,r->expand,r->compress,parameters,0)!=1)return A7_FL_RECOVERY_UNRECOGNIZED;
+    int known=a7_fl_recognize(current,r->base_fl,r->expand,r->compress,parameters,0);
+#ifdef A7_FL_DUAL_LOOK
+    if(!known&&r->base_cinema)
+        known=a7_fl_recognize(current,r->base_cinema,r->expand,r->compress,parameters,0);
+#endif
+#ifdef A7_FL_LEICA_LOOK
+    if(!known&&r->base_leica)known=a7_fl_recognize(current,r->base_leica,r->expand,r->compress,parameters,0);
+#endif
+    if(known!=1)return A7_FL_RECOVERY_UNRECOGNIZED;
     if(r->identity_guard(r->identity_context)!=1)return A7_FL_RECOVERY_IDENTITY;
     rc=other_tables(r,scratch);if(rc)return rc;
     if(r->api->read(A7_FL_PROPERTY,scratch)!=1280||!same(current,scratch,1280))return A7_FL_FOREIGN;

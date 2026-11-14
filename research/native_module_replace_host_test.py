@@ -33,7 +33,9 @@ class Factory:
   if path=='/version.txt':return BUILD_ID
   st,data=self.read(path,maximum);check(st==(0,0),'existing mock contents');return data
  def read(self,path,maximum=1048576):
-  values={host.MODULE:self.e.disk,host.VIEW:view,bundle.backup:self.e.backup,bundle.journal:self.e.log,bundle.temporary:None}
+  values={bundle.target:self.e.disk,host.VIEW:view,bundle.backup:self.e.backup,bundle.journal:self.e.log,bundle.temporary:None}
+  if m['version'] in (11,12,13,14):
+   for name in ('string_simplifiedchinese.uxc','string_english.uxc'):values['/usr/share/app/'+name]=(ROOT/('.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
   check(path in values,'bounded file read path');v=values[path]
   if v is None:return self.missing,b''
   check(len(v)<=maximum,'bounded read size');return (0,0),v

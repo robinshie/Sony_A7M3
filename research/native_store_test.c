@@ -29,6 +29,16 @@ int main(void) {
     for(unsigned i=2;i<=100;i++){p.generation=i;p.parameters[0]=(int)(i%19)-9;assert(!a7_fl_store_save(&s,&p));}
     assert(!a7_fl_store_open(&s,&io,sha,build,&latest,&present)&&present&&latest.generation==100);
     struct disk good=d;
+    assert(a7_fl_preference_migrate(&p)==1);assert(a7_fl_preference_migrate_three(&p)==1);p.generation=101;p.other_parameters[0]=-8;
+#ifdef A7_FL_FILM_CONTROLS
+    assert(a7_fl_preference_migrate_film(&p)==1);p.film[2][0]=7;p.film[2][4]=-9;
+#endif
+    assert(!a7_fl_store_save(&s,&p));
+    assert(!a7_fl_store_open(&s,&io,sha,build,&latest,&present) && latest.schema==p.schema && latest.other_parameters[0]==-8 && latest.third_parameters[6]==3);
+#ifdef A7_FL_FILM_CONTROLS
+    assert(latest.film[2][0]==7&&latest.film[2][4]==-9);
+#endif
+    d=good;
     d.fail=1;p.generation=101;assert(a7_fl_store_save(&s,&p)!=0&&d.writes==100);d=good;
     for(int n=1;n<128;n++) {
         d=good;d.tear=n;assert(a7_fl_store_save(&s,&p)!=0);

@@ -1,6 +1,11 @@
 /* Execute original wrappers and original kernel writer around the new core. */
 #include <stdarg.h>
 #include <stdint.h>
+#include <stddef.h>
+#ifndef A7_FL_SEPARATE_KERNEL_STACK
+void *memset(void *out,int value,size_t n){volatile unsigned char *p=out;while(n--)*p++=(unsigned char)value;return out;}
+void *memcpy(void *out,const void *in,size_t n){volatile unsigned char *p=out;const unsigned char *q=in;while(n--)*p++=*q++;return out;}
+#endif
 #include "a7-fl-runtime.h"
 #include "a7-fl-runtime-prefs.h"
 #include "a7-fl-runtime-control.h"
@@ -165,12 +170,16 @@ static void test_replacement(void) {
 }
 static void test_preferences(void) {
     static const uint8_t hash[32]={1,2,3,4,5};static const char build[24]="a7fl-runtime-test-v1";
-    struct a7_fl_preference p={7,1,{-9,9,-2,4,-1,-3,3,0},0x12345678},out;
+    struct a7_fl_preference p={7,1,{-9,9,-2,4,-1,-3,3,0},0x12345678,0,{0},{0}},out;
     uint8_t a[128],b[128],scratch[128],bad_hash[32];char bad_build[24];
-    check(a7_fl_preference_encode(a,&p,hash,build)==0 && a7_fl_preference_decode(&out,a,128,hash,build)==0 && same(&out,&p,sizeof p),"preference roundtrip");tests++;
+    unsigned plen=sizeof p;
+#ifdef A7_FL_FILM_CONTROLS
+    plen=(unsigned)((const uint8_t *)&p.film-(const uint8_t *)&p)+sizeof p.film;
+#endif
+    check(a7_fl_preference_encode(a,&p,hash,build)==0 && a7_fl_preference_decode(&out,a,128,hash,build)==0 && same(&out,&p,plen),"preference roundtrip");tests++;
     for(unsigned i=0;i<128;i++) {
         bytes(scratch,a,128);scratch[i]^=1;
-        check(a7_fl_preference_decode(&out,scratch,128,hash,build)<0 && same(&out,&p,sizeof p),"single-byte damaged record rejected without output mutation");tests++;
+        check(a7_fl_preference_decode(&out,scratch,128,hash,build)<0 && same(&out,&p,plen),"single-byte damaged record rejected without output mutation");tests++;
         check(a7_fl_preference_decode(&out,a,i,hash,build)<0,"every truncated record rejected");tests++;
     }
     p.generation++;check(a7_fl_preference_encode(b,&p,hash,build)==0,"next record encode");
@@ -184,6 +193,41 @@ static void test_preferences(void) {
     check(a7_fl_preference_decode(&out,a,128,bad_hash,build)<0 && a7_fl_preference_decode(&out,a,128,hash,bad_build)<0,"factory hash and build binding");tests++;
     bytes(scratch,a,128);p.parameters[0]=10;
     check(a7_fl_preference_encode(scratch,&p,hash,build)<0 && same(scratch,a,128),"invalid control leaves output untouched");tests++;
+    for(int mode=0;mode<=2;mode++) {
+        struct a7_fl_preference bank={9,mode,{8,3,-4,0,4,3,1,3},123,0,{0},{0}},round;
+        int original[8];for(unsigned j=0;j<8;j++)original[j]=bank.parameters[j];
+        check(a7_fl_preference_migrate(&bank)==1 && a7_fl_preference_migrate(&bank)==0,"migration is idempotent");
+        a7_fl_preference_switch(&bank,1);
+        for(unsigned j=0;j<8;j++)check(bank.parameters[j]==original[j],"legacy settings retained in FL");
+        a7_fl_preference_switch(&bank,2);
+        for(unsigned j=0;j<8;j++)check(bank.parameters[j]==(j==6?3:0),"FL2 independent initial settings");
+        bank.parameters[0]=-7;bank.parameters[6]=5;
+        a7_fl_preference_switch(&bank,0);a7_fl_preference_switch(&bank,1);a7_fl_preference_switch(&bank,2);
+        check(bank.parameters[0]==-7 && bank.parameters[6]==5,"off switch retains both banks");
+#ifdef A7_FL_DUAL_LOOK
+        check(!a7_fl_preference_encode(b,&bank,hash,build)&&!a7_fl_preference_decode(&round,b,128,hash,build)&&same(&round,&bank,plen),"both banks durable roundtrip");
+        b[116]=127;uint32_t bank_crc=a7_fl_crc(b,124);for(unsigned j=0;j<4;j++)b[124+j]=(uint8_t)(bank_crc>>(j*8));
+        check(a7_fl_preference_decode(&round,b,128,hash,build)<0,"valid CRC with invalid inactive bank rejected");
+#else
+        (void)round;
+#endif
+    }
+#ifdef A7_FL_LEICA_LOOK
+    for(int initial=0;initial<3;initial++) {
+        struct a7_fl_preference bank={9,initial,{8,3,-4,0,4,3,1,3},123,0,{0},{0}},round;
+        a7_fl_preference_migrate(&bank);
+        a7_fl_preference_switch(&bank,2);bank.parameters[0]=5;bank.parameters[3]=6;
+        check(a7_fl_preference_migrate_three(&bank)==1&&a7_fl_preference_migrate_three(&bank)==0,"three-bank migration idempotent");
+        a7_fl_preference_switch(&bank,3);bank.parameters[0]=-7;
+        for(int from=0;from<4;from++)for(int to=0;to<4;to++){
+            a7_fl_preference_switch(&bank,from);a7_fl_preference_switch(&bank,to);
+            check(bank.parameters[0]==(to==3?-7:to==2?5:8),"all preset/off transition pairs preserve independent bank");
+            check(!a7_fl_preference_encode(b,&bank,hash,build)&&!a7_fl_preference_decode(&round,b,128,hash,build)&&same(&round,&bank,plen),"schema3 signed bank roundtrip");
+        }
+        b[48]=1;uint32_t crc=a7_fl_crc(b,124);for(unsigned j=0;j<4;j++)b[124+j]=(uint8_t)(crc>>(j*8));
+        check(a7_fl_preference_decode(&round,b,128,hash,build)<0,"schema3 reserved bytes rejected even with valid CRC");
+    }
+#endif
     p.parameters[0]=0;p.generation=0;check(a7_fl_preference_encode(b,&p,hash,build)<0,"zero generation rejected");tests++;
 }
 static int fake_store(void *ctx,const struct a7_fl_preference *p) {
@@ -197,7 +241,7 @@ static int fake_store(void *ctx,const struct a7_fl_preference *p) {
 static void control_reset(void) {
     reset();clear(&control,sizeof control);clear(&saved,sizeof saved);
     stored=store_failure=store_write_count=0;check(init()==0,"control runtime init");
-    struct a7_fl_preference p={1,0,{0,0,0,0,0,0,3,0},0};p.candidate_crc=a7_fl_crc(CANDIDATE,1280);
+    struct a7_fl_preference p={1,0,{0,0,0,0,0,0,3,0},0,0,{0},{0}};p.candidate_crc=a7_fl_crc(CANDIDATE,1280);
     check(a7_fl_control_init(&control,&context,CANDIDATE,EXPAND,COMPRESS,&p,fake_store,&stored)==0,"control bind exact generated LUT");
 }
 static void test_control(void) {
@@ -210,7 +254,7 @@ static void test_control(void) {
     before=stored;
     for(unsigned f=5;f<8;f++){check(a7_fl_control_apply(&control,f,1)==0 && stored==before,"unsupported spatial control never stored");tests++;}
     check(a7_fl_control_apply(&control,0,10)==0 && stored==before,"invalid scalar control rejected");tests++;
-    check(a7_fl_control_apply(&control,8,2)==0 && stored==before,"invalid mode rejected");tests++;
+    check(a7_fl_control_apply(&control,8,A7_FL_PRESET_MAX+1)==0 && stored==before,"invalid mode rejected");tests++;
     control_reset();store_failure=1;
     check(a7_fl_control_apply(&control,8,1)==0 && context.state==A7_FL_OFF && write_calls==0 && control.preference.generation==1 && control.last_error==A7_FL_CONTROL_PERSIST,"failed durable prewrite prevents all camera changes");tests++;
     control_reset();failure=1;

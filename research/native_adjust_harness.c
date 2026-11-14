@@ -65,10 +65,39 @@ static void widget_check(NativeAdjustNode*root,int pages,int rows,int page,int r
           "original widget consumes exact page and row structure");
 }
 void guest_main(void) {
-    NativeAdjustSpec specs[8];
-    for(unsigned f=0;f<8;f++) specs[f]=(NativeAdjustSpec){0x7f000010+f,0,-9,9,0};
+    NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS];
+    for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++) specs[f]=(NativeAdjustSpec){0x7f000010+f,0,-9,9,0};
     specs[3].minimum=0;specs[5].minimum=-3;specs[5].maximum=3;
     specs[6].minimum=0;specs[6].maximum=4;specs[7].minimum=0;specs[7].maximum=9;
+#ifdef A7_FL_FILM_CONTROLS
+    static const int8_t saved_points[]={9,-6,3,0,-9};
+    check(native_adjust_curve_specs(specs,saved_points),"set five curve specs from saved bank");
+    check(native_adjust_build(&tree,0,0x7f000001,0,0x7f000002,specs,0x1fff),"build film menu");
+    check(native_adjust_add_look(&tree,0x7f000003)&&native_adjust_add_look(&tree,0x7f000004),"add FL2 and FL3");
+    check(native_adjust_add_save(&tree,0x0204eaab),"add film Save");
+    check(tree.root.count==3&&tree.pages[0].count==6&&tree.pages[1].count==6&&tree.pages[2].count==3,"film page sizes");
+    backend_ok=1;
+    check(native_adjust_write(&tree,0x7000,3,backend,&tree)&&last_field==NA_MODE,"select FL3");
+    for(unsigned f=8;f<13;f++) {
+        int id=native_adjust_field_id(f),encoded=-1,value=0;
+        NativeAdjustNode *node=field_node(&tree.root,f+1),*leaf=0;
+        check(get(node,0xe)==id&&id!=NATIVE_ADJUST_SAVE_ID&&node->parent==&tree.pages[(f+1)/6],"curve ID and native ancestry");
+        check(get(node,0)==(int)(NATIVE_ADJUST_CURVE_TITLE_FIRST+f-8),"curve resolves dedicated label ID");
+        check(((GetSelected)0x682951)(node,&leaf)&&get(leaf,0x10)==saved_points[f-8]+9,"saved curve restores initial cursor");
+        check(native_adjust_encode(&tree,id,-1,&encoded)&&encoded==8&&
+              native_adjust_decode(&tree,id,encoded,&value)&&value==-1,"curve enum round trip");
+        check(native_adjust_write(&tree,id,-1,backend,&tree)&&last_field==f&&last_value==-1,"curve dispatch");
+        check(((GetSelected)0x682951)(node,&leaf)&&get(leaf,0x10)==8,"curve cursor selects negative value");
+    }
+    check(!native_adjust_write(&tree,NATIVE_ADJUST_SAVE_ID,0,backend,&tree),"Save cannot hit a curve field");
+    check(tree.save.parent==&tree.pages[2]&&get(&tree.save,0xe)==NATIVE_ADJUST_SAVE_ID,"Save after all curves");
+    for(int p=0;p<3;p++){
+        int rows=p==2?3:6;
+        check(((Select)0x682e59)(&tree.root,p+1)&&((Select)0x682e59)(&tree.pages[p],rows),"select last row on each page");
+        widget_check(&tree.root,3,rows,p+1,rows-1);
+    }
+    put("NATIVE_ADJUST_TESTS_PASSED: three film pages and all five curve fields\n");finish();
+#endif
     check(native_adjust_build(&tree,0,0x7f000001,0,0x7f000002,specs,0x3f),"build original graph");
     check(used==0,"unique graph requires no clone/allocation");
     int count=0;check(((GetCount)0x68289f)(&tree.root,&count)&&count==2,"two root pages");

@@ -27,7 +27,7 @@ def rejects(fn,message):
     except ValueError:check(True,message)
     else:check(False,message)
 class Preference(ctypes.Structure):
-    _fields_=[('generation',ctypes.c_uint32),('enabled',ctypes.c_int),('parameters',ctypes.c_int*8),('candidate_crc',ctypes.c_uint32)]
+    _fields_=[('generation',ctypes.c_uint32),('enabled',ctypes.c_int),('parameters',ctypes.c_int*8),('candidate_crc',ctypes.c_uint32),('schema',ctypes.c_uint32),('other_parameters',ctypes.c_int8*8),('third_parameters',ctypes.c_int8*8)]
 
 
 def main():
@@ -77,7 +77,30 @@ int generate_capture(unsigned t,const int *p,uint8_t *out){
  A7FLColorParams v={p[0],p[1],p[2],p[3],p[4]};return a7_capture_generate(&cc,t,&v,out);
 }
 ''')
-    subprocess.run(['cc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I',str(ROOT/'payloads'),str(wrapper),
+    if attested.dual_look:
+        with wrapper.open('a') as f:f.write('''
+#include "a7-fl-cinema.h"
+int generate_cinema_base(const uint8_t *base,const uint8_t *codec,uint8_t *out){
+ uint16_t e[129];for(unsigned i=0;i<129;i++)e[i]=codec[2*i]|(uint16_t)codec[2*i+1]<<8;
+ return a7_cinema_base(base,e,codec+258,out);
+}
+int generate_cinema_capture(unsigned t,const int *p,uint8_t *out){
+ A7FLColorParams v={p[0],p[1],p[2],p[3],p[4]};return a7_capture_generate_preset(&cc,t,2,&v,out);
+}
+''')
+    if attested.leica_look:
+        with wrapper.open('a') as f:f.write("""
+#include "a7-fl-leica.h"
+int generate_leica_base(const uint8_t *base,const uint8_t *codec,uint8_t *out){
+ uint16_t e[129];for(unsigned i=0;i<129;i++)e[i]=codec[2*i]|(uint16_t)codec[2*i+1]<<8;
+ return a7_leica_base(base,e,codec+258,out);
+}
+int generate_leica_capture(unsigned t,const int *p,uint8_t *out){
+ A7FLColorParams v={p[0],p[1],p[2],p[3],p[4]};return a7_capture_generate_preset(&cc,t,3,&v,out);
+}
+""")
+    subprocess.run(['cc','-shared' ,'-fPIC','-O2','-Wall','-Wextra','-Werror','-I',str(ROOT/'payloads'),str(wrapper),
+                    *(['-DA7_FL_DUAL_LOOK'] if attested.dual_look else []),*(['-DA7_FL_LEICA_LOOK'] if attested.leica_look else []),
                     str(ROOT/'payloads/a7-fl-runtime.c'),str(ROOT/'payloads/a7-fl-runtime-prefs.c'),
                     *([str(ROOT/'payloads/a7-fl-capture-controls.c')] if attested.capture_controls else []),
                     '-o',str(OUT/'reference.so')],check=True)
@@ -120,6 +143,14 @@ int generate_capture(unsigned t,const int *p,uint8_t *out){
     params=[-2,3,-4,2,-1,0,3,0];pref=preference(params)
     parsed=status.decode_preference(pref,digest.hex())
     check(parsed['state']=='valid' and parsed['parameters']==params and parsed['generation']==5,'actual C preference encoded record decoded exactly')
+    bank=Preference(8,1,(ctypes.c_int*8)(*params),123,2,(ctypes.c_int8*8)(8,3,-4,0,4,3,1,3))
+    bank_raw=ctypes.create_string_buffer(128)
+    check(lib.a7_fl_preference_encode(bank_raw,ctypes.byref(bank),digest,build)==0,'two-bank C encoder')
+    bank_decoded=status.decode_preference(bank_raw.raw,digest.hex(),dual_look=True)
+    check(bank_decoded['state']=='valid' and bank_decoded['schema']==2 and bank_decoded['other_parameters']==[8,3,-4,0,4,3,1,3],'Python reads separate inactive bank exactly')
+    for i in range(8):
+        damaged=bytearray(bank_raw.raw);damaged[116+i]=127;struct.pack_into('<I',damaged,124,zlib.crc32(damaged[:124]));out=Preference()
+        check(lib.a7_fl_preference_decode(ctypes.byref(out),bytes(damaged),128,digest,build)!=0 and status.decode_preference(bytes(damaged),digest.hex(),dual_look=True)['state']=='invalid','inactive bank range guard agrees in C and Python')
     for n in range(128):check(status.decode_preference(pref[:n],digest.hex())['state']=='invalid','all truncated preference records rejected')
     for at in range(128):
         damaged=bytearray(pref);damaged[at]^=1
@@ -131,10 +162,10 @@ int generate_capture(unsigned t,const int *p,uint8_t *out){
             native=lib.a7_fl_preference_choose(ctypes.byref(out),a,len(a or b''),b,len(b or b''),digest,build)
             check((selected['selected'] if selected['selected'] is not None else -2 if selected['state']=='conflicting' else -1)==native,
                   'two-slot selection matches actual C for valid/torn/absent/conflicting records')
-    for offset,value in ((12,0),(20,2),(24,10),(36,10),(48,0),(116,1),(120,1)):
+    for offset,value in ((12,0),(20,3 if attested.dual_look else 2),(24,10),(36,10),(48,0),(116,1),(120,1)):
         damaged=bytearray(pref);struct.pack_into('<I',damaged,offset,value);struct.pack_into('<I',damaged,124,zlib.crc32(damaged[:124]));out=Preference()
         native=lib.a7_fl_preference_decode(ctypes.byref(out),bytes(damaged),128,digest,build)
-        check(native!=0 and status.decode_preference(bytes(damaged),digest.hex())['state']=='invalid','valid-checksum invalid preference values rejected by Python and C')
+        check(native!=0 and status.decode_preference(bytes(damaged),digest.hex(),dual_look=attested.dual_look)['state']=='invalid','valid-checksum invalid preference values rejected by Python and C')
     symbols=attested.symbols
     def report(mode=1,loaded=1,stable=1,installed=1,ready=1,dirty=0,parameters=params):
         header=struct.pack('<IIi4Ii3I',0x41374653,2 if 'preview_symbol' in symbols else 1,loaded,0x40000000,0x70000000,
@@ -169,7 +200,56 @@ int generate_capture(unsigned t,const int *p,uint8_t *out){
     damaged=bytearray(raw);struct.pack_into('<i',damaged,108,-7)
     check(status.decode_report(bytes(damaged),symbols)['state']=='module-reported-error','last native failure remains visible')
     profile=types.SimpleNamespace(original=originals,base=base,codec=codec,original_sha=digest.hex(),symbols=symbols,
-                                  module_record=attested.module_record,capture=attested.capture,capture_controls=attested.capture_controls,payload=b'mock-readonly-NOLOAD-probe')
+                                  leica_look=attested.leica_look,module_record=attested.module_record,capture=attested.capture,capture_controls=attested.capture_controls,payload=b'mock-readonly-NOLOAD-probe')
+    if attested.dual_look:
+        cinema=status.cinema_base(originals[0],codec)
+        out=ctypes.create_string_buffer(1280);values=(ctypes.c_int*5)(*params[:5])
+        lib.generate_cinema_base.argtypes=[ctypes.c_void_p]*3
+        lib.generate_cinema_capture.argtypes=[ctypes.c_uint,ctypes.c_void_p,ctypes.c_void_p]
+        check(lib.generate_cinema_base(originals[0],codec,out)==0 and out.raw==cinema and cinema!=base,"Cinema base exact C/Python parity")
+        table=status.adjusted_lut(cinema,codec,params[:5])
+        saved=Preference(5,2,(ctypes.c_int*8)(*params),zlib.crc32(table))
+        encoded=ctypes.create_string_buffer(128)
+        check(lib.a7_fl_preference_encode(encoded,ctypes.byref(saved),digest,build)==0,"Cinema preference encoded")
+        rejects(lambda:status.decode_report(report(mode=2),symbols),'legacy profile rejects Cinema mode')
+        check(status.decode_preference(encoded.raw,digest.hex())['state']=='invalid','legacy profile rejects Cinema record')
+        cinema_report=status.decode_report(report(mode=2),symbols,dual_look=True)
+        cinema_tables=[table,*originals[1:]]
+        for key,legacy_table in profile.capture.items():
+            t=key-0x30005
+            cinema_tables[t+1]=status.adjusted_capture(originals[t+1],legacy_table,t,codec,params[:5],2)
+            check(lib.generate_cinema_capture(t,values,out)==0 and out.raw==cinema_tables[t+1],"Cinema CAP exact C/Python parity")
+        profile.dual_look=True
+        diagnostic=status.observations(profile,cinema_report,[encoded.raw,None],cinema_tables)
+        check(diagnostic['active_table_matches_runtime'] and diagnostic['runtime_matches_saved_preferences'],"Cinema readback and saved CRC match")
+    if attested.leica_look:
+        leica=status.cinema_base(originals[0],codec,True)
+        out=ctypes.create_string_buffer(1280);values=(ctypes.c_int*5)(*params[:5])
+        lib.generate_leica_base.argtypes=[ctypes.c_void_p]*3
+        lib.generate_leica_capture.argtypes=[ctypes.c_uint,ctypes.c_void_p,ctypes.c_void_p]
+        check(lib.generate_leica_base(originals[0],codec,out)==0 and out.raw==leica and leica!=base and leica!=status.cinema_base(originals[0],codec),"FL3 base exact C/Python parity and distinct")
+        table=status.adjusted_lut(leica,codec,params[:5])
+        first=(ctypes.c_int8*8)(8,3,-4,0,4,3,1,3);second=(ctypes.c_int8*8)(5,3,-3,6,-3,1,3,1)
+        saved=Preference(5,3,(ctypes.c_int*8)(*params),zlib.crc32(table),3,first,second)
+        encoded=ctypes.create_string_buffer(128)
+        check(lib.a7_fl_preference_encode(encoded,ctypes.byref(saved),digest,build)==0,"schema3 encoder")
+        decoded_bank=status.decode_preference(encoded.raw,digest.hex(),dual_look=True,leica_look=True)
+        check(decoded_bank['state']=='valid' and decoded_bank['other_parameters']==list(first) and decoded_bank['third_parameters']==list(second),"all three banks decoded exactly")
+        for offset in (24,32,40,48,116):
+            damaged=bytearray(encoded.raw);damaged[offset]=127;struct.pack_into('<I',damaged,124,zlib.crc32(damaged[:124]));output=Preference()
+            check(lib.a7_fl_preference_decode(ctypes.byref(output),bytes(damaged),128,digest,build)!=0 and status.decode_preference(bytes(damaged),digest.hex(),dual_look=True,leica_look=True)['state']=='invalid',"schema3 bad bank/reserved bytes rejected")
+        rejects(lambda:status.decode_report(report(mode=3),symbols,dual_look=True),'two-look profile rejects FL3')
+        leica_report=status.decode_report(report(mode=3),symbols,dual_look=True,leica_look=True)
+        leica_tables=[table,*originals[1:]]
+        for key,legacy_table in profile.capture.items():
+            t=key-0x30005
+            for controls in (params[:5],[0,0,0,0,0],[9,-9,9,9,-9],[-9,9,-9,0,9]):
+                v=(ctypes.c_int*5)(*controls);target=status.adjusted_capture(originals[t+1],legacy_table,t,codec,controls,3)
+                check(lib.generate_leica_capture(t,v,out)==0 and out.raw==target,"FL3 CAP C/Python parity across controls")
+            leica_tables[t+1]=status.adjusted_capture(originals[t+1],legacy_table,t,codec,params[:5],3)
+        profile.leica_look=True
+        diagnostic=status.observations(profile,leica_report,[encoded.raw,None],leica_tables)
+        check(diagnostic['active_table_matches_runtime'] and diagnostic['runtime_matches_saved_preferences'],"FL3 readback and saved CRC match")
     candidate=status.adjusted_lut(base,codec,params[:5]);tables=[candidate,*originals[1:]]
     for key,capture_table in profile.capture.items():
         i=key-0x30004

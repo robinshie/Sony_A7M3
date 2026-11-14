@@ -9,6 +9,7 @@ ownership, compression/packing, mapping and synchronization still need proof.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import struct
 import subprocess
@@ -23,9 +24,12 @@ PINS={
     'libObj.so':'1117453a969c9dedeb9bf6b006514fd9c2644a79085590a797189df109d64d23',
     'dataflowInfraFramework.so':'ad77c2ffd1497d919b401c0d8582eb5fad4c0cf807e109e1ec3fa87adc389780',
     'libmpr.so':'16b0260a33748838ba05fdb79e11392e7562052f79ed072123b1bf991bab966d',
+    'libBizFw.so':'5ae5eaf81286d99214e14d640bd276277fd22a1d137aec502f508022b3409910',
 }
 SOURCES=('research/yc_trace.py','research/yc_trace_hook.S','research/yc_trace_hook_test.c',
          'research/yc_trace_probe.c','research/yc_trace_probe_test.c','research/yc_trace_sample.c','research/yc_trace_sample_test.c','payloads/a7-runtime-probe.c','ui/start.S')
+SOURCES += ('research/dmm_observer.h','research/dmm_observer.c','research/dmm_frame_dump.h','research/dmm_frame_dump.c','payloads/a7-dmm-channel.h','payloads/a7-dmm-channel.c',
+            'research/dmm_channel_test.py','research/dmm_channel_harness.c','research/dmm_frame_dump_test.py','research/dmm_frame_dump_test.c')
 GETTER='_ZN26C_DataflowInfra_StdData_YC22GetEntry_ImageSizeInfoEP35C_DataflowInfra_Entry_ImageSizeInfo'
 PROFILES={
     'metadata':(0,'dataflowInfraFramework.so',GETTER,0x126ce20,0x22301,12),
@@ -35,6 +39,11 @@ PROFILES={
     'write_info':(3,'libmpr.so','_ZN5MprIf10WriteStillEPNS_15WriteStillParamEPN3MPR9StillInfoEm',0x126cce0,0x85ed3b,48),
     'make_info':(3,'libmpr.so','_ZN5MprIf19MakeWriteStillImageEPNS_20WriteStillImageParamEPN3MPR9StillInfoE',0x126cec0,0x85ee15,56),
     'write_samples':(4,'libmpr.so','_ZN5MprIf10WriteStillEPNS_15WriteStillParamEPN3MPR9StillInfoEm',0x126cce0,0x85ed3b,48),
+    'mapped':(5,'libBizFw.so','_ZN12AvbbcPhycMem10GetLogAddrEv',0x126b1d0,0x315f5,8),
+    'dmm_open':(6,'libBizFw.so','_ZN17OBJAVBBCBASECLASS5DmmCh4openEP18dmm_comp_open_unitttj',0x126d13c,0x35f31,264),
+    'unit_sparse':(9,'dataflowInfraFramework.so',GETTER,0x126ce20,0x22301,12),
+    'unit_frame':(8,'dataflowInfraFramework.so',GETTER,0x126ce20,0x22301,12),
+    'unit_query':(7,'dataflowInfraFramework.so',GETTER,0x126ce20,0x22301,12),
 }
 def sha(data):return hashlib.sha256(data).hexdigest()
 def require(ok,message):
@@ -42,7 +51,7 @@ def require(ok,message):
 def run(args,**kw):return subprocess.run(args,check=True,**kw)
 def array(name,data):return f'static const unsigned char {name}[]={{'+','.join(map(str,data))+'};\n'
 
-def build(usr,out,kind='metadata'):
+def build(usr,out,kind='metadata',existing_install=None,memory_map=None):
     mode,target,symbol,expected_slot,expected_address,expected_size=PROFILES[kind]
     elves={n:ELF(usr/'lib'/n) for n in ('libObj.so',target)}
     for n,e in elves.items():require(sha(e.data)==PINS[n],f'Unexpected library: {n}')
@@ -54,9 +63,20 @@ def build(usr,out,kind='metadata'):
     relocations=[(a,reloc,s) for a,(reloc,s) in flow.relocations.items() if start<=a<start+expected_size]
     require(all(reloc==23 and (a-start)%4==0 and a+4<=start+expected_size for a,reloc,s in relocations),'Unsupported code relocation')
     out.mkdir(parents=True,exist_ok=True)
+    query_sources=[]
+    if mode>=7:
+        run([sys.executable,str(ROOT/'research/dmm_channel_test.py'),'--library',str(usr/'lib/libBizFw.so')])
+        query_sources=[str(ROOT/'research/dmm_observer.c'),str(ROOT/'research/dmm_frame_dump.c'),str(ROOT/'payloads/a7-dmm-channel.c')]
+    if mode>=8:run([sys.executable,str(ROOT/'research/dmm_frame_dump_test.py'),*(['--sampled'] if mode==9 else [])])
+    memory_evidence=None
+    if memory_map:
+        raw_map=memory_map.read_bytes();observed=json.loads(raw_map)
+        require(observed['iomem_length']>0 and observed['iomem'].startswith('00000000-3fffffff : System RAM\n') and
+                observed['kernel'].startswith('Linux version 3.0.27_nl-rt106+ '),'Unexpected observed memory map')
+        memory_evidence=sha(raw_map)
     (out/'hook.ld').write_text('ENTRY(a7yc_hook)\nSECTIONS { . = 0; .text : { *(.text*) *(.rodata*) . = ALIGN(4); a7yc_hook_end = .; } }\n')
-    run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mno-unaligned-access','-fPIC','-fvisibility=hidden','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-nostdlib','-T',str(out/'hook.ld'),
-         str(ROOT/'research/yc_trace_hook.S'),str(ROOT/'research/yc_trace_sample.c'),'-o',str(out/'hook.elf')])
+    run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mno-unaligned-access','-fPIC','-fvisibility=hidden','-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-nostdlib','-T',str(out/'hook.ld'),
+         *(['-DA7_DMM_SPARSE_FRAME'] if mode==9 else []),'-I',str(ROOT/'payloads'),str(ROOT/'research/yc_trace_hook.S'),str(ROOT/'research/yc_trace_sample.c'),*query_sources,'-o',str(out/'hook.elf')])
     run(['arm-none-eabi-objcopy','-O','binary','-j','.text',str(out/'hook.elf'),str(out/'hook.bin')])
     listing=run(['arm-none-eabi-nm','-n',str(out/'hook.elf')],capture_output=True,text=True).stdout
     symbols={line.split()[-1]:int(line.split()[0],16) for line in listing.splitlines() if len(line.split())==3}
@@ -64,6 +84,23 @@ def build(usr,out,kind='metadata'):
     require(symbols['a7yc_hook']==0 and symbols['a7yc_hook_end']==len(code) and literal+4<=len(code)<=4096,'Hook layout changed')
     hook_elf=ELF(out/'hook.elf')
     require(all(not(s[2]&2 and s[5]) or (s[1]==1 and s[3]+s[5]<=len(code)) for s in hook_elf.sections),'Hook has uncopied allocated sections')
+    existing_evidence=None
+    if existing_install:
+        require(mode==7,'Historical cleanup is limited to the unit-query ABI')
+        old=existing_install.resolve();proof_raw=(old/'proof.json').read_bytes();proof=json.loads(proof_raw)
+        installed_raw=(old/'live.json').read_bytes();installed=json.loads(installed_raw)
+        expected=(old/'hook.bin').read_bytes()
+        old_literal=re.search(r'^#define A7YC_STATE_LITERAL (\d+)u$',(old/'yc-trace-pins.h').read_text(),re.M)
+        require(proof['kind']=='unit_query' and proof['version']==9 and sha(expected)==proof['hook_sha256'] and
+                installed['status']==1 and installed['action']==0 and installed['kind']==7 and
+                old_literal and int(old_literal[1])==literal and expected[literal:literal+4]==bytes(4) and
+                literal+4<=len(expected)<=4096,'Historical installed hook identity failed')
+        require(all(proof['library_sha256'].get(n)==PINS[n] for n in ('libObj.so','dataflowInfraFramework.so','libBizFw.so')),'Historical library identity changed')
+        require(all(proof['source_sha256'].get(n)==sha((ROOT/n).read_bytes()) for n in
+                    ('research/yc_trace_hook.S','research/dmm_observer.h','research/dmm_observer.c')),'Historical hook/observer ABI changed')
+        existing_evidence=dict(install_proof_sha256=sha(proof_raw),install_report_sha256=sha(installed_raw),
+            hook_sha256=sha(expected),cleanup_only=True)
+        (out/'fresh-hook.bin').write_bytes(code);code=expected;(out/'hook.bin').write_bytes(code)
     (out/'test.ld').write_text('''ENTRY(_start)
 SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
 .rodata : { *(.rodata*) } .data : { *(.data*) }
@@ -89,11 +126,22 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
     header+=array('lazy_pin',obj.read(0xffc24,20))+array('dlsym_pin',obj.read(0x104ae4,12))
     header+=f'#define A7YC_RELOCATION_COUNT {len(relocations)}u\n'
     header+='static const unsigned target_relocations[]={'+(','.join(str(a-start) for a,_,_ in relocations) or '0')+'};\n'
+    if mode>=7:
+        from research.dmm_unit_query import FUNCTIONS
+        biz=ELF(usr/'lib/libBizFw.so');require(sha(biz.data)==PINS['libBizFw.so'],'Wrong DMM library')
+        header+=array('biz_header',biz.data[:64]);entries=[]
+        for key,(name,address,size) in FUNCTIONS.items():
+            require((biz.symbols[name]['value'],biz.symbols[name]['size'])==(address,size),'Wrong DMM ABI')
+            at=address&~1;require(not any(at<=a<at+size for a in biz.relocations),'DMM code relocation unsupported')
+            header+=f'#define A7YC_DMM_{key} {address}u\n'+array('dmm_'+key,biz.read(at,size))
+            entries.append(f'{{{at}u,{size}u,dmm_{key}}}')
+        header+='struct DmmPin {unsigned offset,size;const unsigned char *bytes;};\nstatic const struct DmmPin dmm_pins[]={'+','.join(entries)+'};\n'
     (out/'yc-trace-pins.h').write_text('#ifndef A7YC_PINS_H\n#define A7YC_PINS_H\n'+header+'#endif\n')
     run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mno-unaligned-access','-O2',
          '-ffreestanding','-fno-builtin','-nostdlib','-Wall','-Wextra','-Werror',
-         '-Wno-misleading-indentation','-I',str(out),'-T',str(out/'test.ld'),
+         '-Wno-misleading-indentation','-I',str(out),'-I',str(ROOT/'payloads'),'-T',str(out/'test.ld'),
          str(ROOT/'ui/start.S'),str(ROOT/'research/yc_trace_probe_test.c'),
+         *([str(ROOT/'payloads/a7-dmm-channel.c')] if mode>=7 else []),
          '-lgcc','-o',str(out/'probe-test.elf')])
     t=run(['qemu-system-arm','-M','realview-pbx-a9','-smp','1','-m','64','-nodefaults',
            '-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio',
@@ -107,14 +155,18 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
     require(b'YC_TRACE_SAMPLE_PASSED' in sample_log and b'FAIL' not in sample_log,'Bounded sample test failed')
     for action,index in (('install',0),('read',1),('stop',2)):
         run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-mno-unaligned-access',
-             '-fPIC','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
+             '-fPIC','-fvisibility=hidden','-Os','-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
              '-nostdlib','-shared','-Wl,--no-undefined','-Wl,-z,noexecstack','-Wall','-Wextra',
              '-Wno-unused-function','-Wno-misleading-indentation','-I',str(ROOT/'payloads'),'-I',str(out),
-             f'-DACTION={index}',str(ROOT/'research/yc_trace_probe.c'),'-lgcc','-o',str(out/f'{action}.so')])
+             f'-DACTION={index}',str(ROOT/'research/yc_trace_probe.c'),
+             *(['-DA7YC_STOP_ONLY'] if existing_install else []),
+             *([str(ROOT/'payloads/a7-dmm-channel.c')] if mode>=7 else []),'-lgcc','-o',str(out/f'{action}.so')])
     (out/'proof.json').write_text(json.dumps(dict(source_sha256={n:sha((ROOT/n).read_bytes()) for n in SOURCES},
-        library_sha256={n:PINS[n] for n in elves},kind=kind,version=6,hook_sha256=sha(code),qemu_log_sha256=sha(log),sample_qemu_log_sha256=sha(sample_log),
+        library_sha256={n:PINS[n] for n in (*elves,*(('libBizFw.so',) if mode>=7 else ()))},kind=kind,version=9,hook_sha256=sha(code),qemu_log_sha256=sha(log),sample_qemu_log_sha256=sha(sample_log),
         probe_qemu_log_sha256=sha(probe_log),
         payload_sha256={a:sha((out/f'{a}.so').read_bytes()) for a in ('install','read','stop')},
+        historical_cleanup=existing_evidence,
+        memory_map_sha256=memory_evidence,
         scope='Temporary bounded metadata import hook; no pixel writes or firmware replacement',
         camera_executed=False,capture_path_verified=False),indent=2)+'\n')
 
@@ -127,12 +179,33 @@ FIELDS={'attached':(0,1),'unit_type':(4,4),'unit_handle':(8,2),'unit_data_offset
 def decode(raw):
     require(len(raw)==10344,'Unexpected report length')
     h=struct.unpack_from('<3Ii6I',raw)
-    require(h[:2]==(0x41375950,6),'Unexpected report identity')
+    require(h[:2]==(0x41375950,9),'Unexpected report identity')
     state=struct.unpack_from('<16I',raw,40);rows=[]
-    require(state[5]<=(1 if state[12]==4 else 2 if state[12]==3 else 127),'Unexpected trace count')
+    require(state[5]<=(1 if state[12] in (4,7,8,9) else 2 if state[12]==3 else 127),'Unexpected trace count')
     def record(i):
-        at=104+i*(8192 if state[12]==4 else 4096 if state[12]==3 else 80);caller,result,kind,_=struct.unpack_from('<IiII',raw,at);entry=raw[at+16:at+16+(3400 if kind>=3 else 64)]
-        row={name:int.from_bytes(entry[o:o+n],'little') for name,(o,n) in FIELDS.items()} if kind==0 else {('region_words' if kind==1 else 'still_info_words' if kind>=3 else 'parameter_words'):list(struct.unpack('<'+str(len(entry)//4)+'I',entry))}
+        at=104+i*(8192 if state[12]==4 else 4096 if state[12]==3 else 80);caller,result,kind,extra=struct.unpack_from('<IiII',raw,at);entry=raw[at+16:at+16+(3400 if kind in (3,4) else 64)]
+        row={name:int.from_bytes(entry[o:o+n],'little') for name,(o,n) in FIELDS.items()} if kind in (0,7,8,9) else {('region_words' if kind==1 else 'still_info_words' if kind>=3 else 'parameter_words'):list(struct.unpack('<'+str(len(entry)//4)+'I',entry))}
+        if kind==5:
+            # The pinned original constructor stores these eight words. Reading
+            # metadata here never dereferences the returned mapping itself.
+            entry=raw[at+16:at+80]
+            require(not any(entry[32:]),'Nonzero mapping record padding')
+            vt,fd,logical,mapping,physical,mapped_length,length,owner=struct.unpack_from('<8I',entry)
+            offset=logical-mapping
+            row=dict(vtable=hex(vt),fd=fd if fd<0x80000000 else fd-0x100000000,
+                     logical=hex(logical),mapping=hex(mapping),physical=hex(physical),
+                     mapped_length=mapped_length,length=length,owner=owner,
+                     mapping_consistent=(fd<0x80000000 and mapping not in (0,0xffffffff) and
+                         0<=offset<4096 and 0<length<=0x10000000 and offset+length==mapped_length and
+                         logical+length<=0x100000000 and result&0xffffffff==logical),
+                     mapped_bytes_read=False)
+        if kind==6:
+            require(not any(entry[24:]),'Nonzero DMM record padding')
+            command,status,word4,word6,word8,word12,physical,length=struct.unpack_from('<HhHH4I',entry)
+            row=dict(command=command,dmm_status=status,request_handle=extra&65535,
+                     halfword4=word4,halfword6=word6,word8=hex(word8),word12=hex(word12),
+                     physical=hex(physical),length=length,
+                     dmm_open_succeeded=(result==0 and status==0),pixel_bytes_read=False)
         if kind==4:
             row['samples']=[]
             for n in range(12):
@@ -143,10 +216,24 @@ def decode(raw):
         row.update(caller=hex(caller),object_relative_return=hex(caller-h[4]),result=result,kind=kind,raw=entry.hex());return row
     for i in range(state[5]):
         rows.append(record(i))
-    return dict(status=h[3],action=h[2],object_base=hex(h[4]),target_base=hex(h[5]),
+    query=None
+    if state[12] in (7,8,9):
+        q=40+224;constructed,pending,held,poisoned,command,handle,transport,remote=struct.unpack_from('<6I2i',raw,q+80)
+        attempted,polls,status,disposal=struct.unpack_from('<2I2i',raw,q+160)
+        metadata=raw[q+176:q+236]
+        phase,info_rc,open_rc,close_rc=struct.unpack_from('<I3i',raw,q+236)
+        dump_rc,physical,length,written,reads=struct.unpack_from('<i4I',raw,q+324)
+        query=dict(phase=phase,info_status=info_rc,open_status=open_rc,close_status=close_rc,
+            info_reply=raw[q+252:q+276].hex(),open_reply=raw[q+276:q+300].hex(),close_reply=raw[q+300:q+324].hex(),
+            dump=dict(status=dump_rc,physical=hex(physical),length=length,written=written,reads=reads),constructed=constructed,pending=pending,held=held,poisoned=poisoned,command=hex(command),handle=handle,
+            transport_error=transport,remote_status=remote,attempted=attempted,polls=polls,status=status,disposal=disposal,
+            reply=raw[q+112:q+136].hex(),observed_reply=raw[q+136:q+160].hex(),
+            metadata={n:int.from_bytes(metadata[o:o+size],'little') for n,(o,size) in FIELDS.items()})
+    return dict(unit_query=query,status=h[3],action=h[2],object_base=hex(h[4]),target_base=hex(h[5]),
         code=hex(h[6]),state=hex(h[7]),slot=hex(h[8]),original=hex(h[9]),
         armed=state[4],count=state[5],dropped=state[6],records=rows,observed_calls=state[8],failures=state[9],last_error=state[10]-(1<<32) if state[10]>>31 else state[10],restore_slot=hex(state[13]),
-        largest_area=state[11],kind=state[12],largest=record(127) if state[11] else None,
+        largest_area=state[11] if state[12]==0 else 0,largest_dmm_bytes=state[11] if state[12]==6 else 0,
+        kind=state[12],largest=record(127) if state[11] else None,
         pixel_buffer_exported=False,capture_path_verified=False,firmware_replaced=False)
 
 def live(camera,out,action,kinds):
@@ -154,9 +241,12 @@ def live(camera,out,action,kinds):
     f=Factory(camera)
     require(f.contents('/version.txt')==b'37114_13.2026020901' and bytes(camera.readBackup(0x3e0005))==b'ILCE-7M3'+bytes(8),'Wrong model/build')
     names={'libObj.so',*(PROFILES[k][1] for k in kinds)}
+    if any(k in kinds for k in ('unit_query','unit_frame','unit_sparse')):names.add('libBizFw.so')
     for name in sorted(names):
         require(sha(f.contents('/usr/lib/'+name,32*1024*1024))==PINS[name],'Unexpected installed '+name)
     if action=='install':
+        if any(k in kinds for k in ('unit_frame','unit_sparse')):
+            require(f.read('/tmp/jiritsu/a7yc-frame.bin',8*1024*1024+64)[0]==f.missing,'Existing frame export must be preserved; refusing to overwrite')
         # Validate every target before attaching either hook. Status -6 is
         # returned only after all identity/range/slot checks pass and the slot
         # still points to its original function; this read does not allocate.
@@ -172,15 +262,38 @@ def live(camera,out,action,kinds):
         (folder/'live.json').write_text(json.dumps(result,indent=2)+'\n')
         print('YC_TRACE',kind,json.dumps({k:v for k,v in result.items() if k not in ('records','largest')}),flush=True)
         require(result['status']==(2 if action=='stop' else 1),'Trace guard rejected operation; inspect saved report, no blind retry')
+        if kind in ('unit_frame','unit_sparse') and action=='stop':
+            dumped=result['unit_query']['dump'];result['frame_exported']=False
+            if dumped['status']==0 and dumped['written']:
+                require(result['unit_query']['phase']==4 and not result['unit_query']['constructed'] and
+                        not result['unit_query']['held'] and dumped['length']==dumped['written']*(16 if kind=='unit_sparse' else 1) and
+                        1024*1024<=dumped['length']<=8*1024*1024,'Unexpected frame export lifecycle')
+                frame=f.contents('/tmp/jiritsu/a7yc-frame.bin',8*1024*1024+64)
+                require(len(frame)==dumped['written'],'Incomplete frame download; preserve camera copy')
+                (folder/'frame.raw').write_bytes(frame)
+                require(sha((folder/'frame.raw').read_bytes())==sha(frame),'Local frame verification failed')
+                result['frame_exported']=True;result['frame_sha256']=sha(frame)
+                result['sampling']=dict(row_bytes=1920,row_step=16) if kind=='unit_sparse' else None
+                (folder/'live.json').write_text(json.dumps(result,indent=2)+'\n')
+                f.select('a7yc-frame.bin');f.checked(0x0012,b'\0\xff')
+                require(f.read('/tmp/jiritsu/a7yc-frame.bin')[0]==f.missing,'Temporary frame cleanup not confirmed')
+                result['camera_frame_removed']=True
+                (folder/'live.json').write_text(json.dumps(result,indent=2)+'\n')
+                print('DMM_FRAME_EXPORTED',len(frame),sha(frame),flush=True)
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--usr',required=True,type=Path)
     p.add_argument('--live',action='store_true');p.add_argument('--action',choices=('install','read','stop'),default='read')
     p.add_argument('--host-identity-check',action='store_true',help='Avoid a stuck MSC extended-info query; verify the exact model/build through maintenance before any payload instead')
-    p.add_argument('--kind',choices=(*PROFILES,'both','capture','buffers'),default='metadata');a=p.parse_args()
-    kinds={'both':('metadata','jpeg'),'capture':('write','make'),'buffers':('write_info','make_info')}.get(a.kind,(a.kind,))
+    p.add_argument('--existing-install',type=Path,help='Stop-only: verify the exact previously installed v9 query blob while using corrected reply cleanup')
+    p.add_argument('--memory-map',type=Path,help='Private native memory_read_probe live.json; required for live frame reads')
+    p.add_argument('--kind',choices=(*PROFILES,'both','capture','buffers','frames'),default='metadata');a=p.parse_args()
+    kinds={'both':('metadata','jpeg'),'capture':('write','make'),'buffers':('write_info','make_info'),
+           'frames':('mapped','dmm_open','metadata')}.get(a.kind,(a.kind,))
     out=ROOT/'.lab/yc-trace'/str(time.time_ns())
-    for kind in kinds:build(a.usr,out/kind,kind)
+    require(not a.existing_install or (a.action=='stop' and a.kind=='unit_query'),'Historical hook is only accepted for stop, never install')
+    require(not(a.live and a.kind in ('unit_frame','unit_sparse')) or a.memory_map,'Live frame export requires the observed kernel memory map')
+    for kind in kinds:build(a.usr,out/kind,kind,a.existing_install,a.memory_map)
     if a.live:
         from camera import handoff,service
         service.perform=lambda cam,action:live(cam,out,a.action,kinds)

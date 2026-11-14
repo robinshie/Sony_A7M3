@@ -28,9 +28,9 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def append(data, labels):
+def append(data, labels, expected_count=7582, allow_new_blocks=False):
     old = Strings(data)
-    if old.count != 7582 or not labels or old.count+len(labels)>8191:
+    if old.count != expected_count or not labels or old.count+len(labels)>8191:
         raise ValueError('Unexpected pinned index size')
     index_end = old.entries[-1][0]+old.entries[-1][1]
     if any(data[index_end:old.start]):
@@ -62,7 +62,7 @@ def append(data, labels):
     for key,text in zip(resources,labels):
         if parsed.text(key&0xffffff)!=text:
             raise ValueError('Added resource lookup failed')
-    if math.ceil(len(result)/1024)!=math.ceil(len(data)/1024):
+    if not allow_new_blocks and math.ceil(len(result)/1024)!=math.ceil(len(data)/1024):
         raise ValueError('Added text would allocate another filesystem block')
     return bytes(result), resources
 

@@ -20,6 +20,12 @@ struct a7_fl_control {
     struct a7_fl_context *runtime;
     /* Immutable module-owned inputs must outlive this adapter. */
     const uint8_t *base_fl,*compress;
+#ifdef A7_FL_DUAL_LOOK
+    uint8_t base_cinema[1280];
+#ifdef A7_FL_LEICA_LOOK
+    uint8_t base_leica[1280];
+#endif
+#endif
     const uint16_t *expand;
     struct a7_fl_preference preference;
     struct a7_fl_preference committed;

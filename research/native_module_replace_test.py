@@ -24,6 +24,9 @@ from camera.native_module_replace import REVISIONS
 parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--revision',type=int,choices=sorted(REVISIONS),default=1);REV=parser.parse_args().revision
 OUT=ROOT/('.lab/native-module-replace-test'+('' if REV==1 else f'-r{REV}'))
 TEMP=REVISIONS[REV]['temporary'];BACKUP=REVISIONS[REV]['backup'];JOURNAL=REVISIONS[REV]['journal']
+LOCALE=REVISIONS[REV].get('locale')
+CURRENT=LOCALE or 'a7fl.so'
+DIRECTORY='usr/share/app' if LOCALE else 'usr/lib'
 checks=0
 def check(ok,why):
  global checks
@@ -37,13 +40,15 @@ class Report(C.Structure):
 CALL=C.CFUNCTYPE(C.c_long,C.c_void_p,*([C.c_long]*7));IDENTITY=C.CFUNCTYPE(C.c_int,C.c_void_p)
 OLD=bytes((i*7+3)%251 for i in range(2048))
 NEW=bytearray((i*11+5)%251 for i in range(4096));NEW[:7]=b'\x7fELF\x01\x01\x01';NEW[16:20]=b'\x03\0(\0';NEW=bytes(NEW)
+if LOCALE:NEW=b'uxc\x07\0\0\0\0\x0f\0\x27\0'+NEW[12:]
 VIEW=bytes((i*17+13)%251 for i in range(4096))
 
 class Env:
  def __init__(self,folder):
-  self.root=Path(folder);self.lib=self.root/'usr/lib';self.setting=self.root/'setting';self.lib.mkdir(parents=True);self.setting.mkdir()
-  (self.lib/'a7fl.so').write_bytes(OLD);(self.lib/'viewUnified2.so').write_bytes(VIEW)
-  for revision in range(1,REV):
+  self.root=Path(folder);self.lib=self.root/DIRECTORY;self.setting=self.root/'setting';self.lib.mkdir(parents=True);self.setting.mkdir()
+  self.view=self.root/'usr/lib/viewUnified2.so';self.view.parent.mkdir(parents=True,exist_ok=True)
+  (self.lib/CURRENT).write_bytes(OLD);self.view.write_bytes(VIEW)
+  for revision in [v for v in REVISIONS if v<REV and v<1100]:
    (self.lib/REVISIONS[revision]['backup']).write_bytes(b'previous module')
    (self.setting/REVISIONS[revision]['journal']).write_bytes(b'previous journal')
   self.calls=0;self.fail_at=0;self.fds={};self.ro=True;self.fail_ro=False;self.chunk=0;self.stage_writes=0;self.partial_failure=False;self.error=None
@@ -62,10 +67,10 @@ class Env:
  def invariant(self):
   # Also checked between writes/links/renames: an interruption never exposes a
   # partial new ELF under the real module filename.
-  path=self.lib/'a7fl.so'
+  path=self.lib/CURRENT
   if not path.is_symlink():check(path.read_bytes() in (OLD,NEW),'published module always complete old or new')
-  check((self.lib/'viewUnified2.so').read_bytes()==VIEW,'view library never changed')
-  for revision in range(1,REV):
+  check((self.view).read_bytes()==VIEW,'view library never changed')
+  for revision in [v for v in REVISIONS if v<REV and v<1100]:
    check((self.lib/REVISIONS[revision]['backup']).read_bytes()==b'previous module' and (self.setting/REVISIONS[revision]['journal']).read_bytes()==b'previous journal','prior revision backup and journal preserved')
  def invoke(self,ctx,nr,a,b,c,d,e,f):
   try:
@@ -95,13 +100,14 @@ class Env:
    if path=='/dev/nflasha15':check(b&3==0,'block device never writable');return self.allocate(['block',0,0])
    target=self.absolute(path);return self.allocate(['file',os.open(target,self.flags(b),c),target])
   if nr==322:
-   parent=self.fds[a];name=C.string_at(b).decode();path=parent[2]/name
+   parent=self.fds[a];name=C.string_at(b).decode();path=self.absolute(name) if name.startswith('/') else parent[2]/name
+   if name.startswith('/'):name=str(path)
    if self.ro and str(path).startswith(str(self.lib)) and c&3:return -errno.EROFS
    return self.allocate(['file',os.open(name,self.flags(c),d,dir_fd=parent[1]),path])
   if nr==6:self.close(a);return 0
   if nr==197:
    item=self.fds[a];s=os.fstat(item[1]);raw=bytearray(104)
-   original=item[2] in (self.lib,self.lib/'viewUnified2.so')
+   original=item[2] in (self.lib,self.view)
    uid,gid=self.owner_overrides.get(str(item[2].relative_to(self.root)),(57285,1000) if original else (0,0))
    struct.pack_into('<Q',raw,0,s.st_dev);struct.pack_into('<IIII',raw,16,s.st_mode,s.st_nlink,uid,gid)
    struct.pack_into('<Q',raw,48,s.st_size);struct.pack_into('<Q',raw,96,s.st_ino);C.memmove(b,bytes(raw),104);return 0
@@ -111,7 +117,7 @@ class Env:
    else:raw=os.read(item[1],size)
    C.memmove(b,raw,len(raw));return len(raw)
   if nr==4:
-   item=self.fds[a];check(item[0]=='file' and item[2].name not in ('a7fl.so','viewUnified2.so',BACKUP),'only exclusive candidate/journal may be written')
+   item=self.fds[a];check(item[0]=='file' and item[2].name not in (CURRENT,'viewUnified2.so',BACKUP),'only exclusive candidate/journal may be written')
    if item[2].name==TEMP:
     self.stage_writes+=1
     if self.partial_failure and self.stage_writes==2:return -errno.EIO
@@ -139,11 +145,11 @@ def main():
   r=Report();result=lib.nmr_run(C.byref(b),expected,env.callback,None,env.identity,None,write,C.byref(r))
   if env.error:raise env.error
   check(not env.fds,'all descriptors closed');env.invariant()
-  if r.rollback_ok:check((env.lib/'a7fl.so').read_bytes()==OLD,'claimed rollback restores original inode bytes')
+  if r.rollback_ok:check((env.lib/CURRENT).read_bytes()==OLD,'claimed rollback restores original inode bytes')
   if not result:check(r.readonly_confirmed and env.ro,'success always confirms read-only mount')
   return r
  with tempfile.TemporaryDirectory(dir=OUT) as td:
-  env=Env(td);r=run(env,0);check(r.status==0 and not (env.setting/JOURNAL).exists(),'read/preflight creates no transaction');check((env.lib/'a7fl.so').read_bytes()==OLD,'read keeps original module')
+  env=Env(td);r=run(env,0);check(r.status==0 and not (env.setting/JOURNAL).exists(),'read/preflight creates no transaction');check((env.lib/CURRENT).read_bytes()==OLD,'read keeps original module')
  with tempfile.TemporaryDirectory(dir=OUT) as td:
   env=Env(td);r=run(env);total=env.calls;check(r.status==0 and r.phase==100 and (r.created,r.backed_up,r.published)==(0,1,1),'successful atomic replacement')
   check((env.lib/BACKUP).read_bytes()==OLD,'specific original backup retained')
@@ -157,14 +163,14 @@ def main():
  with tempfile.TemporaryDirectory(dir=OUT) as td:
   env=Env(td);env.chunk=7;env.partial_failure=True;r=run(env)
   check(r.status!=0 and r.rollback_ok and not (env.lib/TEMP).exists(),'partial candidate write rolls back without publishing')
- for name in ('a7fl.so',TEMP,BACKUP,JOURNAL):
+ for name in (CURRENT,TEMP,BACKUP,JOURNAL):
   with tempfile.TemporaryDirectory(dir=OUT) as td:
    env=Env(td);path=(env.setting if name==JOURNAL else env.lib)/name
    if path.exists():path.unlink()
    path.symlink_to('viewUnified2.so');r=run(env)
    check(r.status!=0 and env.ro and not env.stage_writes,'symlink path rejected before candidate writes')
  with tempfile.TemporaryDirectory(dir=OUT) as td:
-  env=Env(td);os.link(env.lib/'a7fl.so',env.lib/'unexpected-alias');r=run(env)
+  env=Env(td);os.link(env.lib/CURRENT,env.lib/'unexpected-alias');r=run(env)
   check(r.status!=0 and not (env.setting/JOURNAL).exists(),'old module hardlink alias rejected')
  for field,value in (('model',0),('version',b'other-build'),('block_ro',1),('space',0)):
   with tempfile.TemporaryDirectory(dir=OUT) as td:
@@ -173,9 +179,9 @@ def main():
   env=Env(td);env.fail_ro=True;r=run(env);check(r.status==-4 and not r.readonly_confirmed,'persistent remount-ro failure remains explicit')
  # Actual Sony stat64 reports: original /usr/lib and view owner57285:1000;
  # our installed module is0:0. The previous blanket uid0 guard rejected them.
- for path,owner,phase in [('usr/lib',(0,0),1006),('usr/lib',(57285,0),1006),
+ for path,owner,phase in [(DIRECTORY,(0,0),1006),(DIRECTORY,(57285,0),1006),
                           ('usr/lib/viewUnified2.so',(0,0),1008),
-                          ('usr/lib/a7fl.so',(57285,1000),1007),('setting',(57285,1000),1006)]:
+                          (DIRECTORY+'/'+CURRENT,(57285,1000),1007),('setting',(57285,1000),1006)]:
   with tempfile.TemporaryDirectory(dir=OUT) as td:
    env=Env(td);env.owner_overrides[path]=owner;r=run(env)
    check(r.status!=0 and r.phase==phase and not env.stage_writes and not (env.setting/JOURNAL).exists(),

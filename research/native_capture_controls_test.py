@@ -9,9 +9,17 @@ ROUTE=ROOT/'.lab/lut3d-capture-look'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def run(args,**kw):return subprocess.run(args,check=True,**kw)
 def main():
+    global OUT
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--route',type=Path,default=ROUTE,help='Fresh original-LUT fixture with identical private tables')
-    route_dir=parser.parse_args().route.resolve()
+    parser.add_argument('--dual-look',action='store_true')
+    parser.add_argument("--leica-look",action="store_true")
+    parser.add_argument('--film-curves',action='store_true',help='Test the new five-point kernel on all three looks, without installing it')
+    options=parser.parse_args()
+    if options.film_curves:
+        if not options.dual_look or not options.leica_look:parser.error('--film-curves requires --dual-look --leica-look')
+        OUT=ROOT/'.lab/native-fivepoint-capture-test'
+    route_dir=options.route.resolve()
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     mp=json.loads((LEGACY/'proof.json').read_text())
     assert mp['module_sha256']=='1216dda332c42c6378fd993ccb89781d6229150c00798191835232de3923b675'
@@ -31,6 +39,11 @@ def main():
     shutil.copyfile(LEGACY/'a7-fl-module-data.h',OUT/'a7-fl-module-data.h')
     sources=['payloads/a7-fl-capture-controls.c','research/native_capture_controls_test.c']
     flags=['-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-I'+str(ROOT/'payloads'),'-I'+str(OUT)]
+    if options.dual_look:flags+=['-DA7_FL_DUAL_LOOK']
+    if options.leica_look:flags+=['-DA7_FL_LEICA_LOOK']
+    if options.film_curves:
+        flags+=['-DA7_FL_FILM_CONTROLS']
+        sources+=['payloads/a7-fl-fivepoint.c']
     (OUT/'host.c').write_text('''#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -40,6 +53,8 @@ void cc_pack(const uint8_t *p,unsigned n){(void)p;(void)n;}
 extern void a7_capture_controls_tests(void);
 int main(void){a7_capture_controls_tests();printf("CAPTURE_CONTROLS_HOST_PASSED: %lu checks\\n",checks);return 0;}
 ''')
+    if options.film_curves:
+        p=OUT/'host.c';p.write_text(p.read_text().replace('a7_capture_controls_tests','a7_capture_curve_tests'))
     run(['clang',*flags,'-fsanitize=address,undefined','-fno-omit-frame-pointer','-DA7_CC_EXHAUSTIVE',
          str(OUT/'host.c'),*[str(ROOT/p) for p in sources],'-o',str(OUT/'host-test')])
     host=run([str(OUT/'host-test')],capture_output=True,timeout=120)
@@ -68,6 +83,9 @@ void cc_pack(const uint8_t *source,unsigned level){
 extern void a7_capture_controls_tests(void);
 void guest_main(void){a7_capture_controls_tests();put("CAPTURE_CONTROLS_ARM_PASSED: controls, bounds, original Create, migration and rollback\\n");finish();}
 ''')
+    if options.film_curves:
+        p=OUT/'arm.c';p.write_text(p.read_text().replace('a7_capture_controls_tests','a7_capture_curve_tests')
+            .replace('controls, bounds, original Create, migration and rollback','five-point preview, paired CAP apply/rollback and original Create; no camera I/O'))
     run(['arm-none-eabi-gcc',*flags,'-I'+str(ROOT/'research'),'-mcpu=cortex-a9','-mthumb','-mfloat-abi=soft','-mno-unaligned-access',
          '-ffreestanding','-fno-builtin','-nostdlib','-T','guest.ld','start.S','native.S','arm.c',
          *[str(ROOT/p) for p in sources],'-lgcc','-o','test.elf'],cwd=OUT)
@@ -75,11 +93,21 @@ void guest_main(void){a7_capture_controls_tests();put("CAPTURE_CONTROLS_ARM_PASS
     log=arm.stdout+arm.stderr;(OUT/'qemu.log').write_bytes(log);print(log.decode(),end='')
     assert b'CAPTURE_CONTROLS_ARM_PASSED' in log and b'FAIL ' not in log
     sources+=['payloads/a7-fl-capture-controls.h','payloads/a7-fl-color.h','research/native_capture_controls_test.py','research/lut3d_harness.c']
-    proof={'source_sha256':{p:sha(ROOT/p) for p in sources},'artifacts':{p:sha(OUT/p) for p in ('host-test','test.elf','host.log','qemu.log','a7-fl-module-data.h','arm.c','native.S','guest.ld','start.S')},
+    sources+=['payloads/a7-fl-runtime-prefs.h']
+    if options.dual_look:sources+=['payloads/a7-fl-cinema.h','payloads/a7-fl-fl2-model.inc']
+    if options.leica_look:sources+=['payloads/a7-fl-leica.h','payloads/a7-fl-leica-model.inc']
+    if options.film_curves:sources+=['payloads/a7-fl-fivepoint.h','payloads/a7-fl-fivepoint-preview.h']
+    proof={'leica_look_packed_bounds':options.leica_look,'dual_look_packed_bounds':options.dual_look,'source_sha256':{p:sha(ROOT/p) for p in sources},'artifacts':{p:sha(OUT/p) for p in ('host-test','test.elf','host.log','qemu.log','a7-fl-module-data.h','arm.c','native.S','guest.ld','start.S')},
            'legacy_module_sha256':mp['module_sha256'],'legacy_capture_proof_sha256':sha(ROUTE/'proof.json'),
            'current_capture_proof_sha256':sha(route_dir/'proof.json'),
            'all_single_control_values':True,'all_tone_combinations_host':True,'tone_combination_count':19**3*10*2,
            'tested_levels':list(range(1,9)),'max_packed_delta':[24,32,32],
            'base_delta_scale':[3,2],'host_sanitizers':True,'arm_original_create':True,'exact_recovery':True,'partial_write_rollback':True,'camera_pixels_verified':False}
+    if options.film_curves:
+        proof.update(fivepoint=True,curve_case_count=3*2*7*128,
+                     all_single_control_values=False,all_single_curve_values=True,
+                     all_tone_combinations_host=False,tone_combination_count=0,
+                     exact_recovery=False,partial_write_rollback=True,camera_written=False,flash_ready=False,
+                     scope='FL3 preview candidate and paired CAP write/rollback with simulated properties; original Create packing runs in QEMU RAM')
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 if __name__=='__main__':main()

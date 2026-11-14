@@ -7,6 +7,16 @@
 #define a7_fl_install a7_fl_install_prepared
 #include "native_adjust.h"
 #include "a7-fl-module-data.h"
+#ifdef A7_FL_FILM_CONTROLS
+#include "a7-fl-fivepoint-preview.h"
+#include "a7-fl-worklog.h"
+#endif
+#ifdef A7_FL_DUAL_LOOK
+#include "a7-fl-cinema.h"
+#ifdef A7_FL_LEICA_LOOK
+#include "a7-fl-leica.h"
+#endif
+#endif
 extern int stock_get(void *,int,int *);
 extern int stock_set(void *,int,int);
 extern void original_action(void *);
@@ -14,6 +24,9 @@ static uintptr_t manager_words[2],manager_vtable_words[28],process_element[2],pr
 static int process_id,stock_value,stock_calls,event_ok;
 static unsigned module_checks,slot_writes,slot_failed,heap_used;
 static uint8_t slot_bytes[2][128];static unsigned slot_exists[2];
+#ifdef A7_FL_FILM_CONTROLS
+static uint8_t work_bytes[2][128];static unsigned work_exists[2];
+#endif
 static uint32_t node_heap[262144];
 static a7_menu_node parent,creative,siblings[5],*parent_children[6];
 static uint8_t action_view[0x248];static a7_menu_node *action_selected;
@@ -47,7 +60,13 @@ static int capture_matches(int enabled) {
     if(!expected_capture.prepared&&a7_capture_prepare(&expected_capture,&api,stock,legacy,EXPAND,COMPRESS))return 0;
     uint8_t expected[1280];
     for(unsigned i=0;i<2;i++) {
-        if(enabled) {if(a7_capture_generate(&expected_capture,i,&p,expected))return 0;}
+        if(enabled) {
+#ifdef A7_FL_DUAL_LOOK
+            if(a7_capture_generate_preset(&expected_capture,i,enabled,&p,expected))return 0;
+#else
+            if(a7_capture_generate(&expected_capture,i,&p,expected))return 0;
+#endif
+        }
         else bytes(expected,stock[i],1280);
         if(!same(expected,other_tables_data[i],1280))return 0;
     }
@@ -74,16 +93,26 @@ static int memory_guard(void *opaque,uintptr_t address,unsigned length) {
     (void)opaque;return address>=0x40000000 && address<0x80000000 && length<0x80000000-address;
 }
 static int read_slot(void *opaque,unsigned slot,unsigned char *out,unsigned cap,unsigned *length) {
-    (void)opaque;check(slot<2&&cap>=128,"module slot read ABI");
-    *length=slot_exists[slot]?128:0;
-    if(!slot_exists[slot])return 1;
-    bytes(out,slot_bytes[slot],128);return 0;
+    uint8_t (*records)[128]=slot_bytes;unsigned *exists=slot_exists;
+#ifdef A7_FL_FILM_CONTROLS
+    if(opaque){records=work_bytes;exists=work_exists;}
+#else
+    (void)opaque;
+#endif
+    check(slot<2&&cap>=128,"module slot read ABI");
+    *length=exists[slot]?128:0;
+    if(!exists[slot])return 1;
+    bytes(out,records[slot],128);return 0;
 }
 static int replace_slot(void *opaque,unsigned slot,const unsigned char *before,unsigned n,int exists,const unsigned char after[128]) {
-    (void)opaque;check(slot<2 && (exists!=0)==(slot_exists[slot]!=0),"exact inactive slot existence");
-    check(exists?(n==128&&same(before,slot_bytes[slot],128)):n==0,"exact inactive slot preimage");
+    uint8_t (*records)[128]=slot_bytes;unsigned *present=slot_exists;
+#ifdef A7_FL_FILM_CONTROLS
+    if(opaque){records=work_bytes;present=work_exists;}
+#endif
+    check(slot<2 && (exists!=0)==(present[slot]!=0),"exact inactive slot existence");
+    check(exists?(n==128&&same(before,records[slot],128)):n==0,"exact inactive slot preimage");
     if(slot_failed)return -1;
-    bytes(slot_bytes[slot],after,128);slot_exists[slot]=1;slot_writes++;return 0;
+    bytes(records[slot],after,128);present[slot]=1;if(!opaque)slot_writes++;return 0;
 }
 static int set_value(int id,int value) {uintptr_t *vt=(uintptr_t *)manager_words[0];return ((int(*)(void *,int,int))vt[17])(manager_words,id,value);}
 static int get_value(int id,int *value) {uintptr_t *vt=(uintptr_t *)manager_words[0];return ((int(*)(void *,int,int *))vt[3])(manager_words,id,value);}
@@ -98,14 +127,35 @@ int a7_fl_preview_request(uintptr_t base,const struct a7_fl_api *backup,
     int enabled,values[5];test(get_value(0x7000,&enabled)==1,"current accepted mode readable");
     for(unsigned i=0;i<5;i++){test(get_value(0x7001+i,values+i)==1,"current accepted scalar readable");values[i]-=i==3?0:9;}
     A7FLColorParams p={values[0],values[1],values[2],values[3],values[4]};uint8_t expected[1280];
-    if(enabled)test(a7_fl_adjust_lut(CANDIDATE,1280,EXPAND,COMPRESS,&p,expected,1280)==0,"expected source generated");
+    const uint8_t *base_table=CANDIDATE;
+#ifdef A7_FL_DUAL_LOOK
+    uint8_t cinema_base[1280];
+    if(enabled==2) {
+        test(!a7_cinema_base(ORIGINAL,EXPAND,COMPRESS,cinema_base),"Cinema base generated");
+        base_table=cinema_base;
+    }
+#endif
+#ifdef A7_FL_LEICA_LOOK
+    if(enabled==3){test(!a7_leica_base(ORIGINAL,EXPAND,COMPRESS,cinema_base),"FL3 expected base");base_table=cinema_base;}
+#endif
+ #ifdef A7_FL_FILM_CONTROLS
+    if(enabled>0) {
+        int points[5];
+        for(unsigned i=0;i<5;i++){
+            test(get_value(native_adjust_field_id(8+i),points+i)==1,"read curve enum");
+            points[i]-=9;
+        }
+        test(!a7_fl_fivepoint_preview(base_table,EXPAND,COMPRESS,&p,points,expected),"curve preview expected");
+    } else
+ #endif
+    if(enabled)test(a7_fl_adjust_lut(base_table,1280,EXPAND,COMPRESS,&p,expected,1280)==0,"expected source generated");
     else bytes(expected,ORIGINAL,1280);
     test(same(expected,data_guarded+1,1280),"refresh follows successful complete source-table update");
     preview_requests++;return preview_error?preview_error:1;
 }
 #endif
 static a7_menu_node *look_row(a7_menu_node *look,unsigned index) {
-    check(look&&look->count==2&&index<10,"look has two native pages and bounded row");
+    check(look&&look->count==NATIVE_ADJUST_PAGES&&index<=NATIVE_ADJUST_FIELDS+1,"look has native pages and bounded row");
     return look->children[index/6]->children[index%6];
 }
 static int row_title(a7_menu_node *look,unsigned index) {
@@ -140,6 +190,63 @@ void guest_main(void) {
     platform.creative_style=&creative;platform.parents[0]=&parent;platform.parent_count=1;platform.backup=api;
     platform.storage=(struct a7_fl_store_io){read_slot,replace_slot,0};platform.identity=identity_guard;
     platform.event=event_guard;platform.readable=memory_guard;platform.opaque=&identity_calls;
+#ifdef A7_FL_FILM_CONTROLS
+    platform.film_storage=(struct a7_fl_store_io){read_slot,replace_slot,work_bytes};
+#endif
+#if defined(A7_FL_FILM_CONTROLS) && !defined(A7_FL_TEST_SAVED_BOOT)
+    test(!a7_fl_prepare(&platform)&&!a7_fl_install(0x40000000,process_element),"curve resident installs");
+    const struct a7_fl_module_status *film=a7_fl_status();
+    a7_menu_node *film_look=parent.children[3];
+    test(film->mode==0&&!slot_writes&&film_look->count==3,"curve menu starts Off without writes");
+    int enum_value=0,black=native_adjust_field_id(8);
+    test(!set_value(black,18),"cannot edit curve while Off");
+    test(set_value(0x7000,3)&&capture_matches(3),"activate FL3");
+    uint8_t before_film[3][1280];
+    bytes(before_film[0],data_guarded+1,1280);
+    for(unsigned t=1;t<3;t++)bytes(before_film[t],other_tables_data[t-1],1280);
+    test(set_value(black,18)&&!same(before_film[0],data_guarded+1,1280),"black point updates preview");
+    for(unsigned t=1;t<3;t++)test(!same(before_film[t],other_tables_data[t-1],1280),"black point updates CAP");
+    test(film->dirty&&!slot_writes&&work_exists[0]&&work_exists[1],"preview records work without saving preferences");
+    test(!a7_fl_cancel()&&film->mode==0&&!film->dirty&&!slot_writes,"cancel restores previously confirmed Off");
+    test(set_value(0x7000,3),"select FL3 before Save");
+    const int selected_points[5]={18,7,10,11,5};
+    for(unsigned f=0;f<5;f++){
+        int id=native_adjust_field_id(8+f);
+        test(set_value(id,selected_points[f])&&get_value(id,&enum_value)&&enum_value==selected_points[f],
+             "edit and read each native curve field");
+    }
+    *(uint32_t *)(action_view+0x130)=1;*(uintptr_t *)(action_view+0x150)=(uintptr_t)manager_words;*(int *)(action_view+0x158)=7;
+    action_selected=look_row(film_look,NATIVE_ADJUST_FIELDS+1);
+    original_action(action_view);
+    test(dialog_commit&&slot_writes==0,"open native Save dialog without a settings write");
+    test(!confirm_dialog()&&!film->dirty&&slot_writes==1,"native confirmed Save writes curve preference once");
+    struct a7_fl_preference result;
+    test(a7_fl_preference_choose(&result,slot_bytes[0],slot_exists[0]?128:0,slot_bytes[1],slot_exists[1]?128:0,
+                                a7_pkg_original_sha,a7_pkg_build)>=0&&result.schema==4&&result.film[2][2]==9,
+         "read back explicit Save and preserved schema");
+    for(unsigned f=0;f<5;f++)test(result.film[2][2+f]==selected_points[f]-9,"all five curve values stored in FL3");
+    test(set_value(black,5)&&!a7_fl_cancel()&&get_value(black,&enum_value)&&enum_value==18,"cancel restores saved curve");
+    const int bank_points[3][5]={{11,6,13,8,7},{12,7,14,9,8},{18,7,10,11,5}};
+    for(unsigned bank=1;bank<=2;bank++){
+        test(set_value(0x7000,(int)bank)&&capture_matches(bank),"activate zero-curve FL/FL2");
+        for(unsigned t=0;t<3;t++)bytes(before_film[t],t?other_tables_data[t-1]:data_guarded+1,1280);
+        for(unsigned f=0;f<5;f++)test(set_value(native_adjust_field_id(8+f),bank_points[bank-1][f]),"all five controls enabled for FL and FL2");
+        for(unsigned t=0;t<3;t++)test(!same(before_film[t],t?other_tables_data[t-1]:data_guarded+1,1280),"FL and FL2 curves affect preview and both capture tables");
+        original_action(action_view);test(!confirm_dialog(),"save independent FL/FL2 curve");
+    }
+    for(unsigned bank=1;bank<=3;bank++){
+        test(set_value(0x7000,(int)bank),"switch all three curve banks");
+        for(unsigned f=0;f<5;f++)test(get_value(native_adjust_field_id(8+f),&enum_value)&&enum_value==bank_points[bank-1][f],"selected curve bank restored exactly");
+    }
+    test(a7_fl_preference_choose(&result,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0,"decode saved three-bank record");
+    for(unsigned bank=0;bank<3;bank++)for(unsigned f=0;f<5;f++)
+        test(result.film[bank][f+2]==bank_points[bank][f]-9,"durable independent curve banks");
+    test(set_value(0x7000,0)&&!set_value(black,18),"Off rejects curve edits");
+    test(set_value(0x7000,3)&&get_value(black,&enum_value)&&enum_value==18,"Off preserves FL3");
+    put("NATIVE_FL_ALL_CURVE_BANKS_PASSED\n");
+    test(!film->fault,"no resident fault after curve flow");
+    put("NATIVE_FL_CURVE_MAIN_PASSED\n");finish();
+#endif
 #ifdef A7_FL_TEST_SAVED_BOOT
     platform.view_manager=0;parent.depth=0;
     struct a7_fl_preference saved_boot={7,1,{2,-3,4,5,-2,
@@ -148,42 +255,142 @@ void guest_main(void) {
 #else
         0,1,0
 #endif
-    },0};
+    },0,0,{0},{0}
+#ifdef A7_FL_FILM_CONTROLS
+    ,{{0}}
+#endif
+    };
     A7FLColorParams desired={2,-3,4,5,-2};uint8_t desired_table[1280];
-    check(a7_fl_adjust_lut(CANDIDATE,1280,EXPAND,COMPRESS,&desired,desired_table,1280)==0,"saved boot generation");
+    const uint8_t *saved_base=CANDIDATE,*prior_base=CANDIDATE;
+#ifdef A7_FL_DUAL_LOOK
+    uint8_t cinema_base[1280];
+    check(!a7_cinema_base(ORIGINAL,EXPAND,COMPRESS,cinema_base),"boot Cinema base generated");
+
+#ifdef A7_FL_TEST_CINEMA_BOOT
+    prior_base=cinema_base;
+    saved_boot.enabled=2;saved_base=cinema_base;
+#endif
+#endif
+#ifdef A7_FL_TEST_LEICA_BOOT
+    check(!a7_leica_base(ORIGINAL,EXPAND,COMPRESS,cinema_base),"FL3 saved base");
+    saved_boot.enabled=3;saved_base=prior_base=cinema_base;
+#endif
+#ifdef A7_FL_FILM_CONTROLS
+    struct a7_fl_preference recovering=saved_boot;
+    recovering.schema=4;recovering.other_parameters[6]=recovering.third_parameters[6]=3;
+    for(unsigned b=0;b<2;b++)for(unsigned f=0;f<5;f++)recovering.film[b][f+2]=(int8_t)((int)b+(int)f-3);
+    const int points[5]={5,-2,1,2,-4},transient[5]={-5,-2,1,2,-4};
+    for(unsigned f=0;f<5;f++)recovering.film[2][2+f]=(int8_t)points[f];
+    test(!a7_fl_fivepoint_preview(saved_base,EXPAND,COMPRESS,&desired,points,desired_table),"saved curve reconstruction");
+    recovering.candidate_crc=a7_fl_crc(desired_table,1280);
+    test(!a7_fl_preference_encode(slot_bytes[0],&recovering,a7_pkg_original_sha,a7_pkg_build),"store previous confirmed curve");slot_exists[0]=1;
+    struct a7_fl_preference pending=recovering;pending.film[2][2]=-5;
+    test(!a7_fl_fivepoint_preview(saved_base,EXPAND,COMPRESS,&desired,transient,data_guarded+1),"partially serialized unsaved curve");
+    pending.candidate_crc=a7_fl_crc(data_guarded+1,1280);
+    struct a7_fl_worklog prior={0};
+    test(!a7_fl_worklog_open(&prior,&platform.film_storage,a7_pkg_original_sha,a7_pkg_build)&&
+         !a7_fl_worklog_prepare(&prior,&recovering)&&!a7_fl_worklog_prepare(&prior,&pending),"saved and pending work endpoints");
+    test(!a7_fl_prepare(&platform)&&!a7_fl_initialize_color_prepared()&&!slot_writes&&
+         a7_fl_status()->runtime_ready&&a7_fl_status()->mode==3&&same(data_guarded+1,desired_table,1280),
+         "runtime boot recovers last Save from partial serialization");
+    const uint8_t *stock[]={a7_pkg_original[1],a7_pkg_original[2]},*legacy[]={a7_pkg_capture1,a7_pkg_capture2};
+    test(!a7_capture_prepare(&expected_capture,&api,stock,legacy,EXPAND,COMPRESS),"expected recovery CAP context");
+    for(unsigned t=0;t<2;t++){
+        uint8_t target[1280];
+        test(!a7_capture_generate_curve(&expected_capture,t,3,&desired,points,target)&&
+             same(target,other_tables_data[t],1280),"both CAP tables recovered on boot");
+    }
+    platform.view_manager=process_element;
+    test(!a7_fl_configure_menu(&platform)&&!a7_fl_install(0x40000000,process_element),"attach the menu after color boot");
+    for(unsigned f=0;f<5;f++){
+        int saved_enum=-1;
+        test(get_value(native_adjust_field_id(8+f),&saved_enum)&&saved_enum==points[f]+9,
+             "cold menu restores each confirmed curve point");
+    }
+    for(unsigned bank=1;bank<=2;bank++){
+        test(set_value(0x7000,(int)bank),"cold boot switches FL and FL2");
+        int bank_curve[5];
+        for(unsigned f=0;f<5;f++){
+            int value=-1;bank_curve[f]=recovering.film[bank-1][f+2];
+            test(get_value(native_adjust_field_id(8+f),&value)&&value==bank_curve[f]+9,"cold boot keeps inactive curve bank");
+        }
+        const struct a7_fl_module_status *status=a7_fl_status();
+        A7FLColorParams color={status->parameters[0],status->parameters[1],status->parameters[2],status->parameters[3],status->parameters[4]};
+        for(unsigned t=0;t<2;t++){
+            uint8_t target[1280];
+            test(!a7_capture_generate_curve(&expected_capture,t,bank,&color,bank_curve,target)&&
+                 same(target,other_tables_data[t],1280),"recovered FL and FL2 CAP curve applied");
+        }
+    }
+    put("NATIVE_FL_ALL_CURVE_BOOT_PASSED\n");
+    put("NATIVE_FL_CURVE_BOOT_PASSED\n");finish();
+#endif
+    check(a7_fl_adjust_lut(saved_base,1280,EXPAND,COMPRESS,&desired,desired_table,1280)==0,"saved boot generation");
     saved_boot.candidate_crc=a7_fl_crc(desired_table,1280);
+#ifdef A7_FL_TEST_BANK_BOOT
+    saved_boot.schema=2;
+#ifdef A7_FL_TEST_LEICA_BOOT
+    saved_boot.schema=3;for(unsigned i=0;i<8;i++)saved_boot.third_parameters[i]=(int8_t)(i==6?3:0);saved_boot.third_parameters[4]=-5;
+#endif
+    for(unsigned i=0;i<8;i++)saved_boot.other_parameters[i]=(int8_t)(i==6?5:0);
+    saved_boot.other_parameters[0]=8;saved_boot.other_parameters[2]=-4;
+#endif
     check(a7_fl_preference_encode(slot_bytes[0],&saved_boot,a7_pkg_original_sha,a7_pkg_build)==0,"saved boot record");slot_exists[0]=1;
     A7FLColorParams previous_preview={-7,8,-5,6,7};
-    check(a7_fl_adjust_lut(CANDIDATE,1280,EXPAND,COMPRESS,&previous_preview,data_guarded+1,1280)==0,"old serialized preview");
-    unsigned boot_writes=2;
+    check(a7_fl_adjust_lut(prior_base,1280,EXPAND,COMPRESS,&previous_preview,data_guarded+1,1280)==0,"old serialized preview");
+    unsigned boot_writes=2,boot_slot_writes=0;
+#ifdef A7_FL_LOOK_BANKS
+    /* Expected migration: preserve all shared legacy settings as FL. */
+    #ifdef A7_FL_LEICA_LOOK
+    int boot_migrated=a7_fl_preference_migrate_three(&saved_boot);
+#else
+    int boot_migrated=a7_fl_preference_migrate(&saved_boot);
+#endif
+    saved_boot.generation+=(unsigned)boot_migrated;
+    desired=(A7FLColorParams){saved_boot.parameters[0],saved_boot.parameters[1],saved_boot.parameters[2],saved_boot.parameters[3],saved_boot.parameters[4]};
+    check(!a7_fl_adjust_lut(saved_base,1280,EXPAND,COMPRESS,&desired,desired_table,1280),"migrated boot table");
+    boot_slot_writes=(unsigned)boot_migrated;
+#endif
 #ifdef A7_FL_CAPTURE_LOOK
     /* A native global save might serialize only one of the two preview tables. */
-    bytes(other_tables_data[0],a7_pkg_capture1,1280);boot_writes++;
+#ifdef A7_FL_TEST_CINEMA_BOOT
+    const uint8_t *stock[]={a7_pkg_original[1],a7_pkg_original[2]},*legacy[]={a7_pkg_capture1,a7_pkg_capture2};
+    check(!a7_capture_prepare(&expected_capture,&api,stock,legacy,EXPAND,COMPRESS),"boot CAP prepare");
+    check(!a7_capture_generate_preset(&expected_capture,0,saved_boot.enabled,&previous_preview,other_tables_data[0]),"serialized unsaved Cinema CAP");
+#else
+    bytes(other_tables_data[0],a7_pkg_capture1,1280);
+#endif
+    boot_writes++;
 #ifdef A7_FL_CAPTURE_CONTROLS
     boot_writes++; /* Legacy CAP1 also migrates to the stronger dynamic recipe. */
 #endif
 #endif
     test(a7_fl_prepare(&platform)==0,"boot prepare without ViewManager");parent.vtable=0;
-    test(a7_fl_initialize_color_prepared()==0 && a7_fl_status()->runtime_ready && !a7_fl_status()->installed && a7_fl_status()->mode==1 && write_calls==boot_writes && slot_writes==0 && same(data_guarded+1,desired_table,1280),"cold boot recovers historic preview and applies durable ON recipe without any menu");
+    test(a7_fl_initialize_color_prepared()==0 && a7_fl_status()->runtime_ready && !a7_fl_status()->installed && a7_fl_status()->mode==saved_boot.enabled && write_calls==boot_writes && slot_writes==boot_slot_writes && same(data_guarded+1,desired_table,1280),"cold boot recovers historic preview and applies durable ON recipe without any menu");
 #ifdef A7_FL_CAPTURE_LOOK
-    test(capture_matches(1),"cold boot reconciles mixed stock and CAP preimages");
+#ifdef A7_FL_LOOK_BANKS
+    struct a7_fl_preference boot_record;
+    test(a7_fl_preference_choose(&boot_record,slot_bytes[0],slot_exists[0]?128:0,slot_bytes[1],slot_exists[1]?128:0,a7_pkg_original_sha,a7_pkg_build)>=0 && boot_record.schema==saved_boot.schema && boot_record.generation==saved_boot.generation,"cold boot keeps dual bank record");
+    for(unsigned i=0;i<8;i++)test(boot_record.parameters[i]==saved_boot.parameters[i] && boot_record.other_parameters[i]==saved_boot.other_parameters[i] && boot_record.third_parameters[i]==saved_boot.third_parameters[i],"cold boot preserves both complete banks");
+#endif
+    test(capture_matches(saved_boot.enabled),"cold boot reconciles mixed stock and CAP preimages");
     put("NATIVE_FL_CAPTURE_BOOT_PASSED\n");
 #endif
     parent.vtable=platform.parent_vtable;platform.view_manager=process_element;
     struct a7_fl_platform changed=platform;changed.backup.read=0;
     test(a7_fl_configure_menu(&changed)==A7_FL_MODULE_PLATFORM,"menu configure cannot replace backend");
-    test(a7_fl_configure_menu(&platform)==0 && a7_fl_install(0x40000000,process_element)==0 && write_calls==boot_writes && slot_writes==0,"first MENU config adopts real ViewManager without repeating color init");
+    test(a7_fl_configure_menu(&platform)==0 && a7_fl_install(0x40000000,process_element)==0 && write_calls==boot_writes && slot_writes==boot_slot_writes,"first MENU config adopts real ViewManager without repeating color init");
     a7_menu_node *cold_look=parent.children[3];
     test(parent.depth==0 && !cold_look->parent,"cold menu templates await original main root initialization");
     typedef int (*DeepInit)(void *,void *,int,int);
     test(((DeepInit)parent.vtable[0xf8/4])(&parent,0,0,3)==1 && cold_look->parent==&parent && cold_look->depth==4,"subsequent original initialization supplies actual ancestry");
     typedef int (*GetSelected)(void *,void **);typedef int (*GetInt)(void *,int,int *);
     void *selected=0;int selected_value=-99;
-    test(((GetSelected)0x40682951)(look_row(cold_look,0),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==1,"late original graph init retains saved ON cursor");
-    test(((GetSelected)0x40682951)(look_row(cold_look,1),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==11,"late original graph init retains saved scalar cursor as unsigned UI enum");
+    test(((GetSelected)0x40682951)(look_row(cold_look,0),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==saved_boot.enabled,"late original graph init retains saved preset cursor");
+    test(((GetSelected)0x40682951)(look_row(cold_look,1),&selected)==1 && ((GetInt)0x40683297)(selected,0x10,&selected_value)==1 && selected_value==saved_boot.parameters[0]+9,"late original graph init retains saved scalar cursor as unsigned UI enum");
     unsigned char grayout=0;
 #ifdef A7_FL_SPATIAL_SETTINGS_ONLY
-    const int saved_spatial_enums[]={1,3,7};
+    const int saved_spatial_enums[]={saved_boot.parameters[5]+3,saved_boot.parameters[6]-1,saved_boot.parameters[7]};
     for(unsigned i=0;i<3;i++)
         test(((int(*)(void *,unsigned char *))0x40682d0b)(look_row(cold_look,6+i),&grayout)==0 &&
              ((GetSelected)0x40682951)(look_row(cold_look,6+i),&selected)==1 &&
@@ -238,7 +445,7 @@ void guest_main(void) {
     test(capture_matches(1),"contrast dispatch updates both actual CAP properties");
 #endif
     unsigned unchanged_writes=write_calls;
-    test(set_value(0x7001,-1)==0 && set_value(0x7001,19)==0 && set_value(0x7000,2)==0 && write_calls==unchanged_writes && state->parameters[0]==3 && slot_writes==1,"invalid native enums never reach LUT or preference writes");
+    test(set_value(0x7001,-1)==0 && set_value(0x7001,19)==0 && set_value(0x7000,A7_FL_PRESET_MAX+1)==0 && write_calls==unchanged_writes && state->parameters[0]==3 && slot_writes==1,"invalid native enums never reach LUT or preference writes");
     unsigned writes_before=write_calls;
     test(a7_fl_initialize_color_prepared()==0 && write_calls==writes_before && state->mode==1 && state->dirty && state->parameters[0]==3 && slot_writes==1,"later still-view entry preserves unsaved RAM preview");
     unsigned char gray=0;
@@ -316,6 +523,80 @@ void guest_main(void) {
     test(confirm_dialog()==0,"new confirmation retries failed save");
 #endif
     test(slot_writes==3 && state->generation==3 && row_title(look,9)==0x0204ef85,"native Save retry visibly succeeds");
+#ifdef A7_FL_DUAL_LOOK
+    uint8_t original_fl[3][1280];
+    bytes(original_fl[0],data_guarded+1,1280);
+    bytes(original_fl[1],other_tables_data[0],1280);
+    bytes(original_fl[2],other_tables_data[1],1280);
+    NativeAdjustNode *mode_row=(NativeAdjustNode *)look_row(look,0);
+    int cinema_label=0;
+    test(mode_row->count==A7_FL_PRESET_MAX+1 &&
+         ((int(*)(void *,int,int *))0x40683297)(mode_row->children[2],0,&cinema_label)==1 &&
+         cinema_label==
+#ifdef A7_FL_LOOK_BANKS
+         0x0204fda8
+#else
+         0x0204eceb
+#endif
+         ,"third native option has the expected resource");
+    unsigned before_cinema=preview_requests;
+#ifdef A7_FL_LOOK_BANKS
+    int fl_parameters[8];for(unsigned i=0;i<8;i++)fl_parameters[i]=state->parameters[i];
+#endif
+    test(set_value(0x7000,2)==1&&state->mode==2&&state->dirty&&slot_writes==3&&
+         get_value(0x7000,&value)==1&&value==2&&capture_matches(2)&&preview_requests==before_cinema+1,
+         "FL to Cinema updates three tables and requests refresh with no save");
+#ifdef A7_FL_LOOK_BANKS
+    for(unsigned i=0;i<8;i++)test(state->parameters[i]==(i==6?3:0),"FL2 starts with independent defaults");
+#endif
+    test(!same(data_guarded+1,original_fl[0],1215) &&
+         !same(other_tables_data[0],original_fl[1],1215) &&
+         !same(other_tables_data[1],original_fl[2],1215),"Cinema differs in preview and both CAP tables");
+    test(a7_fl_cancel()==0&&state->mode==1&&!state->dirty&&slot_writes==3&&
+         same(data_guarded+1,original_fl[0],1280)&&same(other_tables_data[0],original_fl[1],1280)&&
+         same(other_tables_data[1],original_fl[2],1280),"cancel restores the exact original FL bytes");
+    test(set_value(0x7000,2)==1&&set_value(0x7001,18)==1&&capture_matches(2),"Cinema shares working color controls");
+    original_action(action_view);
+    test(confirm_dialog()==0&&slot_writes==4&&!state->dirty&&row_title(look,9)==0x0204ef85,"confirmed Cinema saves and refreshes feedback");
+    struct a7_fl_preference saved_cinema;
+    test(a7_fl_preference_choose(&saved_cinema,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0&&
+        saved_cinema.enabled==2&&saved_cinema.candidate_crc==a7_fl_crc(data_guarded+1,1280),"durable Cinema enum and candidate CRC");
+    test(set_value(0x7000,1)==1&&a7_fl_cancel()==0&&state->mode==2&&capture_matches(2),"cancel restores committed Cinema");
+#ifdef A7_FL_LOOK_BANKS
+    test(saved_cinema.schema==
+#ifdef A7_FL_LEICA_LOOK
+        3
+#else
+        2
+#endif
+        ,"saved two-bank schema");
+    for(unsigned i=0;i<8;i++)test(saved_cinema.other_parameters[i]==fl_parameters[i],"FL bank preserved in FL2 save");
+    test(set_value(0x7000,1)==1&&capture_matches(1),"return FL applies its own controls");
+    for(unsigned i=0;i<8;i++)test(state->parameters[i]==fl_parameters[i],"FL controls restored without reset");
+    test(set_value(0x7000,0)==1&&set_value(0x7000,2)==1&&state->parameters[0]==9&&capture_matches(2),"Off roundtrip retains FL2 controls");
+    test(a7_fl_cancel()==0&&!state->dirty,"bank switching cancel restores committed FL2");
+    put("NATIVE_FL_LOOK_BANKS_PASSED\n");
+#endif
+#ifdef A7_FL_LEICA_LOOK
+    int fl2_parameters[8];for(unsigned i=0;i<8;i++)fl2_parameters[i]=state->parameters[i];
+    test(((int(*)(void *,int,int *))0x40683297)(mode_row->children[3],0,&cinema_label)==1&&cinema_label==0x0204fda9,"FL3 resource bound to fourth leaf");
+    test(set_value(0x7000,3)==1&&state->mode==3&&capture_matches(3),"FL3 preview and JPEG apply");
+    for(unsigned i=0;i<8;i++)test(state->parameters[i]==(i==6?3:0),"FL3 independent defaults");
+    test(set_value(0x7001,11)==1&&set_value(0x7004,3)==1&&capture_matches(3),"FL3 contrast/fade update image tables");
+    test(a7_fl_cancel()==0&&state->mode==2&&capture_matches(2),"cancel FL3 returns prior FL2");
+    test(set_value(0x7000,3)==1&&set_value(0x7001,11)==1&&a7_fl_confirm()==0,"FL3 confirm persists third bank");
+    struct a7_fl_preference three;
+    test(a7_fl_preference_choose(&three,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0&&three.schema==3&&three.enabled==3&&three.parameters[0]==2,"third bank durable record");
+    for(unsigned i=0;i<8;i++)test(three.other_parameters[i]==fl_parameters[i]&&three.third_parameters[i]==fl2_parameters[i],"both previous looks preserved by third save");
+    test(set_value(0x7000,1)==1&&capture_matches(1),"FL restored from FL3");
+    for(unsigned i=0;i<8;i++)test(state->parameters[i]==fl_parameters[i],"FL untouched");
+    test(set_value(0x7000,2)==1&&capture_matches(2),"FL2 restored from FL");
+    for(unsigned i=0;i<8;i++)test(state->parameters[i]==fl2_parameters[i],"FL2 untouched");
+    test(set_value(0x7000,3)==1&&state->parameters[0]==2&&a7_fl_cancel()==0&&!state->dirty&&capture_matches(3),"all-bank roundtrip exact");
+    put("NATIVE_FL3_LEICA_PASSED\n");
+#endif
+    put("NATIVE_FL_DUAL_LOOK_PASSED\n");
+#endif
     test(set_value(0x7000,0)==1 && a7_fl_confirm()==0 && same(data_guarded+1,ORIGINAL,1280) && state->mode==0,"Off restores original and records Off preference");
 #ifdef A7_FL_CAPTURE_LOOK
     test(capture_matches(0),"Off exactly restores stock in both CAP properties");

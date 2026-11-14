@@ -4,8 +4,21 @@
 #include "a7-fl-runtime-control.h"
 #include "a7-fl-runtime-recovery.h"
 #include "a7-fl-color.h"
+#ifdef A7_FL_DUAL_LOOK
+#include "a7-fl-cinema.h"
+#ifdef A7_FL_LEICA_LOOK
+#include "a7-fl-leica.h"
+#endif
+#endif
 #include "native_adjust.h"
 #include "a7-fl-module-data.h"
+#ifdef A7_FL_FILM_CONTROLS
+#if !defined(A7_FL_CAPTURE_CONTROLS) || !defined(A7_FL_LEICA_LOOK) || !defined(A7_FL_LOOK_BANKS) || !defined(A7_FL_SAVE_DIALOG)
+#error Film curve needs the complete FL3 resident configuration
+#endif
+#include "a7-fl-fivepoint-preview.h"
+#include "a7-fl-worklog.h"
+#endif
 #ifdef A7_FL_PREVIEW_REFRESH
 #include "a7-fl-preview.h"
 #endif
@@ -46,9 +59,59 @@ static struct {
     NativeAdjustTree trees[A7_FL_MODULE_PARENTS];
     unsigned attached,bound;
 } module;
+#ifdef A7_FL_FILM_CONTROLS
+static struct a7_fl_worklog film_work;
+static uint8_t film_base[3][1280];
+static unsigned film_saved;
+static int film_equal(const uint8_t *a,const uint8_t *b){
+    for(unsigned i=0;i<1280;i++)if(a[i]!=b[i])return 0;
+    return 1;
+}
+static int film_generate(void *unused,const struct a7_fl_preference *p,unsigned t,uint8_t out[1280]){
+    (void)unused;
+    if(t>2||!a7_fl_preset_valid(p->enabled))return A7_FL_ARGUMENT;
+    if(!p->enabled){memcpy(out,a7_pkg_original[t],1280);return 0;}
+    A7FLColorParams color=capture_params(p);
+    int points[5]={0};
+    if(p->schema==4&&p->enabled>0)
+        for(unsigned i=0;i<5;i++)points[i]=p->film[p->enabled-1][i+2];
+    if(t)return a7_capture_generate_curve(&capture_controls,t-1,p->enabled,&color,points,out);
+    return a7_fl_fivepoint_preview(film_base[p->enabled-1],a7_pkg_expand,a7_pkg_compress,&color,points,out);
+}
+static int film_read(void *unused,unsigned t,uint8_t out[1280]){
+    (void)unused;
+    const struct a7_fl_api *a=&module.platform.backup;
+    if(t>3||a->size(A7_FL_PROPERTY+t)!=1280||a->attr(A7_FL_PROPERTY+t)!=8)return A7_FL_LAYOUT;
+    return a->read(A7_FL_PROPERTY+t,out)==1280?0:A7_FL_READ;
+}
+static int film_write(void *unused,unsigned t,const uint8_t old[1280],const uint8_t next[1280]){
+    uint8_t actual[1280];(void)unused;
+    if(t>2||module.platform.identity(module.platform.opaque)!=1)return A7_FL_FOREIGN;
+    if(film_read(0,t,actual)||!film_equal(actual,old))return A7_FL_FOREIGN;
+    if(module.platform.backup.write(3,A7_FL_PROPERTY+t,next)!=1280)return A7_FL_WRITE;
+    return film_read(0,t,actual)||!film_equal(actual,next)?A7_FL_VERIFY:0;
+}
+static struct a7_fl_curve_scratch film_scratch;
+static const struct a7_fl_curve_io film_io={film_generate,film_read,film_write,0,&film_scratch};
+static int film_crc(struct a7_fl_preference *p){
+    uint8_t table[1280];
+    if(!p->enabled) {
+        A7FLColorParams color=capture_params(p);
+        if(a7_fl_adjust_lut(a7_pkg_base,1280,a7_pkg_expand,a7_pkg_compress,&color,table,1280))return A7_FL_TABLE;
+    } else if(film_generate(0,p,0,table))return A7_FL_TABLE;
+    p->candidate_crc=a7_fl_crc(table,1280);return 0;
+}
+static int film_change(const struct a7_fl_preference *next){
+    int rc=a7_fl_curve_transition(&film_work,&film_io,&module.control.preference,next);
+    if(rc){module.status.fault=1;return rc;}
+    module.control.preference=*next;
+    module.runtime.state=!!next->enabled;
+    module.control.dirty=1;return 0;
+}
+#endif
 static void snapshot(int error) {
     module.status.last_error=error;module.status.parents=module.attached;
-    module.status.mode=module.runtime.state;module.status.dirty=module.control.dirty;
+    module.status.mode=module.runtime.state==A7_FL_ON?module.control.preference.enabled:module.runtime.state;module.status.dirty=module.control.dirty;
     module.status.generation=module.control.committed.generation;
     for(unsigned i=0;i<8;i++)module.status.parameters[i]=module.control.preference.parameters[i];
     if(module.control.fault)module.status.fault=1;
@@ -70,6 +133,7 @@ static int witnesses(enum a7_fl_platform_event event) {
     struct a7_fl_platform *p=&module.platform;
     return p->identity(p->opaque)==1 && p->event(p->opaque,event)==1;
 }
+#ifndef A7_FL_FILM_CONTROLS
 static int capture_set(int mode) {
 #ifdef A7_FL_CAPTURE_CONTROLS
     if(module.platform.identity(module.platform.opaque)!=1)return A7_FL_RECOVERY_IDENTITY;
@@ -92,20 +156,36 @@ static int capture_check(int mode) {
     (void)mode;return 0;
 #endif
 }
+#endif
 static int commit_checked(void) {
+#ifdef A7_FL_FILM_CONTROLS
+    int rc=a7_fl_curve_verify(&film_io,&module.control.preference);
+    if(rc){module.status.fault=1;return rc;}
+    if(!module.control.dirty)return 0;
+    if(module.control.committed.generation>=0xfffffffeu)return A7_FL_CONTROL_GENERATION;
+    struct a7_fl_preference next=module.control.preference;
+    next.generation=film_saved?module.control.committed.generation+1:1;
+    if(a7_fl_store_save(&module.store,&next))return A7_FL_CONTROL_PERSIST;
+    film_saved=1;
+    module.control.committed=module.control.preference=next;
+    module.control.dirty=0;return 0;
+#else
     int rc=capture_check(module.control.preference.enabled);
     if(rc){module.status.fault=1;return rc;}
     return a7_fl_control_commit(&module.control);
+#endif
 }
+#ifndef A7_FL_FILM_CONTROLS
 static int reconcile_failed_color(int error) {
 #ifdef A7_FL_CAPTURE_LOOK
     int mode=module.runtime.state;
-    if((mode!=0 && mode!=1) || capture_set(mode)) {
+    if((mode!=0 && mode!=1) || capture_set(mode?module.control.preference.enabled:0)) {
         module.status.fault=1;return A7_FL_RECOVERY;
     }
 #endif
     return error;
 }
+#endif
 int a7_fl_prepare(const struct a7_fl_platform *p) {
     if(!p||!p->view_base||!p->manager||!p->manager_vtable||!p->parent_vtable||!p->creative_style||
        !p->identity||!p->event||!p->readable||!p->backup.size||!p->backup.attr||!p->backup.read||!p->backup.write||
@@ -140,6 +220,10 @@ int a7_fl_configure_menu(const struct a7_fl_platform *p) {
        p->manager_vtable!=old->manager_vtable||p->parent_vtable!=old->parent_vtable||
        p->backup.size!=old->backup.size||p->backup.attr!=old->backup.attr||p->backup.read!=old->backup.read||p->backup.write!=old->backup.write||
        p->storage.read!=old->storage.read||p->storage.replace!=old->storage.replace||p->storage.opaque!=old->storage.opaque||
+#ifdef A7_FL_FILM_CONTROLS
+       p->film_storage.read!=old->film_storage.read||p->film_storage.replace!=old->film_storage.replace||
+       p->film_storage.opaque!=old->film_storage.opaque||
+#endif
        p->identity!=old->identity||p->event!=old->event||p->readable!=old->readable||p->opaque!=old->opaque)
         return leave(A7_FL_MODULE_PLATFORM);
     if(!witnesses(A7_FL_INSTALL_EVENT)||!readable((uintptr_t)p->view_manager,4))return leave(A7_FL_MODULE_WITNESS);
@@ -170,13 +254,23 @@ static int synchronize(void) {
         for(unsigned f=0;f<8;f++)
             if((A7_FL_EDITABLE_MASK&(1u<<f))&&
                !native_adjust_write(&module.trees[j],0x7001+(int)f,module.control.preference.parameters[f],accept_applied,0))return 0;
+#ifdef A7_FL_FILM_CONTROLS
+        for(unsigned f=8;f<NATIVE_ADJUST_FIELDS;f++)
+            if(!native_adjust_write(&module.trees[j],native_adjust_field_id(f),
+                module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][f-6],accept_applied,0))return 0;
+#endif
     }
     return 1;
 }
 static int model_read(void *unused,int id,int *value) {
     (void)unused;if(!module.status.installed||module.status.fault||!value)return 0;
     if(id==0x7000)return native_adjust_encode(&module.trees[0],id,module.control.preference.enabled,value);
-    unsigned f=(unsigned)(id-0x7001);if(f>=8)return 0;
+    unsigned f=native_adjust_field_index(id);
+#ifdef A7_FL_FILM_CONTROLS
+    if(f>=8&&f<NATIVE_ADJUST_FIELDS)
+        return native_adjust_encode(&module.trees[0],id,module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][f-6],value);
+#endif
+    if(f>=8)return 0;
     /* Native SettingMenu reserves -1 as a missing-value sentinel. The UI uses
      * nonnegative selection enums; signed values belong only to our backend. */
     return native_adjust_encode(&module.trees[0],id,module.control.preference.parameters[f],value);
@@ -188,11 +282,28 @@ static int model_write(void *unused,int id,int value) {
     if(!native_adjust_decode(&module.trees[0],id,value,&decoded)) {leave(A7_FL_CONTROL_ARGUMENT);return 0;}
     int old_mode=module.control.preference.enabled;
     uint32_t old_crc=module.control.preference.candidate_crc;
+#ifdef A7_FL_FILM_CONTROLS
+    unsigned f=native_adjust_field_index(id);
+    struct a7_fl_preference next=module.control.preference;
+    if(id==0x7000){
+        if(next.enabled==decoded){leave(0);return 1;}
+        a7_fl_preference_switch(&next,decoded);
+    } else if(f<8&&(A7_FL_EDITABLE_MASK&(1u<<f))){
+        if(next.parameters[f]==decoded){leave(0);return 1;}
+        next.parameters[f]=decoded;
+    } else if(f>=8&&f<NATIVE_ADJUST_FIELDS&&next.enabled>0){
+        if(next.film[next.enabled-1][f-6]==decoded){leave(0);return 1;}
+        next.film[next.enabled-1][f-6]=(int8_t)decoded;
+    } else {leave(A7_FL_CONTROL_UNSUPPORTED);return 0;}
+    int rc=film_crc(&next);
+    if(!rc)rc=film_change(&next);
+    if(rc){leave(rc);return 0;}
+#else
 #ifdef A7_FL_CAPTURE_CONTROLS
     if(id>=0x7000&&id<=0x7005) {
         int rc=capture_check(module.control.preference.enabled);
         struct a7_fl_preference next=module.control.preference;
-        if(id==0x7000)next.enabled=decoded;else next.parameters[id-0x7001]=decoded;
+        if(id==0x7000)a7_fl_preference_switch(&next,decoded);else next.parameters[id-0x7001]=decoded;
         A7FLColorParams p=capture_params(&next);
         if(!rc&&module.platform.identity(module.platform.opaque)!=1)rc=A7_FL_RECOVERY_IDENTITY;
         if(!rc)rc=a7_capture_apply(&capture_controls,next.enabled,&p);
@@ -207,6 +318,7 @@ static int model_write(void *unused,int id,int value) {
 #endif
     int accepted=native_adjust_write(&module.trees[0],id,decoded,a7_fl_control_preview,&module.control);
     if(!accepted) {leave(reconcile_failed_color(module.control.last_error));return 0;}
+#endif
     if(!synchronize()) {module.status.fault=1;leave(A7_FL_MODULE_NODES);return 0;}
     if(module.control.dirty)save_feedback(0x0204eaab); /* Save */
     int refresh=old_mode!=module.control.preference.enabled ||
@@ -260,8 +372,16 @@ static int rollback(void) {
     if(!module.attached && module.bound) {
         if(a7_menu_unbind_model(&module.model)<0)error=1;else module.bound=0;
     }
+#ifdef A7_FL_FILM_CONTROLS
+    if(module.status.runtime_ready){
+        struct a7_fl_preference off=module.control.preference;
+        a7_fl_preference_switch(&off,0);
+        if(film_crc(&off)||film_change(&off))error=1;
+    }
+#else
     if(module.runtime.initialized && a7_fl_set(&module.runtime,0))error=1;
     if(module.runtime.initialized && capture_set(0))error=1;
+#endif
     module.status.installed=0;
     if(error)module.status.fault=1;
     return error?A7_FL_MODULE_ROLLBACK:0;
@@ -269,21 +389,77 @@ static int rollback(void) {
 static int initialize_color(void) {
     if(module.status.runtime_ready)return 0;
     if(module.runtime.initialized)return A7_FL_MODULE_PLATFORM;
-    struct a7_fl_preference preference;int present=0;
+    struct a7_fl_preference preference={0};int present=0;
     if(a7_fl_store_open(&module.store,&module.platform.storage,a7_pkg_original_sha,a7_pkg_build,&preference,&present))return A7_FL_MODULE_STORE;
     if(!present) {
         preference.generation=1;preference.enabled=0;
         for(unsigned i=0;i<8;i++)preference.parameters[i]=i==6?1:0;
         preference.candidate_crc=a7_fl_crc(a7_pkg_base,1280);
     }
+#ifdef A7_FL_FILM_CONTROLS
+    uint8_t stock[1280];
+    if(module.platform.identity(module.platform.opaque)!=1)return A7_FL_RECOVERY_IDENTITY;
+    if(film_read(0,3,stock)||!film_equal(stock,a7_pkg_original[3]))return A7_FL_FOREIGN;
+    memcpy(film_base[0],a7_pkg_base,1280);
+    if(a7_cinema_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[1])||
+       a7_leica_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[2]))return A7_FL_TABLE;
+    int rc=a7_capture_prepare(&capture_controls,&module.platform.backup,capture_stock,capture_look,a7_pkg_expand,a7_pkg_compress);
+    if(rc)return rc;
+    rc=a7_fl_worklog_open(&film_work,&module.platform.film_storage,a7_pkg_original_sha,a7_pkg_build);
+    if(rc)return rc;
+    unsigned schema=preference.schema;
+    uint32_t prior_crc=preference.candidate_crc;
+    if(a7_fl_preference_migrate_film(&preference)<0||film_crc(&preference)||
+       (schema>=3&&prior_crc!=preference.candidate_crc))return A7_FL_TABLE;
+    rc=a7_fl_curve_recover(&film_work,&film_io,&preference);
+    if(rc==A7_FL_WORKLOG_UNKNOWN&&schema<4&&film_work.latest<0){
+        A7FLColorParams parameters=capture_params(&preference);
+        rc=a7_capture_adopt(&capture_controls,&parameters);
+        if(rc)return rc;
+        struct a7_fl_recovery recovery={0};
+        recovery.api=&module.platform.backup;
+        for(unsigned i=0;i<4;i++){recovery.original[i]=a7_pkg_original[i];recovery.original_crc[i]=a7_pkg_original_crc[i];}
+        recovery.base_fl=a7_pkg_base;recovery.base_fl_crc=a7_pkg_base_crc;
+        recovery.base_cinema=film_base[1];recovery.base_leica=film_base[2];
+        recovery.expand=a7_pkg_expand;recovery.compress=a7_pkg_compress;
+        recovery.identity_guard=module.platform.identity;recovery.identity_context=module.platform.opaque;
+        for(unsigned i=0;i<2;i++)recovery.capture_alternate[i]=capture_controls.current[i];
+        int recognized[5];
+        rc=a7_fl_restore_baseline(&recovery,recognized);if(rc<0)return rc;
+        rc=a7_capture_apply(&capture_controls,0,&parameters);if(rc)return rc;
+        rc=a7_fl_curve_recover(&film_work,&film_io,&preference);
+    }
+    if(rc)return rc;
+    film_saved=present;
+    module.control.preference=module.control.committed=preference;
+    module.runtime.state=!!preference.enabled;
+    module.status.runtime_ready=1;return 0;
+#else
     A7FLColorParams parameters={preference.parameters[0],preference.parameters[1],preference.parameters[2],preference.parameters[3],preference.parameters[4]};
     uint8_t candidate[1280];
-    if(a7_fl_adjust_lut(a7_pkg_base,1280,a7_pkg_expand,a7_pkg_compress,&parameters,candidate,1280)||
+    const uint8_t *base=a7_pkg_base;
+#ifdef A7_FL_DUAL_LOOK
+    uint8_t cinema[1280];
+    if(a7_cinema_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,cinema))return A7_FL_TABLE;
+    if(preference.enabled==A7_FL_PRESET_CINEMA)base=cinema;
+#ifdef A7_FL_LEICA_LOOK
+    uint8_t leica[1280];
+    if(a7_leica_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,leica))return A7_FL_TABLE;
+    if(preference.enabled==A7_FL_PRESET_LEICA)base=leica;
+#endif
+#endif
+    if(a7_fl_adjust_lut(base,1280,a7_pkg_expand,a7_pkg_compress,&parameters,candidate,1280)||
        a7_fl_crc(candidate,1280)!=preference.candidate_crc)return A7_FL_TABLE;
     struct a7_fl_recovery recovery={0};
     recovery.api=&module.platform.backup;
     for(unsigned i=0;i<4;i++){recovery.original[i]=a7_pkg_original[i];recovery.original_crc[i]=a7_pkg_original_crc[i];}
     recovery.base_fl=a7_pkg_base;recovery.base_fl_crc=a7_pkg_base_crc;recovery.expand=a7_pkg_expand;recovery.compress=a7_pkg_compress;
+#ifdef A7_FL_DUAL_LOOK
+    recovery.base_cinema=cinema;
+#ifdef A7_FL_LEICA_LOOK
+    recovery.base_leica=leica;
+#endif
+#endif
     recovery.identity_guard=module.platform.identity;recovery.identity_context=module.platform.opaque;
 #ifdef A7_FL_CAPTURE_CONTROLS
     int prepared=a7_capture_prepare(&capture_controls,&module.platform.backup,capture_stock,capture_look,a7_pkg_expand,a7_pkg_compress);
@@ -295,15 +471,38 @@ static int initialize_color(void) {
 #endif
     int recognized[5],rc=a7_fl_restore_baseline(&recovery,recognized);
     if(rc<0)return rc;
+#ifdef A7_FL_LOOK_BANKS
+    /* Verify/reconcile the legacy candidate above BEFORE moving its shared
+     * values to FL. FL2 starts from its own neutral controls. */
+#ifdef A7_FL_LEICA_LOOK
+    int migrated=a7_fl_preference_migrate_three(&preference);
+#else
+    int migrated=a7_fl_preference_migrate(&preference);
+#endif
+    if(migrated) {
+        if(present) {
+            if(preference.generation>=0xfffffffeu)return A7_FL_CONTROL_GENERATION;
+            preference.generation++;
+        }
+        parameters=capture_params(&preference);
+        if(a7_fl_adjust_lut(base,1280,a7_pkg_expand,a7_pkg_compress,&parameters,candidate,1280))return A7_FL_TABLE;
+        preference.candidate_crc=a7_fl_crc(candidate,1280);
+    }
+#endif
     rc=a7_fl_init(&module.runtime,&module.platform.backup,a7_pkg_original[0],a7_pkg_original_crc[0],candidate,preference.candidate_crc);
     if(rc)return rc;
-    if(!present && a7_fl_store_save(&module.store,&preference))return A7_FL_MODULE_STORE;
-    rc=a7_fl_set(&module.runtime,preference.enabled);if(rc)return rc;
+    if((!present
+#ifdef A7_FL_LOOK_BANKS
+        ||migrated
+#endif
+       ) && a7_fl_store_save(&module.store,&preference))return A7_FL_MODULE_STORE;
+    rc=a7_fl_set(&module.runtime,!!preference.enabled);if(rc)return rc;
     rc=a7_fl_control_init(&module.control,&module.runtime,a7_pkg_base,a7_pkg_expand,a7_pkg_compress,&preference,a7_fl_store_save,&module.store);
     if(rc){rollback();return rc;}
     rc=capture_set(preference.enabled);
     if(rc){int restored=rollback();return restored?restored:rc;}
     module.status.runtime_ready=1;return 0;
+#endif
 }
 int a7_fl_initialize_color_prepared(void) {
     if(!enter())return A7_FL_MODULE_BUSY;
@@ -324,16 +523,35 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
     int rc=initialize_color();
     if(rc){if(module.runtime.initialized)module.status.fault=1;return leave(rc);}
     struct a7_fl_preference preference=module.control.preference;
-    NativeAdjustSpec specs[8];
+    NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS];
     for(unsigned f=0;f<8;f++) {
         specs[f].title=0x0204fda0+f;specs[f].help=0x0204fd9f;
         specs[f].minimum=f==3||f==7?0:f==6?1:f==5?-3:-9;
         specs[f].maximum=f==6?5:f==5?3:9;specs[f].initial=preference.parameters[f];
     }
+    unsigned editable=A7_FL_EDITABLE_MASK;
+#ifdef A7_FL_FILM_CONTROLS
+    if(!native_adjust_curve_specs(specs,preference.film[preference.enabled?preference.enabled-1:0]+2)){rollback();return leave(A7_FL_MODULE_NODES);}
+    editable|=0x1f00u;
+#endif
     for(unsigned j=0;j<module.platform.parent_count;j++) {
-        if(!native_adjust_build(&module.trees[j],module.platform.caution_base,0x0204fd9e,0x0204fd9f,0x0204fd9f,specs,A7_FL_EDITABLE_MASK)) {
+        if(!native_adjust_build(&module.trees[j],module.platform.caution_base,0x0204fd9e,0x0204fd9f,0x0204fd9f,specs,editable)) {
             rollback();return leave(A7_FL_MODULE_NODES);
         }
+#ifdef A7_FL_DUAL_LOOK
+        if(!native_adjust_add_look(&module.trees[j],
+#ifdef A7_FL_LOOK_BANKS
+            0x0204fda8 /* Added FL2 label; installed before this module. */
+#else
+            0x0204eceb
+#endif
+        )) {
+            rollback();return leave(A7_FL_MODULE_NODES);
+        }
+#endif
+#ifdef A7_FL_LEICA_LOOK
+        if(!native_adjust_add_look(&module.trees[j],0x0204fda9)){rollback();return leave(A7_FL_MODULE_NODES);}
+#endif
         if(!native_adjust_add_save(&module.trees[j],0x0204eaab)){rollback();return leave(A7_FL_MODULE_NODES);}
     }
     if(!synchronize()){rollback();return leave(A7_FL_MODULE_NODES);}
@@ -382,6 +600,13 @@ int a7_fl_cancel(void) {
     if(!witnesses(A7_FL_CANCEL_EVENT))return leave(A7_FL_MODULE_EVENT);
     int old_mode=module.control.preference.enabled;
     uint32_t old_crc=module.control.preference.candidate_crc;
+#ifdef A7_FL_FILM_CONTROLS
+    int rc=0;
+    if(module.control.dirty){
+        rc=film_change(&module.control.committed);
+        if(!rc)module.control.dirty=0;
+    }
+#else
     int rc=capture_check(module.control.preference.enabled);
 #ifdef A7_FL_CAPTURE_CONTROLS
     if(!rc&&module.control.dirty) {
@@ -395,6 +620,7 @@ int a7_fl_cancel(void) {
     if(rc){module.status.fault=1;return leave(rc);}
     rc=a7_fl_control_cancel(&module.control);
     if(rc)rc=reconcile_failed_color(rc);
+#endif
     if(!rc&&!synchronize()){module.status.fault=1;rc=A7_FL_MODULE_NODES;}
     if(!rc&&(old_mode!=module.control.preference.enabled ||
        (module.control.preference.enabled&&old_crc!=module.control.preference.candidate_crc)))rc=refresh_preview();

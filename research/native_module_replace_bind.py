@@ -20,9 +20,16 @@ def bind(old,module,proof,view,out,revision=1):
  profile=REVISIONS[revision]
  old,module,proof,view,out=map(lambda p:Path(p).resolve(),(old,module,proof,view,out))
  p=json.loads(proof.read_text());pin(p)
- if p.get('placeholder') is not False or p.get('ready_for_staging') is not True or p['module_sha256']!=sha(module):raise ValueError('Unattested module')
+ if 'locale' in profile:
+  name=profile['locale']
+  if p.get('kind')!=profile.get('resource_set','fl2')+'-additive-locales-v1' or p['files'][name]['after_sha256']!=sha(module) or p['files'][name]['before_sha256']!=profile['old_sha']:raise ValueError('Unattested locale')
+ elif p.get('placeholder') is not False or p.get('ready_for_staging') is not True or p['module_sha256']!=sha(module):raise ValueError('Unattested module')
+ resource_path=LAB/('native-resource-'+profile.get('resource_set','fl2')+'/report.json')
+ if 'locale' in profile:
+  resource=json.loads(resource_path.read_text());pin(resource)
+  if resource['input_proof_sha256']!=sha(proof):raise ValueError('Locale parser proof mismatch')
  require_capture_release(revision,p)
- for n,d in p['dependency_proof_sha256'].items():
+ for n,d in p.get('dependency_proof_sha256',{}).items():
   if sha(LAB/n)!=d:raise ValueError('Module dependency changed: '+n)
   pin(json.loads((LAB/n).read_text()))
  core_path=LAB/('native-module-replace-test'+('' if revision==1 else f'-r{revision}'))/'proof.json';core=json.loads(core_path.read_text());pin(core)
@@ -30,7 +37,7 @@ def bind(old,module,proof,view,out,revision=1):
  action_path=LAB/'native-menu-action-tree/proof.json';action=json.loads(action_path.read_text());pin(action)
  if sha(LAB/'native-menu-action-tree/qemu.log')!=action['qemu_log_sha256']:raise ValueError('Action fixture log changed')
  if sha(old)!=profile['old_sha'] or old.stat().st_size!=profile['old_size'] or sha(view)!=VIEW or view.stat().st_size!=10854816:raise ValueError('Incorrect deployment baseline')
- if 'a7_fl_install' not in ELF(module).symbols:raise ValueError('Missing module entry')
+ if 'locale' not in profile and 'a7_fl_install' not in ELF(module).symbols:raise ValueError('Missing module entry')
  sizes=[old.stat().st_size,module.stat().st_size,view.stat().st_size]
  hashes=[bytes.fromhex(sha(x)) for x in (old,module,view,proof)]
  binding=hashlib.sha256(b'A7M3-single-module-r1\0'+struct.pack('<4I',revision,*sizes)+b''.join(hashes)).digest()
@@ -59,7 +66,8 @@ __attribute__((constructor)) static void entry(void){
   target=out/(name+'.so');subprocess.run(['arm-none-eabi-ld','-shared','--no-undefined','-z','noexecstack',*objects,str(obj),'-o',str(target)],check=True)
   payloads[name]={'sha256':sha(target),'size':target.stat().st_size}
  sources={**core['source_sha256'],**{n:sha(ROOT/n) for n in ['research/native_module_replace_bind.py','camera/native_module_replace.py']}}
- manifest={'version':revision,'kind':f'native-module-replace-r{revision}','bundle_sha256':binding.hex(),'old':{'sha256':profile['old_sha'],'size':sizes[0]},'new':{'sha256':sha(module),'size':sizes[1]},'view':{'sha256':VIEW,'size':sizes[2]},'module_proof_sha256':sha(proof),'core_proof_sha256':sha(core_path),'action_proof_sha256':sha(action_path),'model_identity_boundary':'Authenticated same-session host check before either payload; native callback does not read model','payloads':payloads,'entry_sha256':sha(out/'entry.c'),'data_sha256':sha(out/'data.S'),'source_sha256':sources,'scope':'Only /usr/lib/a7fl.so atomic replacement; existing mapped old DSO survives until reboot; no loader, locale, LUT, or WBI changes'}
+ manifest={'version':revision,'kind':f'native-module-replace-r{revision}','bundle_sha256':binding.hex(),'old':{'sha256':profile['old_sha'],'size':sizes[0]},'new':{'sha256':sha(module),'size':sizes[1]},'view':{'sha256':VIEW,'size':sizes[2]},'module_proof_sha256':sha(proof),'core_proof_sha256':sha(core_path),'action_proof_sha256':sha(action_path),'model_identity_boundary':'Authenticated same-session host check before either payload; native callback does not read model','payloads':payloads,'entry_sha256':sha(out/'entry.c'),'data_sha256':sha(out/'data.S'),'source_sha256':sources,'scope':'Atomic pinned file replacement: '+('/usr/share/app/'+profile['locale'] if 'locale' in profile else '/usr/lib/a7fl.so')+'; no loader, LUT or WBI writes'}
+ if 'locale' in profile:manifest['resource_proof_sha256']=sha(resource_path)
  (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n');return manifest
 if __name__=='__main__':
  p=argparse.ArgumentParser(description=__doc__)

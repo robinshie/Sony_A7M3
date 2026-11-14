@@ -64,6 +64,20 @@ def validate(recipe):
         number(band['width'], 1, 180)
         number(band['shift'], -45, 45)
         number(band['saturation'], 0, 2)
+    split = recipe.get('split_tone')
+    if split is not None:
+        if len(split) != 5 or any(len(row) != 2 for row in split):
+            raise ValueError('Split tone needs five Cb/Cr pairs')
+        for cb, cr in split:
+            number(cb, -.125, .125)
+            number(cr, -.125, .125)
+    model = recipe.get('reference_ycc_q10')
+    if model is not None:
+        if (len(model) != 5 or any(len(plane) != 9 for plane in model)
+                or any(len(node) != 3 for plane in model for node in plane)):
+            raise ValueError('Reference model needs five 9-by-3 planes')
+        if any(type(v) is not int or abs(v) > 512 for plane in model for node in plane for v in node):
+            raise ValueError('Reference coefficients must be integers in [-512, 512]')
     return recipe
 
 
@@ -74,12 +88,27 @@ def tone(value, points):
     return points[-1][1]
 
 
+def reference_ycc(rgb, model):
+    r, g, b = rgb
+    y = .2126*r + .7152*g + .0722*b
+    cb, cr = (b-y)/1.8556, (r-y)/1.5748
+    k = min(7, int(8*y))
+    f = 8*y - k
+    weights = (1, 2*cb, 2*cr, 4*cb*cb, 4*cr*cr)
+    dy, dcb, dcr = [sum(w * (p[k][j] + f*(p[k+1][j] - p[k][j]))
+                       for w, p in zip(weights, model))/1024 for j in range(3)]
+    y, cb, cr = y+dy, cb+dcb, cr+dcr
+    return y+1.5748*cr, y-.187324*cb-.468124*cr, y+1.8556*cb
+
+
 def transform(rgb, recipe):
     if len(rgb) != 3 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in rgb):
         raise ValueError('RGB must contain three finite sRGB values in [0, 1]')
     strength = recipe['strength']
     if strength == 0:
         return tuple(rgb)
+    if (model := recipe.get('reference_ycc_q10')) is not None:
+        return tuple(clamp(a + strength*(b-a)) for a, b in zip(rgb, reference_ycc(rgb, model)))
     linear = [decode(v) * 2 ** recipe['exposure_ev'] for v in rgb]
     mixed = [encode(clamp(sum(a * b for a, b in zip(row, linear))))
              for row in recipe['linear_matrix']]
@@ -93,6 +122,13 @@ def transform(rgb, recipe):
         scale *= 1 + weight * (band['saturation'] - 1)
     colored = colorsys.hsv_to_rgb(((hue + shift) % 360) / 360, clamp(s * scale), v)
     result = [tone(c, recipe['tone_curve']) for c in colored]
+    if (split := recipe.get('split_tone')) is not None:
+        y = .2126 * colored[0] + .7152 * colored[1] + .0722 * colored[2]
+        i = min(int(y * 4), 3)
+        f = y * 4 - i
+        cb, cr = (a + f * (b - a) for a, b in zip(split[i], split[i + 1]))
+        result = [clamp(c + offset) for c, offset in
+                  zip(result, (1.5748 * cr, -.187324 * cb - .468124 * cr, 1.8556 * cb))]
     return tuple(clamp(a + strength * (b - a)) for a, b in zip(rgb, result))
 
 
@@ -143,8 +179,11 @@ def build(recipe, size, out):
     out.mkdir(parents=True, exist_ok=True)
     (out / 'proof.json').unlink(missing_ok=True)
     table = cube_table(recipe, size)
+    label = ('FL Inspired Experimental v0' if recipe['id'] == 'fl-inspired-v0'
+             else recipe.get('name', recipe['id']))
+    label = label.encode('ascii', 'replace').decode().replace('"', "'").replace('\r', ' ').replace('\n', ' ')
     cube = ('# Original FL-inspired experiment, not Sony FL. Input/output: sRGB.\n'
-            'TITLE "FL Inspired Experimental v0"\n'
+            f'TITLE "{label}"\n'
             f'LUT_3D_SIZE {size}\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n')
     cube += ''.join(' '.join(f'{v:.9f}' for v in row) + '\n' for row in table)
     files = {'fl-inspired.cube': cube.encode(), 'tone-u16le-1025.bin': native_tone(recipe),
@@ -155,12 +194,12 @@ def build(recipe, size, out):
              'input_output': 'display-referred sRGB, normalized 0..1',
              'interpolation': 'trilinear', 'files_sha256': {k: digest(v) for k, v in files.items()},
              'source_sha256': digest(Path(__file__).read_bytes()),
-             'native_tone_scope': 'scalar tone only; excludes matrix and hue/saturation changes',
+             'native_tone_scope': 'scalar curve only; excludes matrix, hue/saturation, split tone and reference YCC fitting',
              'sony_fl_match_validated': False, 'camera_integration': False, 'flash_ready': False}
     return table, proof
 
 
-def preview(source, table, size, out, assume_srgb):
+def preview(source, table, size, out, assume_srgb, label='FL-inspired v0'):
     from PIL import Image, ImageCms, ImageDraw, ImageFilter, ImageOps
     data = source.read_bytes()
     with Image.open(io.BytesIO(data)) as opened:
@@ -186,7 +225,7 @@ def preview(source, table, size, out, assume_srgb):
     comparison.paste(before, (0, 32)); comparison.paste(after, (before.width, 32))
     draw = ImageDraw.Draw(comparison)
     draw.text((10, 8), 'Before (sRGB)', fill='white')
-    draw.text((before.width+10, 8), 'FL-inspired v0 / desktop experiment', fill='white')
+    draw.text((before.width+10, 8), f'{label} / desktop experiment', fill='white')
     comparison.save(out / 'comparison.png', icc_profile=srgb.tobytes())
     return {'input_sha256': digest(data), 'output_sha256': digest((out / 'fl-preview.png').read_bytes()),
             'pixels': list(photo.size), 'desktop_filter_seconds': elapsed,
@@ -210,7 +249,8 @@ def main():
     recipe = validate(json.loads(args.recipe.read_text()))
     table, proof = build(recipe, args.size, args.out)
     if args.action == 'preview':
-        proof['preview'] = preview(args.input, table, args.size, args.out, args.assume_srgb)
+        label = 'FL-inspired v0' if recipe['id'] == 'fl-inspired-v0' else recipe.get('name', recipe['id'])
+        proof['preview'] = preview(args.input, table, args.size, args.out, args.assume_srgb, label)
     (args.out / 'proof.json').write_text(json.dumps(proof, indent=2) + '\n')
     print(json.dumps({'out': str(args.out.resolve()), 'cube_size': args.size,
                       'camera_integration': False, 'flash_ready': False}, ensure_ascii=False))

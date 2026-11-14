@@ -1,5 +1,10 @@
 #include "a7-fl-capture-controls.h"
 #include "a7-fl-module-data.h"
+#ifdef A7_FL_FILM_CONTROLS
+#include "a7-fl-fivepoint-preview.h"
+#include "a7-fl-leica.h"
+#include "a7-fl-runtime-prefs.h"
+#endif
 extern void cc_check(int,const char *);
 extern void cc_pack(const uint8_t *,unsigned);
 static struct a7_capture_controls ctx;
@@ -27,9 +32,14 @@ static void reset(void){
     writes=fail_at=fail_mode=0;
     cc_check(a7_capture_prepare(&ctx,&api,stock,legacy,a7_pkg_expand,a7_pkg_compress)==0,"CAP control preparation");
 }
-static void validate(unsigned t,const A7FLColorParams *p,int pack){
+static void validate(unsigned t,int preset,const A7FLColorParams *p,int pack){
     uint8_t out[1282];out[0]=0x5a;out[1281]=0xa5;
+#ifdef A7_FL_DUAL_LOOK
+    cc_check(a7_capture_generate_preset(&ctx,t,preset,p,out+1)==0,"preset CAP generation");
+#else
+    (void)preset;
     cc_check(a7_capture_generate(&ctx,t,p,out+1)==0,"CAP generation");
+#endif
     cc_check(out[0]==0x5a&&out[1281]==0xa5&&eq(out+1216,ctx.stock[t]+1215,65),"CAP output extent and calibration tail");
     for(unsigned i=0;i<1215;i++){
         unsigned v=out[i+1];
@@ -43,6 +53,81 @@ static void validate(unsigned t,const A7FLColorParams *p,int pack){
         cc_check((int)(a*64)+signed7(out[1+a*81+b])>=(int)((a-1)*64)+signed7(out[1+(a-1)*81+b]),"CAP monotonic luminance");
     if(pack)for(unsigned level=1;level<=8;level++)cc_pack(out+1,level);
 }
+#ifdef A7_FL_FILM_CONTROLS
+void a7_capture_curve_tests(void){
+    reset();
+    uint8_t leica[1280],plain[1280],preview[1280];
+    A7FLColorParams color={-6,3,-2,4,5};
+    cc_check(!a7_leica_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,leica),"FL3 preview base");
+    cc_check(!a7_fl_adjust_lut(leica,1280,a7_pkg_expand,a7_pkg_compress,&color,plain,1280),"legacy preview candidate");
+    for(unsigned i=0;i<6;i++){
+        int points[5]={0};
+        static const int visible[]={9,-9,9,-9,-9};
+        if(i)points[i-1]=visible[i-1];
+        cc_check(!a7_fl_fivepoint_preview(leica,a7_pkg_expand,a7_pkg_compress,&color,points,preview),"native FL3 preview candidate");
+        cc_check(eq(plain,preview,1280)==(i==0)&&eq(plain+405,preview+405,875),
+                 "curve changes luminance and preserves other preview values");
+    }
+    const int invalid_preview[5]={0,0,-10,0,0};
+    copy_bytes(preview,plain,1280);
+    cc_check(a7_fl_fivepoint_preview(leica,a7_pkg_expand,a7_pkg_compress,&color,invalid_preview,preview)&&
+             eq(plain,preview,1280),"invalid curve publishes no preview table");
+    for(int preset=1;preset<=3;preset++)for(unsigned t=0;t<2;t++)for(unsigned pattern=0;pattern<7;pattern++){
+        A7FLColorParams p={0,0,0,0,0};
+        if(pattern>=1&&pattern<=5){
+            int values[5]={0};values[pattern-1]=pattern==4?9:(pattern&1?9:-9);
+            p=(A7FLColorParams){values[0],values[1],values[2],values[3],values[4]};
+        }
+        if(pattern==6)p=(A7FLColorParams){-8,7,-6,5,4};
+        uint8_t base[1280],out[1280];
+        cc_check(!a7_capture_generate_preset(&ctx,t,preset,&p,base),"film curve base");
+        for(unsigned test=0;test<128;test++){
+            int points[5]={0};
+            if(test&&test<=95)points[(test-1)/19]=(int)((test-1)%19)-9;
+            if(test>=96)for(unsigned f=0;f<5;f++)points[f]=((test-96)>>f)&1?9:-9;
+            cc_check(!a7_capture_generate_curve(&ctx,t,preset,&p,points,out),"native five-point capture table");
+            cc_check(eq(base+405,out+405,875),"curve leaves chroma/calibration byte-exact");
+            if(test==0)cc_check(eq(base,out,1280),"curve disabled is byte-exact");
+            for(unsigned i=0;i<1215;i++)for(unsigned level=1;level<=8;level++){
+                int delta=pack_code(out[i],level)-pack_code(ctx.stock[t][i],level),limit=i<405?24:32;
+                cc_check(delta>=-limit&&delta<=limit,"curve respects every hardware packing level");
+            }
+            for(unsigned col=0;col<81;col++)for(unsigned a=1;a<5;a++)
+                cc_check(a7_fl_clamp((int)a*64+signed7(out[a*81+col]),0,256)>=
+                    a7_fl_clamp((int)(a-1)*64+signed7(out[(a-1)*81+col]),0,256),"five-point capture curve monotone");
+            if(pattern==0&&(test==0||test==1||test==19||test>=96))for(unsigned level=1;level<=8;level++)cc_pack(out,level);
+        }
+        int invalid[5]={0,0,10,0,0};
+        copy_bytes(out,base,1280);
+        cc_check(a7_capture_generate_curve(&ctx,t,preset,&p,invalid,out)&&eq(out,base,1280),
+                 "invalid curve publishes no capture table");
+    }
+    const int curve[5]={8,-5,6,-3,-7};
+    uint8_t targets[2][1280];
+    for(unsigned t=0;t<2;t++)
+        cc_check(!a7_capture_generate_curve(&ctx,t,A7_FL_PRESET_LEICA,&color,curve,targets[t]),
+                 "generate FL3 curve transaction targets");
+    ctx.initialized=1;
+    for(unsigned t=0;t<2;t++)copy_bytes(ctx.current[t],ctx.stock[t],1280);
+    cc_check(a7_capture_apply_curve(&ctx,A7_FL_PRESET_LEICA,&color,invalid_preview)&&writes==0,
+             "invalid curves do not start capture transaction");
+    cc_check(a7_capture_apply_curve(&ctx,A7_FL_PRESET_CINEMA,&color,curve)&&writes==0,
+             "FL3 curve cannot change another look");
+    fail_at=2;fail_mode=1;
+    cc_check(a7_capture_apply_curve(&ctx,A7_FL_PRESET_LEICA,&color,curve)==A7_FL_WRITE&&writes==3,
+             "second curve write failure rolls back first");
+    for(unsigned t=0;t<2;t++)
+        cc_check(eq(live[t],ctx.stock[t],1280)&&eq(ctx.current[t],ctx.stock[t],1280),"rollback restores exact stock");
+    fail_at=fail_mode=writes=0;
+    cc_check(!a7_capture_apply_curve(&ctx,A7_FL_PRESET_LEICA,&color,curve)&&writes==2,
+             "apply complete curve to both capture tables");
+    for(unsigned t=0;t<2;t++)
+        cc_check(eq(live[t],targets[t],1280)&&eq(ctx.current[t],targets[t],1280),"capture readback matches generated bytes");
+    cc_check(!a7_capture_apply(&ctx,A7_FL_PRESET_OFF,&color)&&writes==4,
+             "turning FL3 off restores stock");
+    for(unsigned t=0;t<2;t++)cc_check(eq(live[t],ctx.stock[t],1280),"no curve bytes left after Off");
+}
+#endif
 void a7_capture_controls_tests(void){
     reset();A7FLColorParams zero={0,0,0,0,0},p=zero;
     uint8_t neutral[1280],other[1280],before[2][1280];
@@ -54,17 +139,17 @@ void a7_capture_controls_tests(void){
             old_sum+=(unsigned)(a<0?-a:a);new_sum+=(unsigned)(b<0?-b:b);
         }
         cc_check(new_sum>old_sum*12/10,"default has materially stronger source deltas");
-        validate(t,&zero,1);
+        validate(t,1,&zero,1);
         for(unsigned f=0;f<5;f++)for(int v=f==3?0:-9;v<=9;v++){
             p=zero;int values[5]={0,0,0,0,0};values[f]=v;
             p=(A7FLColorParams){values[0],values[1],values[2],values[3],values[4]};
-            validate(t,&p,v==-9||v==9);
+            validate(t,1,&p,v==-9||v==9);
             cc_check(a7_capture_generate(&ctx,t,&p,other)==0,"slider table");
             cc_check(v==0||!eq(neutral,other,1215),"every nonzero slider changes capture source");
         }
         for(unsigned mask=0;mask<32;mask++){
             p=(A7FLColorParams){mask&1?9:-9,mask&2?9:-9,mask&4?9:-9,mask&8?9:0,mask&16?9:-9};
-            validate(t,&p,1);
+            validate(t,1,&p,1);
         }
         p=(A7FLColorParams){-7,8,-5,6,7};
         cc_check(a7_capture_generate(&ctx,t,&p,other)==0&&a7_capture_recognize(&ctx,t,other)==1,"unsaved CAP preview recognition");
@@ -72,6 +157,39 @@ void a7_capture_controls_tests(void){
         p=zero;p.contrast=10;copy_bytes(other,neutral,1280);
         cc_check(a7_capture_generate(&ctx,t,&p,other)<0&&eq(other,neutral,1280),"invalid input leaves output untouched");
     }
+#ifdef A7_FL_DUAL_LOOK
+    for(unsigned t=0;t<2;t++) {
+        validate(t,2,&zero,1);
+        for(unsigned mask=0;mask<32;mask++){
+            p=(A7FLColorParams){mask&1?9:-9,mask&2?9:-9,mask&4?9:-9,mask&8?9:0,mask&16?9:-9};
+            validate(t,2,&p,1);
+        }
+        p=(A7FLColorParams){-7,8,-5,6,7};
+        cc_check(a7_capture_generate_preset(&ctx,t,2,&p,other)==0&&a7_capture_recognize(&ctx,t,other)==1,
+                 "exact unsaved Cinema CAP recognition");
+        other[1215]^=1;
+        cc_check(a7_capture_recognize(&ctx,t,other)==0,"Cinema foreign preimage rejected");
+    }
+#endif
+#ifdef A7_FL_LEICA_LOOK
+    for(unsigned t=0;t<2;t++) {
+        validate(t,3,&zero,1);
+        cc_check(!a7_capture_generate_preset(&ctx,t,3,&zero,neutral),"FL3 neutral generation");
+        cc_check(!eq(neutral,ctx.stock[t],1215),"FL3 neutral visibly alters stock source");
+        for(unsigned f=0;f<5;f++)for(int v=f==3?0:-9;v<=9;v++){
+            int values[5]={0,0,0,0,0};values[f]=v;p=(A7FLColorParams){values[0],values[1],values[2],values[3],values[4]};validate(t,3,&p,v==-9||v==9);
+        }
+        for(unsigned mask=0;mask<32;mask++){
+            p=(A7FLColorParams){mask&1?9:-9,mask&2?9:-9,mask&4?9:-9,mask&8?9:0,mask&16?9:-9};
+            validate(t,3,&p,1);
+        }
+        p=(A7FLColorParams){-7,8,-5,6,7};
+        cc_check(a7_capture_generate_preset(&ctx,t,3,&p,other)==0&&a7_capture_recognize(&ctx,t,other)==1,
+                 "exact unsaved FL3 CAP recognition");
+        other[1215]^=1;
+        cc_check(a7_capture_recognize(&ctx,t,other)==0,"FL3 foreign preimage rejected");
+    }
+#endif
     /* Exhaustive tone combinations on host; QEMU checks all single values and corners. */
 #ifdef A7_CC_EXHAUSTIVE
     for(int a=-9;a<=9;a++)for(int b=-9;b<=9;b++)for(int d=-9;d<=9;d++)for(int f=0;f<=9;f++)

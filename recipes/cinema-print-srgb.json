@@ -1,0 +1,21 @@
+{
+  "id": "cinema-print-srgb",
+  "name": "Cinema Print",
+  "version": 1,
+  "description": "Desktop interpretation of the r10 Cinema look. This is an sRGB effect, not an emulation of the camera pipeline.",
+  "input_space": "sRGB",
+  "output_space": "sRGB",
+  "strength": 1.0,
+  "exposure_ev": 0.0,
+  "linear_matrix": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+  "saturation": 0.82,
+  "hue_bands": [],
+  "tone_curve": [[0.0, 0.0546875], [0.25, 0.203125], [0.5, 0.5], [0.75, 0.80859375], [1.0, 0.92578125]],
+  "split_tone": [
+    [0.02734375, -0.0234375],
+    [0.03125, -0.01953125],
+    [0.0078125, 0.0078125],
+    [-0.01953125, 0.0234375],
+    [-0.02734375, 0.02734375]
+  ]
+}

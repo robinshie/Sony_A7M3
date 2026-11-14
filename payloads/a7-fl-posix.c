@@ -13,6 +13,9 @@ extern long a7_fl_test_syscall(long,long,long,long);
 #define call3 a7_fl_test_syscall
 #endif
 static const char *const paths[2]={"/setting/A7FL0.CFG","/setting/A7FL1.CFG"};
+#ifdef A7_FL_FILM_CONTROLS
+static const char *const work_paths[2]={"/setting/A7FW0.CFG","/setting/A7FW1.CFG"};
+#endif
 /* ARM overrides asm-generic: Linux arch/arm/include/asm/fcntl.h, v2.6.35.
  * O_NOFOLLOW=0100000 octal. 0x20000 means O_LARGEFILE on ARM. */
 enum { A7_O_NOFOLLOW=0x8000, A7_O_NONBLOCK=0x800 };
@@ -40,17 +43,20 @@ static int read_fd(long fd,unsigned char *out,unsigned cap,unsigned *length) {
     *length=n;return 0;
 }
 static int read_slot(void *ctx,unsigned slot,unsigned char *out,unsigned cap,unsigned *n) {
-    (void)ctx;if(slot>1||!out||!n)return -1;*n=0;
-    long fd=call3(5,(long)paths[slot],A7_O_NOFOLLOW|A7_O_NONBLOCK,0);
+    if(slot>1||!out||!n)return -1;
+    *n=0;
+    const char *const *selected=ctx?ctx:paths;
+    long fd=call3(5,(long)selected[slot],A7_O_NOFOLLOW|A7_O_NONBLOCK,0);
     if(fd==-2)return 1;
     if(fd<0)return -2;
     int rc=read_fd(fd,out,cap,n);if(call3(6,fd,0,0)&&!rc)rc=-4;return rc;
 }
 static int replace_slot(void *ctx,unsigned slot,const unsigned char *before,unsigned before_size,
                         int existed,const unsigned char after[128]) {
-    (void)ctx;if(slot>1||!after||before_size>128||(existed&&!before))return -1;
+    if(slot>1||!after||before_size>128||(existed&&!before))return -1;
+    const char *const *selected=ctx?ctx:paths;
     /* Never O_TRUNC before checking the exact inactive preimage. */
-    long fd=call3(5,(long)paths[slot],2|A7_O_NOFOLLOW|A7_O_NONBLOCK|(existed?0:64|128),0600);
+    long fd=call3(5,(long)selected[slot],2|A7_O_NOFOLLOW|A7_O_NONBLOCK|(existed?0:64|128),0600);
     if(fd<0)return -2;
     int rc=-3;unsigned char check[129];unsigned size=0;
     if(read_fd(fd,check,129,&size)||size!=before_size||(existed&&!equal(before,check,size)))goto done;
@@ -65,8 +71,22 @@ static int replace_slot(void *ctx,unsigned slot,const unsigned char *before,unsi
     rc=0;
 done:
     if(call3(6,fd,0,0)&&!rc)rc=-4;
+#ifdef A7_FL_FILM_CONTROLS
+    if(!rc&&!existed) {
+        /* Sync the new directory entry as well as the record itself. */
+        long dir=call3(5,(long)"/setting",A7_O_NOFOLLOW|A7_O_NONBLOCK|0x4000,0);
+        if(dir<0)return -5;
+        long sync=call3(118,dir,0,0),closed=call3(6,dir,0,0);
+        if(sync||closed)return -5;
+    }
+#endif
     return rc;
 }
 void a7_fl_posix_io(struct a7_fl_store_io *io) {
     if(io){io->read=read_slot;io->replace=replace_slot;io->opaque=0;}
 }
+#ifdef A7_FL_FILM_CONTROLS
+void a7_fl_posix_worklog_io(struct a7_fl_store_io *io) {
+    if(io){a7_fl_posix_io(io);io->opaque=(void *)work_paths;}
+}
+#endif

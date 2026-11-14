@@ -37,7 +37,7 @@ static int initialize(NativeAdjustNode *node,NativeAdjustNode **aliases,int coun
     int rc=((DeepInit)(t->caution_base+0x6830ab))(node,aliases,count,depth);
     int process_id=0;
     if(rc && ((GetInt)(t->caution_base+0x683297))(node,0xe,&process_id)) {
-        unsigned field=(unsigned)(process_id-NATIVE_ADJUST_ID_FIRST);
+        unsigned field=native_adjust_field_index(process_id);
         if(field<NATIVE_ADJUST_FIELDS) {
             rc=((Gray)(t->caution_base+0x682edb))(node,!(t->enabled_mask&(1u<<field)),0);
             if(rc)rc=((Select)(t->caution_base+0x682e59))(node,t->specs[field].maximum-t->current[field]+1);
@@ -55,6 +55,15 @@ uint32_t native_adjust_number_resid(int value) {
     if(value < -15 || value > 15) return 0;
     return value ? (uint32_t)(0x0204e7ad+value) : 0x0204e39c;
 }
+#ifdef A7_FL_FILM_CONTROLS
+int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const int8_t points[5]){
+    if(!specs||!points)return 0;
+    for(unsigned i=0;i<5;i++)if(points[i]<-9||points[i]>9)return 0;
+    for(unsigned i=0;i<5;i++)
+        specs[NATIVE_ADJUST_BASE_FIELDS+i]=(NativeAdjustSpec){NATIVE_ADJUST_CURVE_TITLE_FIRST+i,0,-9,9,points[i]};
+    return 1;
+}
+#endif
 int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32_t help,uint32_t fl_title,
                         const NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],unsigned enabled) {
     if(!t || !specs || !title || !fl_title || enabled>>NATIVE_ADJUST_FIELDS) return 0;
@@ -103,7 +112,7 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
         }
         NativeAdjustProperty *p=t->field_props[f];
         prop(p+0,0,0,s->title);prop(p+1,6,0,s->help);prop(p+2,0xb,1,2);
-        prop(p+3,0xc,1,0);prop(p+4,0xe,1,NATIVE_ADJUST_ID_FIRST+f);
+        prop(p+3,0xc,1,0);prop(p+4,0xe,1,native_adjust_field_id(f));
         t->field_properties[f]=(NativeAdjustProperties){p,4};
         construct(t,&t->fields[f],t->value_ptrs[f],(int)count,&t->field_properties[f]);
         t->field_ptrs[f+1]=&t->fields[f];
@@ -113,11 +122,12 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
     t->root_properties=(NativeAdjustProperties){t->root_props,3};
     prop(t->page_props,0xb,1,0);
     t->page_properties=(NativeAdjustProperties){t->page_props,0};
-    for(unsigned p=0;p<2;p++) {
-        construct(t,&t->pages[p],t->field_ptrs+p*6,p?3:6,&t->page_properties);
+    for(unsigned p=0;p<NATIVE_ADJUST_PAGES;p++) {
+        unsigned remaining=NATIVE_ADJUST_FIELDS+1-p*6;
+        construct(t,&t->pages[p],t->field_ptrs+p*6,remaining>6?6:(int)remaining,&t->page_properties);
         t->page_ptrs[p]=&t->pages[p];
     }
-    construct(t,&t->root,t->page_ptrs,2,&t->root_properties);
+    construct(t,&t->root,t->page_ptrs,NATIVE_ADJUST_PAGES,&t->root_properties);
     if(!((Init)(base+0x682869))(&t->root,0,0)) return 0;
     for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++) {
         if(!((Select)(base+0x682e59))(&t->fields[f],specs[f].maximum-specs[f].initial+1))
@@ -127,8 +137,21 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
     }
     return 1;
 }
+int native_adjust_add_look(NativeAdjustTree *t,uint32_t title) {
+    if(!t || !title || t->root.parent || (t->mode.count<2||t->mode.count>=NATIVE_ADJUST_MODES) ||
+       t->mode.children!=t->mode_ptrs || t->mode.vtable!=t->node_vtable+2) return 0;
+    unsigned index=(unsigned)t->mode.count;
+    NativeAdjustProperty *p=t->mode_value_props[index];
+    for(unsigned i=0;i<6;i++)p[i]=t->mode_value_props[1][i];
+    p[0].value=title;p[4].value=p[5].value=index;
+    t->mode_value_properties[index]=(NativeAdjustProperties){p,5};
+    construct(t,&t->mode_values[index],0,0,&t->mode_value_properties[index]);
+    t->mode_ptrs[index]=&t->mode_values[index];t->mode.count=(int)index+1;
+    return 1; /* The subsequent Save append deep-initializes all children. */
+}
 int native_adjust_add_save(NativeAdjustTree *t,uint32_t title) {
-    if(!t || !title || t->root.parent || t->root.count!=2 || t->pages[1].count!=3 ||
+    if(!t || !title || t->root.parent || t->root.count!=NATIVE_ADJUST_PAGES ||
+       t->pages[NATIVE_ADJUST_PAGES-1].count!=NATIVE_ADJUST_FIELDS+1-6*(NATIVE_ADJUST_PAGES-1) ||
        t->root.children!=t->page_ptrs || t->root.vtable!=t->node_vtable+2) return 0;
     NativeAdjustProperty *p=t->save_props;
     prop(p+0,0,0,title);prop(p+1,6,0,0);prop(p+2,0xb,1,2);
@@ -136,7 +159,7 @@ int native_adjust_add_save(NativeAdjustTree *t,uint32_t title) {
     t->save_properties=(NativeAdjustProperties){p,4};
     construct(t,&t->save,0,0,&t->save_properties);
     t->field_ptrs[NATIVE_ADJUST_FIELDS+1]=&t->save;
-    t->pages[1].count=4;
+    t->pages[NATIVE_ADJUST_PAGES-1].count++;
     if(!initialize(&t->root,0,0,t->root.depth)) return 0;
     if(!((Select)(t->caution_base+0x682e59))(&t->mode,t->current_mode+1)) return 0;
     for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++)
@@ -152,35 +175,35 @@ int native_adjust_save_title(NativeAdjustTree*t,uint32_t title) {
 }
 int native_adjust_encode(const NativeAdjustTree*t,int id,int value,int*out) {
     if(!t||!out)return 0;
-    if(id==0x7000) {if(value!=0&&value!=1)return 0;*out=value;return 1;}
-    unsigned f=(unsigned)(id-NATIVE_ADJUST_ID_FIRST);if(f>=NATIVE_ADJUST_FIELDS)return 0;
+    if(id==0x7000) {if(value<0||value>=t->mode.count)return 0;*out=value;return 1;}
+    unsigned f=native_adjust_field_index(id);if(f>=NATIVE_ADJUST_FIELDS)return 0;
     if(value<t->specs[f].minimum||value>t->specs[f].maximum)return 0;
     *out=value-t->specs[f].minimum;return 1;
 }
 int native_adjust_decode(const NativeAdjustTree*t,int id,int encoded,int*out) {
     if(!t||!out)return 0;
-    if(id==0x7000) {if(encoded!=0&&encoded!=1)return 0;*out=encoded;return 1;}
-    unsigned f=(unsigned)(id-NATIVE_ADJUST_ID_FIRST);if(f>=NATIVE_ADJUST_FIELDS)return 0;
+    if(id==0x7000) {if(encoded<0||encoded>=t->mode.count)return 0;*out=encoded;return 1;}
+    unsigned f=native_adjust_field_index(id);if(f>=NATIVE_ADJUST_FIELDS)return 0;
     if(encoded<0||encoded>t->specs[f].maximum-t->specs[f].minimum)return 0;
     *out=encoded+t->specs[f].minimum;return 1;
 }
 int native_adjust_read(const NativeAdjustTree *t,int process_id,int *value) {
     if(t && value && process_id==0x7000) {*value=t->current_mode;return 1;}
-    unsigned f=(unsigned)(process_id-NATIVE_ADJUST_ID_FIRST);
+    unsigned f=native_adjust_field_index(process_id);
     if(!t || !value || f>=NATIVE_ADJUST_FIELDS) return 0;
     *value=t->current[f];return 1;
 }
 int native_adjust_write(NativeAdjustTree *t,int process_id,int value,
                         int (*apply)(void *,unsigned,int),void *ctx) {
     if(process_id==0x7000) {
-        if(!t || !apply || (value!=0 && value!=1)) return 0;
+        if(!t || !apply || value<0 || value>=t->mode.count) return 0;
         if(value==t->current_mode)
             return ((Select)(t->caution_base+0x682e59))(&t->mode,value+1);
         if(!apply(ctx,NA_MODE,value)) return 0;
         t->current_mode=value;
         return ((Select)(t->caution_base+0x682e59))(&t->mode,value+1);
     }
-    unsigned f=(unsigned)(process_id-NATIVE_ADJUST_ID_FIRST);
+    unsigned f=native_adjust_field_index(process_id);
     if(!t || f>=NATIVE_ADJUST_FIELDS || !(t->enabled_mask&(1u<<f)) || !apply) return 0;
     if(value<t->specs[f].minimum || value>t->specs[f].maximum) return 0;
     if(value==t->current[f])

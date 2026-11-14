@@ -6,6 +6,9 @@ typedef int (*native_set)(void *, int, int);
 typedef int (*native_action)(void *, int);
 
 static int custom(int id) {
+#ifdef A7_FL_FILM_CONTROLS
+    if(id>=0x700a&&id<=0x700e)return 1;
+#endif
     return id >= A7_MENU_PROCESS_FIRST && id <= A7_MENU_PROCESS_LAST;
 }
 
@@ -33,7 +36,7 @@ static int menu_action(void *manager, int id) {
 
 int a7_menu_bind_action(a7_menu_model *m, int id, a7_menu_action action) {
     if (!m || bound != m || !m->manager || !action ||
-        id <= A7_MENU_PROCESS_LAST || id > 0x7fff ||
+        id <= A7_MENU_PROCESS_LAST || id > 0x7fff || custom(id) ||
         *(uintptr_t **)m->manager != m->table + 2) return -1;
     if (!m->before[0x54 / 4]) return -2;
     m->action_id = id;

@@ -71,6 +71,41 @@ def adjusted_lut(base,codec,parameters):
     return bytes(result)
 
 
+@lru_cache(maxsize=2)
+def reference_model(leica=False):
+    return json.loads((ROOT/('recipes/leica-film-inspired.json' if leica else 'recipes/fl2-reference-srgb.json')).read_text())['reference_ycc_q10']
+
+
+@lru_cache(maxsize=8)
+def cinema_base(base,codec,leica=False):
+    """Exact host equivalent of the native FL2-inspired table generation."""
+    signed=lambda v:v if v<128 else v-256
+    clamp=lambda v,lo,hi:min(max(v,lo),hi)
+    result=bytearray(adjusted_lut(base,codec,(0,0,0,0,0)))
+    expand=struct.unpack('<129H',codec[:258]);compress=codec[258:]
+    model=reference_model(leica)
+    for offset in range(81):
+        previous=0
+        for a in range(5):
+            i=a*81+offset
+            y=clamp(a*64+signed(base[i]),0,256)
+            code=[signed(base[i+(p+1)*405]) for p in range(2)]
+            compressed=[clamp((b-4)*32+(c*3//4),-128,128) for b,c in zip(divmod(offset,9),code)]
+            cb,cr=[(-1 if c<0 else 1)*expand[abs(c)] for c in compressed]
+            k=min(y//32,7);f=y-k*32
+            weights=(512,cb,cr,round_div(cb*cb,512),round_div(cr*cr,512))
+            delta=[round_div(sum(w*(q[k][p]*(32-f)+q[k+1][p]*f) for w,q in zip(weights,model)),512*32)
+                   for p in range(3)]
+            v=clamp(y+round_div(delta[0],4),0,256)
+            previous=clamp(clamp(v,a*64-64,a*64+63),previous,256)
+            result[i]=(previous-a*64)&255
+            for p,linear in enumerate((cb,cr)):
+                x=linear+delta[p+1]
+                mapped=(-1 if x<0 else 1)*compress[min(abs(x),512)]
+                result[i+(p+1)*405]=clamp(code[p]+round_div((mapped-compressed[p])*4,3),-64,63)&255
+    return bytes(result)
+
+
 @lru_cache(maxsize=4)
 def capture_control_base(stock,legacy,table):
     """Independent host equivalent of the r5 bounded CAP projection."""
@@ -95,8 +130,11 @@ def capture_control_base(stock,legacy,table):
     return bytes(base),tuple(bounds)
 
 
-def adjusted_capture(stock,legacy,table,codec,parameters):
+def adjusted_capture(stock,legacy,table,codec,parameters,preset=1):
     base,bounds=capture_control_base(stock,legacy,table)
+    if preset in (2,3):
+        signed_stock=bytes(((v&127)-128 if v&64 else v&127)&255 for v in stock[:1215])+stock[1215:]
+        base=cinema_base(signed_stock,codec,preset==3)
     result=bytearray(adjusted_lut(base,codec,parameters))
     for i,(low,high) in enumerate(bounds):
         value=result[i] if result[i]<128 else result[i]-256
@@ -104,25 +142,31 @@ def adjusted_capture(stock,legacy,table,codec,parameters):
     return bytes(result)
 
 
-def decode_preference(raw,original_sha,build=BUILD_ID):
+def decode_preference(raw,original_sha,build=BUILD_ID,*,dual_look=False,leica_look=False):
     if raw is None:return dict(state='absent')
     error=None
     if len(raw)!=128:error='length'
-    elif raw[:8]!=b'A7FLP001' or struct.unpack_from('<I',raw,8)[0]!=128 or struct.unpack_from('<I',raw,16)[0]!=1:error='format'
+    elif raw[:8]!=b'A7FLP001' or struct.unpack_from('<I',raw,8)[0]!=128 or struct.unpack_from('<I',raw,16)[0] not in (1,2,3):error='format'
     elif raw[56:88].hex()!=original_sha or raw[88:112]!=build+bytes(24-len(build)):error='identity'
-    elif any(raw[116:124]) or struct.unpack_from('<I',raw,124)[0]!=zlib.crc32(raw[:124]):error='checksum/reserved'
+    elif (struct.unpack_from('<I',raw,16)[0]!=2 and any(raw[116:124])) or struct.unpack_from('<I',raw,124)[0]!=zlib.crc32(raw[:124]):error='checksum/reserved'
     if error:return dict(state='invalid',reason=error,size=len(raw),sha256=sha(raw))
-    generation,_,enabled=struct.unpack_from('<3I',raw,12)
-    parameters=list(struct.unpack_from('<8i',raw,24))
-    if not generation or enabled not in (0,1) or any(not LOW[i]<=v<=HIGH[i] for i,v in enumerate(parameters)):
+    generation,schema,enabled=struct.unpack_from('<3I',raw,12)
+    parameters=list(struct.unpack_from('<8b' if schema==3 else '<8i',raw,24))
+    if not generation or enabled not in range(4 if leica_look else 3 if dual_look else 2) or any(not LOW[i]<=v<=HIGH[i] for i,v in enumerate(parameters)):
         return dict(state='invalid',reason='values',size=len(raw),sha256=sha(raw))
-    return dict(state='valid',generation=generation,enabled=enabled,parameters=parameters,
+    if (enabled==3 and schema!=3) or (schema==3 and any(raw[48:56])):return dict(state='invalid',reason='schema3-values',size=len(raw),sha256=sha(raw))
+    other=list(struct.unpack_from('<8b',raw,32 if schema==3 else 116)) if schema>=2 else None
+    if other is not None and any(not LOW[i]<=v<=HIGH[i] for i,v in enumerate(other)):
+        return dict(state='invalid',reason='bank-values',size=len(raw),sha256=sha(raw))
+    third=list(struct.unpack_from('<8b',raw,40)) if schema==3 else None
+    if third is not None and any(not LOW[i]<=v<=HIGH[i] for i,v in enumerate(third)):return dict(state='invalid',reason='third-bank-values',size=len(raw),sha256=sha(raw))
+    return dict(state='valid',third_parameters=third,generation=generation,enabled=enabled,parameters=parameters,schema=schema,other_parameters=other,
                 candidate_crc32=struct.unpack_from('<I',raw,112)[0],sha256=sha(raw))
 
 
-def select_preferences(raw,original_sha):
+def select_preferences(raw,original_sha,*,dual_look=False,leica_look=False):
     require(len(raw)==2,'Exactly two preference slots are required.')
-    slots=[decode_preference(value,original_sha) for value in raw]
+    slots=[decode_preference(value,original_sha,dual_look=dual_look,leica_look=leica_look) for value in raw]
     valid=[i for i,p in enumerate(slots) if p['state']=='valid']
     if len(valid)==2 and slots[0]['generation']==slots[1]['generation'] and raw[0]!=raw[1]:
         return dict(state='conflicting',selected=None,slots=slots)
@@ -131,7 +175,7 @@ def select_preferences(raw,original_sha):
     return dict(state='valid',selected=chosen,slots=slots,preference=slots[chosen])
 
 
-def decode_report(raw,expected_symbols=None):
+def decode_report(raw,expected_symbols=None,*,dual_look=False,leica_look=False):
     require(len(raw) in (148,184),'Unexpected resident report length.')
     values=struct.unpack_from('<IIi4Ii3I',raw)
     names=('magic','version','status','view_base','module_base','bootstrap_symbol','runtime_symbol',
@@ -163,7 +207,7 @@ def decode_report(raw,expected_symbols=None):
     runtime['parameters']=list(values[9:])
     require(bootstrap['version'] in (0,1) and bootstrap['ready'] in (0,1) and
             all(runtime[k] in (0,1) for k in ('prepared','installed','fault','dirty','runtime_ready')) and
-            runtime['parents']<=8 and runtime['mode'] in (-2,-1,0,1), 'Resident status fields are invalid.')
+            runtime['parents']<=8 and runtime['mode'] in range(-2,4 if leica_look else 3 if dual_look else 2), 'Resident status fields are invalid.')
     if runtime['runtime_ready']:
         require(all(LOW[i]<=v<=HIGH[i] for i,v in enumerate(runtime['parameters'])), 'Resident controls out of range.')
     state=('unstable' if not header['stable'] else 'probe-error' if header['dlclose_result'] else
@@ -235,6 +279,8 @@ class Profile:
                 sha(self.base)==p['base_fl_sha256'] and sha(self.codec)==p['codec_sha256'] and
                 p['build'].encode()==BUILD_ID and p['original_sha256']==sha(self.original[0]),'Private diagnostic data identity mismatch.')
         self.original_sha=sha(self.original[0])
+        self.leica_look=json.loads(module_proof.read_text()).get('leica_look') is True
+        self.dual_look=json.loads(module_proof.read_text()).get('dual_look') is True
         self.capture=capture_candidates(capture_proof,json.loads(module_proof.read_text()),self.original)
         self.capture_controls=json.loads(module_proof.read_text()).get('capture_look',{}).get('dynamic_capture_controls') is True
         module=ELF(module_path)
@@ -248,16 +294,16 @@ class Profile:
 
 def observations(profile,report,prefs,tables):
     require(len(tables)==4 and all(len(t)==1280 for t in tables),'Four complete LUT reads required.')
-    selection=select_preferences(prefs,profile.original_sha)
+    selection=select_preferences(prefs,profile.original_sha,dual_look=getattr(profile,'dual_look',False),leica_look=getattr(profile,'leica_look',False))
     candidate=None
     if selection['selected'] is not None:
-        p=selection['preference'];candidate=adjusted_lut(profile.base,profile.codec,p['parameters'][:5])
+        p=selection['preference'];candidate=adjusted_lut(cinema_base(profile.original[0],profile.codec,p['enabled']==3) if p['enabled'] in (2,3) else profile.base,profile.codec,p['parameters'][:5])
         selection['candidate_crc_matches']=zlib.crc32(candidate)==p['candidate_crc32']
     runtime=report['runtime'];expected=None
     if (report['header']['status']==1 and report['header']['stable'] and not report['header']['dlclose_result'] and
             runtime and runtime['runtime_ready'] and not runtime['fault']):
         if runtime['mode']==0:expected=profile.original[0]
-        elif runtime['mode']==1:expected=adjusted_lut(profile.base,profile.codec,runtime['parameters'][:5])
+        elif runtime['mode'] in (1,2,3):expected=adjusted_lut(cinema_base(profile.original[0],profile.codec,runtime['mode']==3) if runtime['mode'] in (2,3) else profile.base,profile.codec,runtime['parameters'][:5])
     capture=profile.capture
     table_states=[];capture_matches=[]
     for i,(actual,original) in enumerate(zip(tables,profile.original)):
@@ -269,7 +315,7 @@ def observations(profile,report,prefs,tables):
         record=dict(property=f'{key:08x}',state=state,sha256=sha(actual))
         if key in capture:
             dynamic=getattr(profile,'capture_controls',False)
-            target=adjusted_capture(original,capture[key],key-0x30005,profile.codec,runtime['parameters'][:5]) if dynamic and expected is not None else capture[key]
+            target=adjusted_capture(original,capture[key],key-0x30005,profile.codec,runtime['parameters'][:5],runtime['mode']) if dynamic and expected is not None else capture[key]
             record['state']=('adjustable-capture-FL' if dynamic else 'fixed-capture-FL') if actual==target else state
             record['matches_runtime']=None if expected is None else actual==(target if runtime['mode'] else original)
             capture_matches.append(record['matches_runtime'])
@@ -300,7 +346,7 @@ def inspect_camera(camera,profile,evidence,report_only=False):
     module=factory.contents('/usr/lib/a7fl.so')
     require(sha(module)==profile.module_record['sha256'],'Installed module differs from attested artifact.')
     raw=factory.run(profile.payload,'a7status.bin');save(evidence/'resident.bin',raw)
-    result=decode_report(raw,profile.symbols)
+    result=decode_report(raw,profile.symbols,dual_look=profile.dual_look,leica_look=profile.leica_look)
     if not report_only:
         prefs=[]
         for index,path in enumerate(PREFERENCES):
@@ -343,7 +389,7 @@ def main():
                               module_sha256=profile.module_record['sha256'],
                               capture_properties=[hex(key) for key in profile.capture]),indent=2));return 0
     if args.decode:
-        result=decode_report(args.decode.read_bytes(),profile.symbols);result['camera_contacted']=False
+        result=decode_report(args.decode.read_bytes(),profile.symbols,dual_look=profile.dual_look,leica_look=profile.leica_look);result['camera_contacted']=False
         print(json.dumps(result,indent=2));return 0
     evidence=args.probe.resolve()/f'read-{time.time_ns()}';evidence.mkdir(mode=0o700)
     save(evidence/'probe-proof.json',profile.proof_path.read_bytes())

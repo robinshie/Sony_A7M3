@@ -24,10 +24,38 @@ static const char temporary[]=".a7fl-r7.new",backup[]=".a7fl-25d5f6f1.orig",logn
 static const char temporary[]=".a7fl-r8.new",backup[]=".a7fl-74d1df6c.orig",logname[]="A7FLUP8.LOG";
 #elif NMR_REVISION == 9
 static const char temporary[]=".a7fl-r9.new",backup[]=".a7fl-a332915e.orig",logname[]="A7FLUP9.LOG";
+#elif NMR_REVISION == 10
+static const char temporary[]=".a7fl-r10.new",backup[]=".a7fl-c2a8c2b9.orig",logname[]="A7FLUP10.LOG";
+#elif NMR_REVISION == 11
+static const char temporary[]=".a7fl-r11.new",backup[]=".a7fl-ff537349.orig",logname[]="A7FLUP11.LOG";
+#elif NMR_REVISION == 12
+static const char temporary[]=".a7fl-r12.new",backup[]=".a7fl-70e12df5.orig",logname[]="A7FLUP12.LOG";
+#elif NMR_REVISION == 1201
+static const char temporary[]=".a7fl3-zh.new",backup[]=".a7fl3-zh.orig",logname[]="A7FL3ZH.LOG";
+#elif NMR_REVISION == 1202
+static const char temporary[]=".a7fl3-en.new",backup[]=".a7fl3-en.orig",logname[]="A7FL3EN.LOG";
+#elif NMR_REVISION == 1101
+static const char temporary[]=".a7fl2-zh.new",backup[]=".a7fl2-zh.orig",logname[]="A7FL2ZH.LOG";
+#elif NMR_REVISION == 1102
+static const char temporary[]=".a7fl2-en.new",backup[]=".a7fl2-en.orig",logname[]="A7FL2EN.LOG";
+#elif NMR_REVISION == 14
+static const char temporary[]=".a7fl-r14.new",backup[]=".a7fl-79772dfc.orig",logname[]="A7FLUP14.LOG";
+#elif NMR_REVISION == 13
+static const char temporary[]=".a7fl-r13.new",backup[]=".a7fl-b83d38c9.orig",logname[]="A7FLUP13.LOG";
+#elif NMR_REVISION == 1301
+static const char temporary[]=".a7curve-zh.new",backup[]=".a7curve-zh.orig",logname[]="A7CURVEZH.LOG";
+#elif NMR_REVISION == 1302
+static const char temporary[]=".a7curve-en.new",backup[]=".a7curve-en.orig",logname[]="A7CURVEEN.LOG";
 #else
 #error Unsupported module replacement revision
 #endif
-static const char current[]="a7fl.so";
+#if NMR_REVISION == 1101 || NMR_REVISION == 1201 || NMR_REVISION == 1301
+static const char current[]="string_simplifiedchinese.uxc",directory[]="/usr/share/app";
+#elif NMR_REVISION == 1102 || NMR_REVISION == 1202 || NMR_REVISION == 1302
+static const char current[]="string_english.uxc",directory[]="/usr/share/app";
+#else
+static const char current[]="a7fl.so",directory[]="/usr/lib";
+#endif
 static volatile unsigned busy;
 typedef struct {uint64_t dev,ino;uint32_t size,links,mode;} File;
 typedef struct {const NMRBundle*b;NMRCall call;void*ctx;NMRReport*r;int lib,setting,log,rw;unsigned sequence,temp_old;
@@ -59,7 +87,7 @@ static int hashfd(Work*w,int fd,unsigned size,const unsigned char expected[32]){
 static int named(const char*a,const char*b){while(*a&&*a==*b){a++;b++;}return *a==*b;}
 static int file(Work*w,int dir,const char*name,unsigned size,const unsigned char hash[32],unsigned links,const File*expected,File*out){
  int fd=(int)sc(w,OPENAT,dir,(long)name,NOFOLLOW|NONBLOCK,0,0,0);if(fd<0)return 0;File a,b;
- unsigned original=named(name,"viewUnified2.so"),uid=original?57285:0,gid=original?1000:0;
+ unsigned original=named(name,"/usr/lib/viewUnified2.so"),uid=original?57285:0,gid=original?1000:0;
  int ok=statfd(w,fd,&a,uid,gid)&&(a.mode&0xf000)==0x8000&&a.links==links&&a.size==size&&(!expected||ident(&a,expected))&&hashfd(w,fd,size,hash)&&statfd(w,fd,&b,uid,gid)&&ident(&a,&b)&&a.size==b.size&&a.links==b.links;
  if(!closefd(w,fd))ok=0;if(ok&&out)*out=a;return ok;}
 static int writeall(Work*w,int fd,const void*p,unsigned size){const unsigned char*s=p;while(size){long n=sc(w,WR,fd,(long)s,size,0,0,0);if(n<=0||(unsigned)n>size)return 0;s+=n;size-=(unsigned)n;}return 1;}
@@ -83,11 +111,11 @@ static int preflight(Work*w,NMRIdentity identity,void*ctx){
  w->r->phase=1004;fd=(int)sc(w,OPEN,(long)"/dev/nflasha15",0,0,0,0,0);if(fd<0)return 0;int ro=-1;ok=sc(w,IOCTL,fd,0x125e,(long)&ro,0,0,0)==0&&ro==0;if(!closefd(w,fd))ok=0;if(!ok)return 0;
  w->r->phase=1005;if(sc(w,STATFS,(long)"/usr",(long)stat,0,0,0,0)||stat[0]!=0xef53||stat[1]!=1024||!(stat[11]&1)||stat[6]<1||stat[4]<(w->b->new_size+1023)/1024+32)return 0;
  w->r->phase=1006;
- w->lib=(int)sc(w,OPEN,(long)"/usr/lib",DIRECTORY|NOFOLLOW,0,0,0,0);if(w->lib<0)return 0;
+ w->lib=(int)sc(w,OPEN,(long)directory,DIRECTORY|NOFOLLOW,0,0,0,0);if(w->lib<0)return 0;
  w->setting=(int)sc(w,OPEN,(long)"/setting",DIRECTORY|NOFOLLOW,0,0,0,0);if(w->setting<0)return 0;
  File d;if(!statfd(w,w->lib,&d,57285,1000)||(d.mode&0xf000)!=0x4000||!statfd(w,w->setting,&d,0,0)||(d.mode&0xf000)!=0x4000)return 0;
  w->r->phase=1007;if(!file(w,w->lib,current,w->b->old_size,w->b->old_sha,1,0,&w->old))return 0;
- w->r->phase=1008;if(!file(w,w->lib,"viewUnified2.so",w->b->view_size,w->b->view_sha,1,0,0))return 0;
+ w->r->phase=1008;if(!file(w,w->lib,"/usr/lib/viewUnified2.so",w->b->view_size,w->b->view_sha,1,0,0))return 0;
  w->r->phase=1009;return absent(w,w->lib,temporary)&&absent(w,w->lib,backup)&&absent(w,w->setting,logname);
 }
 static int unlink_owned_temp(Work*w){
@@ -116,7 +144,12 @@ int nmr_run(const NMRBundle*b,const unsigned char expected[32],NMRCall call,void
  if(b->version!=NMR_REVISION||(write!=0&&write!=1)||!b->new_bytes||b->old_size<52||b->old_size>1048576||b->new_size<52||b->new_size>1048576||
     b->view_size<4096||b->view_size>16*1048576||!same(expected,r->binding,32)||same(b->old_sha,b->new_sha,32)||!any(b->new_proof_sha,32))goto done;
  sha_update(&h,b->new_bytes,b->new_size);sha_finish(&h,sum);
- if(!same(sum,b->new_sha,32)||!same(b->new_bytes,"\177ELF\1\1\1",7)||!same(b->new_bytes+16,"\3\0\50\0",4))goto done;
+ if(!same(sum,b->new_sha,32))goto done;
+#if NMR_REVISION == 1101 || NMR_REVISION == 1102 || NMR_REVISION == 1201 || NMR_REVISION == 1202 || NMR_REVISION == 1301 || NMR_REVISION == 1302
+ if(!same(b->new_bytes,"uxc\7\0\0\0\0\17\0\47\0",12))goto done;
+#else
+ if(!same(b->new_bytes,"\177ELF\1\1\1",7)||!same(b->new_bytes+16,"\3\0\50\0",4))goto done;
+#endif
  if(!preflight(&w,identity,idctx))goto done;r->phase=1;if(!write){success=1;goto done;}
  w.log=(int)sc(&w,OPENAT,w.setting,(long)logname,1|CREAT|EXCL|NOFOLLOW|NONBLOCK,0600,0,0);if(w.log<0)goto done;
  if(!journal(&w,1)||sc(&w,SYNC,w.setting,0,0,0,0,0)||!remount(&w,0))goto done;w.rw=1;r->readonly_confirmed=0;
@@ -132,7 +165,7 @@ int nmr_run(const NMRBundle*b,const unsigned char expected[32],NMRCall call,void
  if(!file(&w,w.lib,current,b->old_size,b->old_sha,2,&w.old,0)||!file(&w,w.lib,temporary,b->new_size,b->new_sha,1,&w.new_file,0)||!journal(&w,40)||
     sc(&w,RENAMEAT,w.lib,(long)temporary,w.lib,(long)current,0,0))goto fail;r->created=0;r->published=1;
  if(sc(&w,SYNC,w.lib,0,0,0,0,0)||!journal(&w,41)||!file(&w,w.lib,current,b->new_size,b->new_sha,1,&w.new_file,0)||
-    !file(&w,w.lib,backup,b->old_size,b->old_sha,1,&w.old,0)||!file(&w,w.lib,"viewUnified2.so",b->view_size,b->view_sha,1,0,0)||!journal(&w,60))goto fail;
+    !file(&w,w.lib,backup,b->old_size,b->old_sha,1,&w.old,0)||!file(&w,w.lib,"/usr/lib/viewUnified2.so",b->view_size,b->view_sha,1,0,0)||!journal(&w,60))goto fail;
  success=1;goto restore;
 fail:r->rollback_ok=rollback(&w);journal(&w,90);
 restore:if(remount(&w,1)&&mount_is(&w,1)){r->readonly_confirmed=1;w.rw=0;}else{success=0;r->status=-4;}

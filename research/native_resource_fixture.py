@@ -27,7 +27,11 @@ def main():
     p.add_argument('--usr',required=True,type=Path)
     p.add_argument('--before',type=Path,default=ROOT/'.lab/creative-icons-belt')
     p.add_argument('--after',type=Path,default=ROOT/'.lab/native-fl-strings')
+    p.add_argument("--fl2",action="store_true")
+    p.add_argument("--fl3",action="store_true")
+    p.add_argument('--fl3-curves',action='store_true')
     args=p.parse_args()
+    if sum((args.fl2,args.fl3,args.fl3_curves))>1:p.error("Select one resource extension")
     elf=ELF(args.usr/'lib/libObj.so')
     if sha(elf.data)!=OBJ_SHA:p.error('Unexpected libObj.so SHA-256')
     proof=json.loads((args.after/'proof.json').read_text())
@@ -37,9 +41,15 @@ def main():
               ('contrast','对比度','Contrast'),('highlights','高光','Highlights'),
               ('shadows','阴影','Shadows'),('fade','褪色','Fade'),('saturation','饱和度','Saturation'),
               ('sharpness','锐度','Sharpness'),('range','锐度范围','Sharpness Range'),('clarity','清晰度','Clarity')]
-    if proof['resources']!={name:0x0204fd9e+i for i,(name,_,_) in enumerate(expected)}:
+    if args.fl2:expected=[('fl2','FL2','FL2')]
+    if args.fl3:expected=[('fl3','FL3（徕卡胶片）','FL3 (Leica Film)')]
+    if args.fl3_curves:
+        from native_fl_curve_strings import KEYS, LABELS
+        expected=[(key,*labels) for key,labels in zip(KEYS,LABELS)]
+    first=7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
+    if proof['resources']!={name:0x0204e000+first+i for i,(name,_,_) in enumerate(expected)}:
         p.error('Unexpected resource assignment')
-    out=ROOT/'.lab/native-resource';out.mkdir(parents=True,exist_ok=True)
+    out=ROOT/('.lab/native-resource-fl3-curves' if args.fl3_curves else '.lab/native-resource-fl3' if args.fl3 else '.lab/native-resource-fl2' if args.fl2 else '.lab/native-resource');out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
     asm='.syntax unified\n';sections=[];parts=[]
     for va,size,name in PIECES:
@@ -48,7 +58,7 @@ def main():
         parts.append({'va':hex(va),'bytes':size,'sha256':sha(data)})
     asm+='.section .native_log,"ax"\n.arm\nldr ip, [pc, #0]\nbx ip\n.word unexpected_log\n'
     sections.append((0x1077a8,'.native_log'))
-    metadata=[];header='#include <stdint.h>\n'
+    metadata=[];header=f'#include <stdint.h>\n#define RESOURCE_OLD_COUNT {first}u\n#define RESOURCE_ADDED {len(expected)}u\n'
     for column,language in enumerate(('simplifiedchinese','english')):
         name=f'string_{language}.uxc';sizes=[]
         for state,folder in [('before',args.before),('after',args.after)]:
@@ -60,7 +70,7 @@ def main():
             header+=f'extern unsigned char {symbol}[];\n'
         metadata.append({'file':name,'before_sha256':proof['files'][name]['before_sha256'],'after_sha256':proof['files'][name]['after_sha256'],'before_bytes':sizes[0],'after_bytes':sizes[1]})
         header+=f'static const unsigned resource_sizes_{column}[2]={{{sizes[0]},{sizes[1]}}};\n'
-        header+=f'static const char *resource_labels_{column}[10]={{\n'
+        header+=f'static const char *resource_labels_{column}[{len(expected)}]={{\n'
         for row in expected:
             # Unambiguous UTF-8 octets; no execution or shell interpolation.
             header+='"'+''.join('\\%03o'%b for b in row[column+1].encode('utf-8'))+'",\n'
@@ -79,7 +89,7 @@ def main():
     if 'NATIVE_RESOURCE_TESTS_PASSED' not in run.stdout or 'FAIL' in run.stdout:raise ValueError('Native UXC parser rejected expanded resource')
     report={'libobj_sha256':OBJ_SHA,'native_components':parts,'locales':metadata,
             'input_proof_sha256':sha((args.after/'proof.json').read_bytes()),
-            'source_sha256':{n:sha((ROOT/'research'/n).read_bytes()) for n in ('native_resource_fixture.py','native_resource_harness.c')},
+            'source_sha256':{('research/'+n if args.fl2 or args.fl3 or args.fl3_curves else n):sha((ROOT/'research'/n).read_bytes()) for n in ('native_resource_fixture.py','native_resource_harness.c')},
             'scope':'Original Sony v7 header validation, count/index/data-base extraction, mixed short/long record lookup and record ID/type; all prior entries compared, every new UTF-8 label exact. No OS file loader/cache/font/LCD/camera validation.',
             'flash_ready':False,'log':run.stdout.splitlines()}
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')

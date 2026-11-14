@@ -17,12 +17,32 @@ REVISIONS={1:dict(old_sha=OLD,old_size=42208,temporary='.a7fl-r1.new',backup='.a
            6:dict(old_sha='62c85626243e7009d78999ab16568163e9186934ccd820b70c7b3ea08ff7b5d0',old_size=55420,temporary='.a7fl-r6.new',backup='.a7fl-62c85626.orig',journal='A7FLUP6.LOG'),
            7:dict(old_sha='25d5f6f1f428cfbd92cae46be496b407eb746fbe06a4120215f5f2b87d508f31',old_size=60744,temporary='.a7fl-r7.new',backup='.a7fl-25d5f6f1.orig',journal='A7FLUP7.LOG'),
            8:dict(old_sha='74d1df6c73ebd7d056ce741a28e3f459fdf2e7c5ac29063527e18b7111a64703',old_size=63524,temporary='.a7fl-r8.new',backup='.a7fl-74d1df6c.orig',journal='A7FLUP8.LOG'),
-           9:dict(old_sha='a332915e7cd4c5753df843480779f21b1d05941504f814a6cd438892ec86b865',old_size=65392,temporary='.a7fl-r9.new',backup='.a7fl-a332915e.orig',journal='A7FLUP9.LOG')}
+           9:dict(old_sha='a332915e7cd4c5753df843480779f21b1d05941504f814a6cd438892ec86b865',old_size=65392,temporary='.a7fl-r9.new',backup='.a7fl-a332915e.orig',journal='A7FLUP9.LOG'),
+           10:dict(old_sha='c2a8c2b9fc03b90c7695a775d6d14cd1813ebe38ca2f6924fef36dc9299fa5cc',old_size=67740,temporary='.a7fl-r10.new',backup='.a7fl-c2a8c2b9.orig',journal='A7FLUP10.LOG'),
+           11:dict(old_sha='ff53734912f9a80a720de7105d4ef97a8166f5a1b9b70ab8009cb16b122396eb',old_size=74176,temporary='.a7fl-r11.new',backup='.a7fl-ff537349.orig',journal='A7FLUP11.LOG'),
+           1101:dict(old_sha='980b77f7a7d08963976b724b958525d0b99e0f5e70a01552f3116dd3b1b014c1',old_size=350176,temporary='.a7fl2-zh.new',backup='.a7fl2-zh.orig',journal='A7FL2ZH.LOG',locale='string_simplifiedchinese.uxc'),
+           1102:dict(old_sha='8b4772b88ad655c0b866924ce0876d79d8400d3fc558c9350c28c58a05adf196',old_size=392884,temporary='.a7fl2-en.new',backup='.a7fl2-en.orig',journal='A7FL2EN.LOG',locale='string_english.uxc'),
+           12:dict(old_sha='70e12df533ecd928f3c9f48231622e112ac0acaae698a737ae93e314895372b2',old_size=75148,temporary='.a7fl-r12.new',backup='.a7fl-70e12df5.orig',journal='A7FLUP12.LOG'),
+           1201:dict(old_sha='c992cd53f905df46f98d13800d4f899c93d9e4e50cf2e35135d8e6f557ec006b',old_size=350188,temporary='.a7fl3-zh.new',backup='.a7fl3-zh.orig',journal='A7FL3ZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='fl3'),
+           1202:dict(old_sha='d3c4bb0a71e4355d3bf394a14543abc850f76eccb0ec72e0c64f31f97f41f9ef',old_size=392896,temporary='.a7fl3-en.new',backup='.a7fl3-en.orig',journal='A7FL3EN.LOG',locale='string_english.uxc',resource_set='fl3')}
+REVISIONS.update({13: {'old_sha': 'b83d38c9867d50b3345b72813879b73b6659e375c36625a6f68e90d64bb493f7', 'old_size': 79840, 'temporary': '.a7fl-r13.new', 'backup': '.a7fl-b83d38c9.orig', 'journal': 'A7FLUP13.LOG'}, 1301: {'old_sha': '97de64a708e20121c717d0e362b93215783461ec8d7e5213194f94b487ede245', 'old_size': 350220, 'temporary': '.a7curve-zh.new', 'backup': '.a7curve-zh.orig', 'journal': 'A7CURVEZH.LOG', 'locale': 'string_simplifiedchinese.uxc', 'resource_set': 'fl3-curves'}, 1302: {'old_sha': '83b77a48936f83163d3f9ec20d8dad0c7fbc1681e53096038e599681213c45ed', 'old_size': 392924, 'temporary': '.a7curve-en.new', 'backup': '.a7curve-en.orig', 'journal': 'A7CURVEEN.LOG', 'locale': 'string_english.uxc', 'resource_set': 'fl3-curves'}})
+REVISIONS[14]=dict(old_sha='79772dfce51d90663de65fda7d54ed48bfcbe8c9fd46df7797ca9dcf5be53bbd',old_size=89692,temporary='.a7fl-r14.new',backup='.a7fl-79772dfc.orig',journal='A7FLUP14.LOG')
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
- if revision not in (4,5,6,7,8,9):return
+ if revision in (13,14):
+  if revision==14:require(proof.get("all_look_curves") is True,"All three look curves require integration evidence.")
+  require(proof.get('preference_schema')==4 and proof.get('leica_look') is True and
+          proof.get('independent_look_banks') is True and proof.get('save_confirmation_dialog') is True and
+          proof.get('preview_timed_cycle') is True and proof.get('curve_release_verified') is True,
+          'Curve release requires verified menu, schema migration and recovery.')
+  for key in ('film-worklog/proof.json','film-controls/proof.json',
+              'native-fivepoint-capture-test/proof.json','native-resource-fl3-curves/report.json',
+              'native-adjust-film/integration-proof.json'):
+   require(key in proof.get('dependency_proof_sha256',{}),'Missing curve evidence: '+key)
+  return
+ if revision not in (4,5,6,7,8,9,10,11,12):return
  c=proof.get('capture_look');deps=proof.get('dependency_proof_sha256')
  require(isinstance(c,dict) and isinstance(deps,dict) and proof.get('spatial_settings_only') is True and
          c.get('arm_transaction_verified') is True and c.get('fixed_capture_tables') is (revision==4) and
@@ -44,7 +64,20 @@ def require_capture_release(revision,proof):
   require(proof.get('preview_refresh_request') is True and proof.get('preview_timed_cycle') is True and
           isinstance(deps.get('native-preview-cycle/proof.json'),str),
           'Revision 9 requires the guarded native timer cycle tests.')
+ if revision in (11,12):
+  require(proof.get('independent_look_banks') is True and proof.get('fl2_resource')==0x0204fda8 and
+          isinstance(deps.get('native-resource-fl2/report.json'),str) and
+          all(x in proof.get('artifact_sha256',{}) for x in ('bank-boot.log','module-bank-boot-test.elf')),'Revision 11 requires separate banks and verified FL2 resource.')
+ if revision==12:
+  require(proof.get('leica_look') is True and proof.get('preference_schema')==3 and
+          isinstance(deps.get('native-resource-fl3/report.json'),str) and
+          all(x in proof.get('artifact_sha256',{}) for x in ('leica-boot.log','module-leica-boot-test.elf')),'Revision 12 requires tested FL3 and three-bank cold boot.')
  digest=c.get('source_qemu_proof_sha256')
+ if revision>=10:
+  require(proof.get('dual_look') is True and
+          all(x in proof.get('artifact_sha256',{}) for x in ('qemu.log','cinema-boot.log','module-cinema-boot-test.elf')) and
+          all(x in proof.get('source_sha256',{}) for x in ('payloads/a7-fl-fl2-model.inc','recipes/fl2-reference-srgb.json')),
+          'Revision 10 requires the FL2 model and both-preset integration/boot evidence.')
  require(isinstance(digest,str) and len(digest)==64 and all(x in '0123456789abcdef' for x in digest) and
          digest in deps.values(),'Revision 4 requires its capture QEMU proof as a pinned dependency.')
 def syncdir(p):
@@ -55,12 +88,22 @@ class Bundle:
  def __init__(self,directory):
   self.directory=d=Path(directory).resolve();m=self.manifest=json.loads((d/'manifest.json').read_text());pin_sources(m)
   revision=m['version'];require(revision in REVISIONS and m['kind']==f'native-module-replace-r{revision}','Foreign module replacement binding.');r=REVISIONS[revision]
-  self.temporary='/usr/lib/'+r['temporary'];self.backup='/usr/lib/'+r['backup'];self.journal='/setting/'+r['journal']
+  self.locale=r.get('locale');parent='/usr/share/app/' if self.locale else '/usr/lib/'
+  self.target=parent+(self.locale or 'a7fl.so')
+  self.temporary=parent+r['temporary'];self.backup=parent+r['backup'];self.journal='/setting/'+r['journal']
   require(m['old']==dict(sha256=r['old_sha'],size=r['old_size']) and m['view']==dict(sha256=VIEW_SHA,size=10854816),'Incorrect deployed baseline.')
   proof=d/'module-proof.json';require(file_sha(proof)==m['module_proof_sha256'],'Module proof changed.');p=json.loads(proof.read_text());pin_sources(p)
-  require(p.get('ready_for_staging') is True and p.get('placeholder') is False and p['module_sha256']==m['new']['sha256'],'Unattested module.')
+  if self.locale:
+   resource_set=r.get('resource_set','fl2')
+   resource_path=LAB/f'native-resource-{resource_set}/report.json'
+   require(file_sha(resource_path)==m['resource_proof_sha256'],'Locale parser evidence changed.')
+   resource=json.loads(resource_path.read_text());pin_sources(resource)
+   require(resource['input_proof_sha256']==m['module_proof_sha256'],'Locale parser input changed.')
+   require(p.get('kind')==resource_set+'-additive-locales-v1' and p['files'][self.locale]['after_sha256']==m['new']['sha256'] and p['files'][self.locale]['before_sha256']==r['old_sha'],'Unattested additive locale.')
+  else:
+   require(p.get('ready_for_staging') is True and p.get('placeholder') is False and p['module_sha256']==m['new']['sha256'],'Unattested module.')
   require_capture_release(revision,p)
-  for n,h in p['dependency_proof_sha256'].items():
+  for n,h in p.get('dependency_proof_sha256',{}).items():
    path=(LAB/n).resolve();require(path.is_relative_to(LAB) and file_sha(path)==h,'Dependency changed: '+n);pin_sources(json.loads(path.read_text()))
   core_dir='native-module-replace-test'+('' if revision==1 else f'-r{revision}')
   for n,key in [(core_dir+'/proof.json','core_proof_sha256'),('native-menu-action-tree/proof.json','action_proof_sha256')]:
@@ -102,7 +145,12 @@ def operate(camera,b,operation,evidence,write_device=False):
  require(f.contents('/version.txt')==BUILD_ID and bytes(camera.readBackup(0x3e0005))==b'ILCE-7M3'+bytes(8),'Camera model/build mismatch.')
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
- require_file(f,MODULE,m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
+ require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
+ if m['version'] in (11,12,13,14):
+  resource_set='fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+  resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
+  for name,record in resource['files'].items():
+   require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))
  before=native(f,b,'preflight',e);require(success(before),'Native module preflight rejected; no replacement payload sent.')
  if operation=='preflight':
   result=dict(operation=operation,verified=True,device_firmware_written=False,native_report=before,evidence=str(e));save_json(e/'verified.json',result);syncdir(e);return result
@@ -115,7 +163,7 @@ def operate(camera,b,operation,evidence,write_device=False):
  else:j=None
  syncdir(e);require(success(written,True),'Replacement did not fully verify; inspect retained report/journal, no automatic retry.')
  require(j is not None and j['complete'],'Incomplete replacement transaction journal.')
- require_file(f,MODULE,m['new'],e/'new-module-readback.so');require_file(f,b.backup,m['old'],e/'old-backup-readback.so');require_file(f,VIEW,m['view'],e/'view-after.so')
+ require_file(f,getattr(b,'target',MODULE),m['new'],e/'new-module-readback.so');require_file(f,b.backup,m['old'],e/'old-backup-readback.so');require_file(f,VIEW,m['view'],e/'view-after.so')
  require(f.read(b.temporary)[0]==f.missing,'Temporary candidate remains after replacement.')
  after=zero_wbi(camera,e/'wbi-after')
  require((e/'wbi-before/neighbor.bin').read_bytes()==(e/'wbi-after/neighbor.bin').read_bytes(),'WBI neighbor unexpectedly differs.')

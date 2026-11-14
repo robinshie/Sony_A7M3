@@ -140,6 +140,9 @@ static int prepare(void) {
 #endif
     p->identity=identity;p->event=event;p->readable=span;p->opaque=0;
     a7_fl_posix_io(&p->storage);
+#ifdef A7_FL_FILM_CONTROLS
+    a7_fl_posix_worklog_io(&p->film_storage);
+#endif
     if(!identity(0))return A7_FL_MODULE_WITNESS;
     /* Color startup does not dereference menu/model objects. The menu-specific
      * profile is validated later, at the original SettingMenu construction seam. */

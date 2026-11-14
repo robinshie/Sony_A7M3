@@ -21,9 +21,9 @@ def main():
    f=service.Factory(camera)
    require(f.contents('/version.txt')==b'37114_13.2026020901' and bytes(camera.readBackup(0x3e0005))==b'ILCE-7M3'+bytes(8),'Wrong model/build')
    raw=f.run((out/'probe.so').read_bytes(),'a7mr.bin');(out/'live.bin').write_bytes(raw)
-   require(len(raw)==2348,'Unexpected report size');h=struct.unpack_from('<2I5i2I2i',raw);require(h[:2]==(0x41374d52,1),'Wrong report version')
-   result=dict(zip(('vm_read','vm_invalid','mem_open','mem_read','mem_invalid','vm_matches','mem_matches','kernel_length','meminfo_length'),h[2:]))
-   for name,at,size in (('kernel',44,256),('meminfo',300,2048)):
+   require(len(raw)==10544,'Unexpected report size');h=struct.unpack_from('<2I5i2I3i',raw);require(h[:2]==(0x41374d52,2),'Wrong report version')
+   result=dict(zip(('vm_read','vm_invalid','mem_open','mem_read','mem_invalid','vm_matches','mem_matches','kernel_length','meminfo_length','iomem_length'),h[2:]))
+   for name,at,size in (('kernel',48,256),('meminfo',304,2048),('iomem',2352,8192)):
     n=result[name+'_length'];result[name]=raw[at:at+max(0,min(n,size))].decode('utf8','replace')
    (out/'live.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
   service.perform=collect;previous=handoff.SWITCH;handoff.SWITCH+=' --host-identity-check'

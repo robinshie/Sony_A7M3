@@ -35,11 +35,12 @@ WIDGET_STUBS={0x572c1c:'widget_set_pages',0x572c26:'widget_set_rows',
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--usr',required=True,type=Path)
+    ap.add_argument('--film-curve-menu',action='store_true')
     args=ap.parse_args()
     elf=ELF(args.usr/'lib/CautionConfig.so')
     view=ELF(args.usr/'lib/viewUnified2.so')
     if hashlib.sha256(elf.data).hexdigest()!=SHA: ap.error('Unexpected CautionConfig SHA-256')
-    out=ROOT/'.lab/native-adjust';out.mkdir(parents=True,exist_ok=True)
+    out=ROOT/('.lab/native-adjust-film' if args.film_curve_menu else '.lab/native-adjust');out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
     asm='.syntax unified\n';sections=[];pieces=[]
     for va,size,name in PIECES:
@@ -79,12 +80,16 @@ def main():
     (out/'guest.ld').write_text(ld)
     gcc,qemu=shutil.which('arm-none-eabi-gcc'),shutil.which('qemu-system-arm')
     if not gcc or not qemu: ap.error('ARM GCC and QEMU are required')
-    subprocess.run([gcc,'-mcpu=cortex-a9','-mthumb','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-nostdlib','-T','guest.ld',str(ROOT/'ui/start.S'),str(ROOT/'research/native_adjust.c'),str(ROOT/'research/native_adjust_harness.c'),'native.S','-lgcc','-o','adjust.elf'],cwd=out,check=True)
+    subprocess.run([gcc,'-mcpu=cortex-a9','-mthumb','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-nostdlib','-T','guest.ld',
+                    *(['-DA7_FL_FILM_CONTROLS'] if args.film_curve_menu else []),
+                    str(ROOT/'ui/start.S'),str(ROOT/'research/native_adjust.c'),str(ROOT/'research/native_adjust_harness.c'),'native.S','-lgcc','-o','adjust.elf'],cwd=out,check=True)
     run=subprocess.run([qemu,'-M','realview-pbx-a9','-smp','1','-m','64','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={out}/adjust.elf,cpu-num=0'],capture_output=True,text=True,timeout=20,check=True)
     (out/'adjust.log').write_text(run.stdout+run.stderr);print(run.stdout,end='')
     if 'NATIVE_ADJUST_TESTS_PASSED' not in run.stdout or 'FAIL' in run.stdout: raise ValueError('Native node fixture failed')
     sources={name:hashlib.sha256((ROOT/'research'/name).read_bytes()).hexdigest() for name in ['native_adjust.h','native_adjust.c','native_adjust_harness.c','native_adjust_fixture.py']}
     report={'caution_sha256':SHA,'view_sha256':hashlib.sha256(view.data).hexdigest(),'extracted_components':pieces,'source_sha256':sources,'scope':'Original node construction, properties, selection, grayout, clone/destruction and actual PAS_SelectListTab page/row traversal. Two-page 6/4 structure plus old-flat negative control; signed backend/nonnegative UI enum mapping. Rendering/backend mocked; no ISP, USB or camera execution.','flash_ready':False,'log':run.stdout.splitlines()}
+    if args.film_curve_menu:
+        report['scope']='Original page/row traversal and native node selection for the 6/6/3 curve menu, with isolated scalar IDs and Save; fixture labels/backend only'
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 
 

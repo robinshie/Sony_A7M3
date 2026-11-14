@@ -39,6 +39,18 @@ static void *lookup(void*h,const char*name){lookups++;check(h==0&&equal(name,A7Y
 }
 #define A7YC_PROBE_TEST
 #define ACTION action
+#if A7YC_KIND >= 7
+#include "a7-dmm-channel.h"
+static unsigned qreceive_failure=1,qfrees,qcommand;
+static void qconstruct(void *self,uint16_t owner){check(owner==41);((uint32_t*)self)[1]=0x2960b8;}
+static void qdestroy(void *self){check(((uint32_t*)self)[1]==0x2960b8);qfrees++;}
+static int qsend(void*a,void*b,uint16_t c,uint32_t d,uint32_t e){(void)a;uint8_t*p=b;
+ check(c==24&&d==0x2960b8&&e==0x61003c&&p[0]==6&&p[1]==0);qcommand=6;return 0;}
+static int qreceive(void*a,void*b,uint16_t c,uint32_t d,uint32_t e){(void)a;check(c==24&&d==0x2960b8&&e==0);
+ if(qreceive_failure)return 1;unsigned char *p=b;for(unsigned i=0;i<24;i++)p[i]=0;
+ p[0]=qcommand==6?6:0x13;p[1]=0x80;p[2]=qcommand==6?0:0xfb;p[3]=qcommand==6?0:0xff;p[6]=0xb8;p[7]=0x60;return 0;}
+static int query_bind(struct a7_dmm_native *api){api->construct=qconstruct;api->destroy=qdestroy;api->send=qsend;api->receive=qreceive;return 1;}
+#endif
 /* Pins already included above. Suppress their second inclusion. */
 #include "yc_trace_probe.c"
 static void reset(unsigned lazy){
@@ -52,6 +64,9 @@ static void reset(unsigned lazy){
  *(uint32_t*)(OBJ+0x126c750)=(uintptr_t)lookup;
  *import_slot=lazy?OBJ+A7YC_LAZY:ORIGINAL;
  lookups=allocations=releases=lookup_mode=allocation_fail=protect_fail=slot_race=bad_version=0;action=1;cases++;
+#if A7YC_KIND >= 7
+ qreceive_failure=1;qfrees=qcommand=0;
+#endif
 }
 void guest_main(void){
  struct Trace *state=(void*)(HEAP+4096);
@@ -63,7 +78,7 @@ void guest_main(void){
  reset(0);*import_slot=0x12345678;check(inspect()==-10&&allocations==0);
  for(unsigned lazy=0;lazy<=1;lazy++){
   reset(lazy);action=0;check(inspect()==1&&allocations==1&&*import_slot==HEAP&&state->original==ORIGINAL);
-  check(state->restore_slot==(lazy?OBJ+A7YC_LAZY:ORIGINAL)&&state->armed==1&&state->version==6);
+  check(state->restore_slot==(lazy?OBJ+A7YC_LAZY:ORIGINAL)&&state->armed==1&&state->version==9);
   action=1;check(inspect()==1&&*import_slot==HEAP&&state->lock==0);
   state->lock=1;check(inspect()==-14&&state->armed==1&&*import_slot==HEAP);
   action=2;check(inspect()==-14&&state->armed==0&&*import_slot==HEAP);
@@ -81,5 +96,25 @@ void guest_main(void){
  reset(1);*(unsigned char*)(FLOW+A7YC_ORIGINAL)^=1;check(inspect()==-4&&lookups==0&&allocations==0);
  for(unsigned i=0;i!=A7YC_RELOCATION_COUNT;i++){reset(1);*(uint32_t*)(FLOW+A7YC_ORIGINAL+target_relocations[i])^=1;check(inspect()==-4&&lookups==0&&allocations==0);}
  reset(1);bad_version=1;check(inspect()==-1&&lookups==0&&allocations==0);
+#if A7YC_KIND >= 7
+ reset(1);action=0;check(inspect()==1);
+ struct a7_dmm_observer *o=(void*)((uint8_t*)state+A7_DMM_OBSERVER_OFFSET);
+ o->channel.pending=1;o->channel.command=0x13;o->channel.request_handle=0x44b2;
+ action=2;check(inspect()==-18&&!state->armed&&*import_slot==HEAP&&!qfrees&&state->lock==0);
+ qreceive_failure=0;check(inspect()==2&&!o->channel.pending&&!o->channel.constructed&&qfrees==1&&*import_slot==OBJ+A7YC_LAZY);
+ reset(1);action=0;check(inspect()==1);o->channel.pending=o->channel.poisoned=1;
+ o->channel.command=0x13;o->channel.request_handle=19393;
+ static const uint8_t captured[24]={0x13,0x80,0,0,0,0,0xb8,0x60,1,0,1,0,1,0,0,0,0,0xc0,0x3f,0,0,0,0,0};
+ copy(o->channel.observed_reply,captured,24);action=2;
+ check(inspect()==2&&!o->channel.pending&&!o->channel.poisoned&&!o->channel.constructed&&
+       qfrees==1&&*import_slot==OBJ+A7YC_LAZY&&o->status==0);
+ reset(1);action=0;check(inspect()==1);o->channel.api.receive=0;action=2;
+ check(inspect()==-17&&*import_slot==HEAP&&!state->armed&&!qfrees&&state->lock==0);
+#if A7YC_KIND >= 8
+ reset(1);action=0;check(inspect()==1);o->channel.held=0x1234;o->channel.command=5;o->channel.request_handle=0x1234;o->phase=2;
+ action=2;check(inspect()==-18&&o->channel.pending&&o->channel.held==0x1234&&qcommand==6&&!qfrees&&!state->armed);
+ qreceive_failure=0;check(inspect()==2&&!o->channel.pending&&!o->channel.held&&!o->channel.constructed&&qfrees==1&&o->phase==4);
+#endif
+#endif
  put("YC_TRACE_PROBE_PASSED cases=");number(cases);put(" checks=");number(checks);put("\n");stop();
 }

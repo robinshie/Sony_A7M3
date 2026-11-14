@@ -40,7 +40,8 @@ class LookTests(unittest.TestCase):
         for key, bad in [('strength', float('nan')), ('strength', 2),
                          ('input_space', 'S-Log3'), ('saturation', -1),
                          ('tone_curve', [[0, 1], [1, 0]]),
-                         ('linear_matrix', [[1, 0, 0]]*2)]:
+                         ('linear_matrix', [[1, 0, 0]]*2),
+                         ('split_tone', [[0, 0]]*4), ('split_tone', [[0, .3]]*5)]:
             recipe = copy.deepcopy(self.recipe); recipe[key] = bad
             with self.subTest(key=key), self.assertRaises(ValueError):
                 validate(recipe)
@@ -79,6 +80,28 @@ class LookTests(unittest.TestCase):
         self.assertEqual(values[0], round(.012*65535))
         self.assertEqual(values[-1], round(.985*65535))
         self.assertTrue(all(a <= b for a,b in zip(values, values[1:])))
+
+    def test_cinema_print_has_cool_shadows_and_warm_highlights(self):
+        path = DEFAULT_RECIPE.with_name('cinema-print-srgb.json')
+        recipe = validate(json.loads(path.read_text()))
+        shadow = transform((.12,) * 3, recipe)
+        highlight = transform((.85,) * 3, recipe)
+        self.assertGreater(shadow[2] - shadow[0], .05)
+        self.assertGreater(highlight[0] - highlight[2], .05)
+        self.assertGreater(sum(transform((0,) * 3, recipe)) / 3, .04)
+        self.assertLess(sum(transform((1,) * 3, recipe)) / 3, .95)
+        ramp = [transform((i / 256,) * 3, recipe) for i in range(257)]
+        self.assertTrue(all(all(x <= y for x, y in zip(a, b)) for a, b in zip(ramp, ramp[1:])))
+
+    def test_fl2_reference_lifts_mids_and_subdues_blue_without_tinting_gray(self):
+        recipe = validate(json.loads(DEFAULT_RECIPE.with_name('fl2-reference-srgb.json').read_text()))
+        gray = transform((.5,) * 3, recipe)
+        self.assertGreater(min(gray), .58)
+        self.assertLess(max(gray) - min(gray), .025)
+        blue = transform((.22, .53, .84), recipe)
+        self.assertLess(max(blue) - min(blue), .40)
+        ramp = [transform((i / 256,) * 3, recipe) for i in range(257)]
+        self.assertTrue(all(all(x <= y for x, y in zip(a, b)) for a, b in zip(ramp, ramp[1:])))
 
     def test_build_is_reproducible(self):
         with tempfile.TemporaryDirectory() as folder:
