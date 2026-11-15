@@ -21,6 +21,10 @@ struct a7_fl_store {
 int a7_fl_store_open(struct a7_fl_store *, const struct a7_fl_store_io *,
                      const unsigned char [32], const char [24],
                      struct a7_fl_preference *, int *present);
+/* Read-only boot history: only the intact immediately preceding confirmed
+ * generation, while the latest record still exactly matches the caller. */
+int a7_fl_store_previous(struct a7_fl_store *,const struct a7_fl_preference *,
+                         struct a7_fl_preference *,int *present);
 /* Matches a7_fl_control store callback. Generation starts at1 and increments
  * exactly once. Re-reads both records before and after the durable write. */
 int a7_fl_store_save(void *, const struct a7_fl_preference *);

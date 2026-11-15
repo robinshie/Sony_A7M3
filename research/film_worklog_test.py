@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fault-test the five-point write-ahead coordinator; no camera access."""
+import argparse
 import hashlib
 import json
 import subprocess
@@ -10,6 +11,9 @@ OUT = ROOT / '.lab/film-worklog'
 
 
 def main():
+    global OUT
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--vignette',action='store_true');args=parser.parse_args()
+    if args.vignette:OUT=OUT.with_name('film-worklog-vignette')
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'proof.json').unlink(missing_ok=True)
     sources = ['payloads/a7-fl-worklog.c', 'payloads/a7-fl-worklog.h',
@@ -20,6 +24,7 @@ def main():
                'payloads/a7-fl-store.c', 'payloads/a7-fl-fivepoint-preview.h','payloads/a7-fl-color.h']
     flags = ['-O2', '-Wall', '-Wextra', '-Werror', '-ffreestanding', '-fno-builtin',
              '-DA7_FL_FILM_CONTROLS', '-DA7_FL_LEICA_LOOK', '-I', str(ROOT / 'payloads')]
+    if args.vignette:flags+=['-DA7_FL_CAPTURE_VIGNETTE','-DA7_FL_CAPTURE_HALATION']
     code = [str(ROOT / sources[i]) for i in (0, 2, 4, 8, 11)]
     subprocess.run(['clang', *flags, '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                     *code, '-o', str(OUT / 'host')], check=True)

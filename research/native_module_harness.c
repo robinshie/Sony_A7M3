@@ -22,6 +22,9 @@ static unsigned grain_selection,grain_calls;
 static int grain_fail_once;
 #ifdef A7_FL_CAPTURE_HALATION
 static int halo_selection;
+#ifdef A7_FL_CAPTURE_VIGNETTE
+static int vignette_selection;
+#endif
 #endif
 int a7_fl_grain_apply(unsigned preset,unsigned strength){
     check(preset<=3&&strength<=9,"valid grain backend settings");grain_calls++;
@@ -35,6 +38,14 @@ int a7_fl_film_apply(unsigned preset,unsigned strength,int halation){
     if(!rc)halo_selection=preset?halation:0;
     return rc;
 }
+#ifdef A7_FL_CAPTURE_VIGNETTE
+int a7_fl_vignette_apply(unsigned preset,unsigned strength,int halation,int vignette){
+    check(vignette>=-9&&vignette<=9,"signed capture vignette range");
+    int rc=a7_fl_film_apply(preset,strength,halation);
+    if(!rc)vignette_selection=preset?vignette:0;
+    return rc;
+}
+#endif
 #endif
 #endif
 extern int stock_get(void *,int,int *);
@@ -243,18 +254,25 @@ void guest_main(void) {
 #endif
 #ifdef A7_FL_CAPTURE_HALATION
     int halo_id=native_adjust_field_id(NATIVE_ADJUST_HALATION_FIELD);
-    test(halo_id==0x7010&&film_look->children[2]->count==5,"signed halo before Save on page 3");
+    test(halo_id==0x7010&&film_look->children[2]->count==NATIVE_ADJUST_FIELDS-10,"signed halo before Save on page 3");
     test(!set_value(halo_id,-1)&&!set_value(halo_id,19)&&
          get_value(halo_id,&enum_value)&&enum_value==9,"new halo starts at zero; invalid enum rejected");
     test(set_value(halo_id,8)&&get_value(halo_id,&enum_value)&&enum_value==8,"native enum 8 represents -1");
     test(set_value(halo_id,0),"set FL3 halo to -9");
+#endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    int vignette_id=native_adjust_field_id(NATIVE_ADJUST_VIGNETTE_FIELD);
+    const int vignette_values[3]={12,6,0};
+    test(vignette_id==0x7011&&film_look->children[2]->count==6,"vignette fits page 3 before Save");
+    test(get_value(vignette_id,&enum_value)&&enum_value==9&&!set_value(vignette_id,19),"new vignette starts neutral and bounds enum");
+    test(set_value(vignette_id,0),"edit negative FL3 vignette");
 #endif
     original_action(action_view);
     test(dialog_commit&&slot_writes==0,"open native Save dialog without a settings write");
     test(!confirm_dialog()&&!film->dirty&&slot_writes==1,"native confirmed Save writes curve preference once");
     struct a7_fl_preference result;
     test(a7_fl_preference_choose(&result,slot_bytes[0],slot_exists[0]?128:0,slot_bytes[1],slot_exists[1]?128:0,
-                                a7_pkg_original_sha,a7_pkg_build)>=0&&result.schema==4&&result.film[2][2]==9,
+                                a7_pkg_original_sha,a7_pkg_build)>=0&&result.schema==A7_FL_FILM_SCHEMA&&result.film[2][2]==9,
          "read back explicit Save and preserved schema");
     for(unsigned f=0;f<5;f++)test(result.film[2][2+f]==selected_points[f]-9,"all five curve values stored in FL3");
     test(set_value(black,5)&&!a7_fl_cancel()&&get_value(black,&enum_value)&&enum_value==18,"cancel restores saved curve");
@@ -266,6 +284,10 @@ void guest_main(void) {
     test(result.film[2][1]==-9,"negative halo saved");
     test(set_value(halo_id,18)&&!a7_fl_cancel()&&get_value(halo_id,&enum_value)&&enum_value==0,"cancel restores negative halo");
     const int halo_values[3]={15,6,0};
+#endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    test(result.vignette[2]==-9,"negative vignette saved");
+    test(set_value(vignette_id,18)&&!a7_fl_cancel()&&get_value(vignette_id,&enum_value)&&enum_value==0,"cancel restores saved vignette");
 #endif
     const int bank_points[3][5]={{11,6,13,8,7},{12,7,14,9,8},{18,7,10,11,5}};
     for(unsigned bank=1;bank<=2;bank++){
@@ -279,10 +301,19 @@ void guest_main(void) {
 #ifdef A7_FL_CAPTURE_HALATION
         test(set_value(halo_id,halo_values[bank-1]),"set independent positive and negative halo");
 #endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        test(set_value(vignette_id,vignette_values[bank-1]),"set independent FL/FL2 vignette");
+#endif
         original_action(action_view);test(!confirm_dialog(),"save independent FL/FL2 curve");
     }
     for(unsigned bank=1;bank<=3;bank++){
         test(set_value(0x7000,(int)bank),"switch all three curve banks");
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        test(get_value(vignette_id,&enum_value)&&enum_value==vignette_values[bank-1],"switch restores vignette bank");
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+        test(vignette_selection==vignette_values[bank-1]-9,"selected vignette reaches capture backend");
+#endif
+#endif
 #ifdef A7_FL_CAPTURE_GRAIN
         test(get_value(grain_id,&enum_value)&&enum_value==(bank==3?7:(int)bank*2),"switch restores each grain bank");
 #endif
@@ -322,6 +353,20 @@ void guest_main(void) {
          get_value(halo_id,&enum_value)&&enum_value==0,"Off blocks edit and preserves halo");
     put("NATIVE_FL_HALATION_BANKS_PASSED\n");
 #endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    for(unsigned b=0;b<3;b++)test(result.vignette[b]==vignette_values[b]-9,"all vignette banks durable");
+    test(set_value(0x7000,0)&&!set_value(vignette_id,2)&&set_value(0x7000,3),"Off blocks vignette edit");
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+    test(vignette_selection==-9,"reselected FL3 vignette reaches backend");
+    grain_fail_once=1;
+    test(!set_value(vignette_id,18)&&vignette_selection==-9&&get_value(vignette_id,&enum_value)&&enum_value==0&&!film->fault,"failed backend change preserves vignette");
+    test(set_value(vignette_id,18)&&vignette_selection==9,"positive vignette reaches backend");
+    test(!a7_fl_cancel()&&vignette_selection==-3,"cancel restores confirmed FL2 vignette backend");
+    test(set_value(0x7000,0)&&vignette_selection==0,"Off clears vignette backend");
+    put("NATIVE_FL_VIGNETTE_CAPTURE_DISPATCH_PASSED\n");
+#endif
+    put("NATIVE_FL_VIGNETTE_BANKS_PASSED\n");
+#endif
     put("NATIVE_FL_ALL_CURVE_BANKS_PASSED\n");
     test(!film->fault,"no resident fault after curve flow");
     put("NATIVE_FL_CURVE_MAIN_PASSED\n");finish();
@@ -356,7 +401,7 @@ void guest_main(void) {
 #endif
 #ifdef A7_FL_FILM_CONTROLS
     struct a7_fl_preference recovering=saved_boot;
-    recovering.schema=4;recovering.other_parameters[6]=recovering.third_parameters[6]=3;
+    recovering.schema=A7_FL_FILM_SCHEMA;recovering.other_parameters[6]=recovering.third_parameters[6]=3;
     for(unsigned b=0;b<2;b++)for(unsigned f=0;f<5;f++)recovering.film[b][f+2]=(int8_t)((int)b+(int)f-3);
     const int points[5]={5,-2,1,2,-4},transient[5]={-5,-2,1,2,-4};
     for(unsigned f=0;f<5;f++)recovering.film[2][2+f]=(int8_t)points[f];
@@ -368,6 +413,9 @@ void guest_main(void) {
 #ifdef A7_FL_CAPTURE_HALATION
     recovering.film[0][1]=6;recovering.film[1][1]=-3;recovering.film[2][1]=-9;
 #endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    recovering.vignette[0]=-6;recovering.vignette[1]=3;recovering.vignette[2]=-9;
+#endif
     test(!a7_fl_preference_encode(slot_bytes[0],&recovering,a7_pkg_original_sha,a7_pkg_build),"store previous confirmed curve");slot_exists[0]=1;
     struct a7_fl_preference pending=recovering;pending.film[2][2]=-5;
 #ifdef A7_FL_CAPTURE_GRAIN
@@ -376,14 +424,41 @@ void guest_main(void) {
 #ifdef A7_FL_CAPTURE_HALATION
     pending.film[2][1]=9;
 #endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    pending.vignette[2]=9;
+#endif
     test(!a7_fl_fivepoint_preview(saved_base,EXPAND,COMPRESS,&desired,transient,data_guarded+1),"partially serialized unsaved curve");
     pending.candidate_crc=a7_fl_crc(data_guarded+1,1280);
     struct a7_fl_worklog prior={0};
     test(!a7_fl_worklog_open(&prior,&platform.film_storage,a7_pkg_original_sha,a7_pkg_build)&&
          !a7_fl_worklog_prepare(&prior,&recovering)&&!a7_fl_worklog_prepare(&prior,&pending),"saved and pending work endpoints");
-    test(!a7_fl_prepare(&platform)&&!a7_fl_initialize_color_prepared()&&!slot_writes&&
+#ifdef A7_FL_TEST_BOOT_RECOVERY
+    /* Sony can restore the older confirmed recipe after the two-entry preview
+     * log has moved on. The older preference is still independently retained. */
+    struct a7_fl_preference older=recovering;older.generation=6;
+    a7_fl_preference_switch(&older,1);test(older.enabled==1,"choose older confirmed FL");
+    A7FLColorParams older_color={older.parameters[0],older.parameters[1],older.parameters[2],older.parameters[3],older.parameters[4]};
+    int older_points[5];for(unsigned f=0;f<5;f++)older_points[f]=older.film[0][f+2];
+    test(!a7_fl_fivepoint_preview(a7_pkg_base,EXPAND,COMPRESS,&older_color,older_points,data_guarded+1),"Sony restores older preview");
+    older.candidate_crc=a7_fl_crc(data_guarded+1,1280);
+    test(!a7_fl_preference_encode(slot_bytes[1],&older,a7_pkg_original_sha,a7_pkg_build),"retain previous confirmed slot");slot_exists[1]=1;
+    static struct a7_capture_controls older_capture;
+    const uint8_t *older_stock[]={a7_pkg_original[1],a7_pkg_original[2]},*older_legacy[]={a7_pkg_capture1,a7_pkg_capture2};
+    test(!a7_capture_prepare(&older_capture,&api,older_stock,older_legacy,EXPAND,COMPRESS),"previous capture recipe context");
+    for(unsigned t=0;t<2;t++)test(!a7_capture_generate_curve(&older_capture,t,1,&older_color,older_points,other_tables_data[t]),"Sony restores older CAP tables");
+#endif
+    test(!a7_fl_prepare(&platform),"prepare cold boot platform");
+#if defined(A7_FL_TEST_BOOT_RECOVERY) && defined(A7_FL_CAPTURE_GRAIN_BACKEND)
+    grain_fail_once=1;
+    test(a7_fl_initialize_color_prepared()==-5&&!a7_fl_status()->runtime_ready&&!a7_fl_status()->fault&&!slot_writes,
+         "recover older saved tables before transient backend startup failure");
+#endif
+    test(!a7_fl_initialize_color_prepared()&&!slot_writes&&
          a7_fl_status()->runtime_ready&&a7_fl_status()->mode==3&&same(data_guarded+1,desired_table,1280),
          "runtime boot recovers last Save from partial serialization");
+#ifdef A7_FL_TEST_BOOT_RECOVERY
+    put("NATIVE_FL_CONFIRMED_HISTORY_RETRY_PASSED\n");
+#endif
     const uint8_t *stock[]={a7_pkg_original[1],a7_pkg_original[2]},*legacy[]={a7_pkg_capture1,a7_pkg_capture2};
     test(!a7_capture_prepare(&expected_capture,&api,stock,legacy,EXPAND,COMPRESS),"expected recovery CAP context");
     for(unsigned t=0;t<2;t++){
@@ -401,6 +476,10 @@ void guest_main(void) {
     int halo_enum=-1,halo_id=native_adjust_field_id(NATIVE_ADJUST_HALATION_FIELD);
     test(get_value(halo_id,&halo_enum)&&halo_enum==0,"cold boot restores saved negative halo, discards pending positive");
 #endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    int vignette_enum=-1,vignette_id=native_adjust_field_id(NATIVE_ADJUST_VIGNETTE_FIELD);
+    test(get_value(vignette_id,&vignette_enum)&&vignette_enum==0,"cold boot restores saved -9, discards unsaved +9 vignette");
+#endif
     for(unsigned f=0;f<5;f++){
         int saved_enum=-1;
         test(get_value(native_adjust_field_id(8+f),&saved_enum)&&saved_enum==points[f]+9,
@@ -408,6 +487,12 @@ void guest_main(void) {
     }
     for(unsigned bank=1;bank<=2;bank++){
         test(set_value(0x7000,(int)bank),"cold boot switches FL and FL2");
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        test(get_value(vignette_id,&vignette_enum)&&vignette_enum==recovering.vignette[bank-1]+9,"boot restores independent vignette banks");
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+        test(vignette_selection==recovering.vignette[bank-1],"boot vignette reaches capture backend");
+#endif
+#endif
 #ifdef A7_FL_CAPTURE_GRAIN
         test(get_value(native_adjust_field_id(NATIVE_ADJUST_GRAIN_FIELD),&grain_enum)&&grain_enum==(int)bank*2,"cold boot retains independent grain banks");
 #endif
@@ -439,6 +524,12 @@ void guest_main(void) {
 #endif
 #endif
     put("NATIVE_FL_GRAIN_BOOT_PASSED\n");
+#endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+    put("NATIVE_FL_VIGNETTE_CAPTURE_BOOT_PASSED\n");
+#endif
+    put("NATIVE_FL_VIGNETTE_BOOT_PASSED\n");
 #endif
     put("NATIVE_FL_ALL_CURVE_BOOT_PASSED\n");
 #ifdef A7_FL_CAPTURE_HALATION

@@ -54,7 +54,10 @@ static int generate(void *ctx,const struct a7_fl_preference *p,unsigned table,ui
     return a7_fl_fivepoint_lut(base,1280,out,1280,table==2,curve,0,0);
 }
 static struct a7_fl_preference preference(int v){
-    struct a7_fl_preference p={0};p.generation=44;p.enabled=3;p.schema=4;
+    struct a7_fl_preference p={0};p.generation=44;p.enabled=3;p.schema=A7_FL_FILM_SCHEMA;
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    p.vignette[0]=-9;p.vignette[1]=0;p.vignette[2]=9;
+#endif
     p.parameters[6]=p.other_parameters[6]=p.third_parameters[6]=3;
     for(unsigned b=0;b<3;b++){p.film[b][0]=(int8_t)(b+1);p.film[b][1]=(int8_t)(b+2);p.film[b][2]=(int8_t)((int)b-1);p.film[b][3]=(int8_t)v;p.film[b][5]=(int8_t)-v;}
     uint8_t table[1280];check(!generate(0,&p,0,table),"generate preview");p.candidate_crc=a7_fl_crc(table,1280);return p;
@@ -69,6 +72,36 @@ static int write_property(void *ctx,unsigned slot,const uint8_t before[1280],con
     struct properties *p=ctx;
     if(!eq(before,p->live[slot],1280)||++p->writes==p->cut)return -1;
     memcpy(p->live[slot],after,1280);return 0;
+}
+static void confirmed_history_lifecycle(void){
+    struct a7_fl_preference old=preference(1),latest=preference(4),pending=preference(8),loaded,previous;
+    old.generation=1;latest.generation=2;pending.generation=3;
+    struct disk prefs={0},work={0};struct a7_fl_store store;
+    struct a7_fl_store_io pref_io={rd,wr,&prefs};int present=0,have_previous=0;
+    check(!a7_fl_store_open(&store,&pref_io,identity,build,&loaded,&present)&&!present,"history starts absent");
+    check(!a7_fl_store_save(&store,&old)&&!a7_fl_store_open(&store,&pref_io,identity,build,&loaded,&present),"one confirmed record");
+    check(!a7_fl_store_previous(&store,&loaded,&previous,&have_previous)&&!have_previous,"single slot has no history");
+    check(!a7_fl_store_save(&store,&latest)&&!a7_fl_store_open(&store,&pref_io,identity,build,&loaded,&present),"two confirmed records");
+    check(!a7_fl_store_previous(&store,&loaded,&previous,&have_previous)&&have_previous&&previous.generation==1,"read exact preceding confirmed record");
+    unsigned writes=prefs.writes;
+    check(a7_fl_store_previous(&store,&old,&previous,&have_previous)<0&&!have_previous&&prefs.writes==writes,"stale latest cannot authorize recovery");
+    check(!a7_fl_store_previous(&store,&loaded,&previous,&have_previous)&&have_previous,"refresh unchanged history");
+    struct a7_fl_worklog log={0};struct properties props={0};struct a7_fl_curve_scratch scratch;
+    struct a7_fl_curve_io io={generate,read_property,write_property,&props,&scratch};
+    check(!open_j(&log,&work)&&!a7_fl_worklog_prepare(&log,&latest)&&!a7_fl_worklog_prepare(&log,&pending),"preview journal no longer retains old confirmation");
+    for(unsigned t=0;t<3;t++)check(!generate(0,&old,t,props.live[t]),"Sony restores prior confirmed tables");
+    check(a7_fl_curve_recover(&log,&io,&loaded)==A7_FL_WORKLOG_UNKNOWN&&!props.writes,"negative control rejects absent preview endpoint");
+    check(!a7_fl_curve_recover_history(&log,&io,&loaded,&previous)&&props.writes==3,"known preceding confirmation restores latest three tables");
+    for(unsigned t=0;t<3;t++)check(!generate(0,&old,t,props.live[t]),"reset history source");
+    props.writes=0;previous.candidate_crc^=1;
+    check(a7_fl_curve_recover_history(&log,&io,&loaded,&previous)==A7_FL_WORKLOG_ARGUMENT&&!props.writes,"bad prior recipe CRC rejects without writes");
+    previous.candidate_crc^=1;previous.generation=4;
+    check(a7_fl_curve_recover_history(&log,&io,&loaded,&previous)==A7_FL_WORKLOG_ARGUMENT&&!props.writes,"wrong history generation rejects without writes");
+    previous.generation=1;props.live[2][1279]^=1;
+    check(a7_fl_curve_recover_history(&log,&io,&loaded,&previous)==A7_FL_WORKLOG_UNKNOWN&&!props.writes,"one foreign byte rejects whole history restore");
+    prefs.bytes[0][25]^=1;
+    check(!a7_fl_store_previous(&store,&loaded,&previous,&have_previous)&&!have_previous&&prefs.writes==writes,"torn old slot never grants history authority");
+    cases+=8;
 }
 static void curve_lifecycle(void){
     struct a7_fl_preference committed=preference(1),edited=preference(8),saved;
@@ -174,7 +207,7 @@ static void tests(void){
     d=saved;check(!open_j(&j,&d),"before new state");check(!a7_fl_worklog_prepare(&j,&c),"subsequent alternating write");
     check(!open_j(&reboot,&d)&&reboot.record[reboot.latest].generation==3,"newest work sequence");
     check(a7_fl_worklog_recognize(&reboot,0,tables[0][0],generate,0)==0,"obsolete endpoint no longer authorizes writes");cases++;
-    curve_lifecycle();
+    curve_lifecycle();confirmed_history_lifecycle();
     put("FILM_WORKLOG_CASES ");num(cases);put(" CHECKS ");num(checks);put("\nFILM_WORKLOG_PASSED\n");
 }
 #ifdef A7_WORKLOG_QEMU

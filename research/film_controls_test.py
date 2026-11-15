@@ -15,11 +15,14 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--legacy-records', nargs=2, type=Path, help='Optional two previously read camera preferences; offline only')
     cli.add_argument('--signed-halation', action='store_true')
+    cli.add_argument('--vignette', action='store_true')
     options = cli.parse_args()
     if options.legacy_records:
         OUT = ROOT / '.lab/film-controls-private'
+    if options.vignette:options.signed_halation=True
     if options.signed_halation:
         OUT = OUT.with_name(OUT.name + '-halation')
+    if options.vignette:OUT=OUT.with_name(OUT.name+'-vignette')
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'proof.json').unlink(missing_ok=True)
     sources = ['payloads/a7-fl-fivepoint.c', 'payloads/a7-fl-fivepoint.h',
@@ -29,6 +32,7 @@ def main():
               '-I', str(ROOT / 'payloads'), *[str(ROOT / sources[i]) for i in (0, 2, 4)]]
     if options.signed_halation:
         common += ['-DA7_FL_CAPTURE_HALATION']
+    if options.vignette:common += ['-DA7_FL_CAPTURE_VIGNETTE']
     private_hashes = []
     if options.legacy_records:
         data = [p.read_bytes() for p in options.legacy_records]
@@ -68,6 +72,7 @@ SECTIONS { . = 0x100000; .text : { *(.text.start) *(.text*) }
         path = OUT / ('store-film' if film else 'store-legacy')
         subprocess.run(['clang', '-O2', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                         '-DA7_FL_LEICA_LOOK', *(['-DA7_FL_FILM_CONTROLS'] if film else []),
+                        *(['-DA7_FL_CAPTURE_HALATION','-DA7_FL_CAPTURE_VIGNETTE'] if film and options.vignette else []),
                         str(ROOT / 'research/native_store_test.c'), str(ROOT / 'payloads/a7-fl-store.c'),
                         str(ROOT / 'payloads/a7-fl-runtime-prefs.c'), '-o', str(path)], check=True)
         log = subprocess.run([str(path)], capture_output=True, check=True, timeout=15)

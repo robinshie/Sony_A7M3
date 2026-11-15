@@ -76,7 +76,7 @@ static int film_generate(void *unused,const struct a7_fl_preference *p,unsigned 
     if(!p->enabled){memcpy(out,a7_pkg_original[t],1280);return 0;}
     A7FLColorParams color=capture_params(p);
     int points[5]={0};
-    if(p->schema==4&&p->enabled>0)
+    if(a7_fl_film_schema(p->schema)&&p->enabled>0)
         for(unsigned i=0;i<5;i++)points[i]=p->film[p->enabled-1][i+2];
     if(t)return a7_capture_generate_curve(&capture_controls,t-1,p->enabled,&color,points,out);
     return a7_fl_fivepoint_preview(film_base[p->enabled-1],a7_pkg_expand,a7_pkg_compress,&color,points,out);
@@ -106,7 +106,10 @@ static int film_crc(struct a7_fl_preference *p){
 }
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
 static int grain_sync(const struct a7_fl_preference *p){
-#ifdef A7_FL_CAPTURE_HALATION
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    return a7_fl_vignette_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
+                               p->enabled?p->film[p->enabled-1][1]:0,p->enabled?p->vignette[p->enabled-1]:0);
+#elif defined(A7_FL_CAPTURE_HALATION)
     return a7_fl_film_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
                            p->enabled?p->film[p->enabled-1][1]:0);
 #else
@@ -285,7 +288,7 @@ static int synchronize(void) {
 #ifdef A7_FL_FILM_CONTROLS
         for(unsigned f=8;f<NATIVE_ADJUST_FIELDS;f++)
             if(!native_adjust_write(&module.trees[j],native_adjust_field_id(f),
-                module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][native_adjust_film_index(f)],accept_applied,0))return 0;
+                a7_fl_film_get(&module.control.preference,module.control.preference.enabled?module.control.preference.enabled-1:0,native_adjust_film_index(f)),accept_applied,0))return 0;
 #endif
     }
     return 1;
@@ -296,7 +299,7 @@ static int model_read(void *unused,int id,int *value) {
     unsigned f=native_adjust_field_index(id);
 #ifdef A7_FL_FILM_CONTROLS
     if(f>=8&&f<NATIVE_ADJUST_FIELDS)
-        return native_adjust_encode(&module.trees[0],id,module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][native_adjust_film_index(f)],value);
+        return native_adjust_encode(&module.trees[0],id,a7_fl_film_get(&module.control.preference,module.control.preference.enabled?module.control.preference.enabled-1:0,native_adjust_film_index(f)),value);
 #endif
     if(f>=8)return 0;
     /* Native SettingMenu reserves -1 as a missing-value sentinel. The UI uses
@@ -320,8 +323,8 @@ static int model_write(void *unused,int id,int value) {
         if(next.parameters[f]==decoded){leave(0);return 1;}
         next.parameters[f]=decoded;
     } else if(f>=8&&f<NATIVE_ADJUST_FIELDS&&next.enabled>0){
-        if(next.film[next.enabled-1][native_adjust_film_index(f)]==decoded){leave(0);return 1;}
-        next.film[next.enabled-1][native_adjust_film_index(f)]=(int8_t)decoded;
+        if(a7_fl_film_get(&next,next.enabled-1,native_adjust_film_index(f))==decoded){leave(0);return 1;}
+        a7_fl_film_set(&next,next.enabled-1,native_adjust_film_index(f),decoded);
     } else {leave(A7_FL_CONTROL_UNSUPPORTED);return 0;}
     int rc=film_crc(&next);
     if(!rc)rc=film_change(&next);
@@ -431,15 +434,27 @@ static int initialize_color(void) {
     memcpy(film_base[0],a7_pkg_base,1280);
     if(a7_cinema_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[1])||
        a7_leica_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[2]))return A7_FL_TABLE;
-    int rc=a7_capture_prepare(&capture_controls,&module.platform.backup,capture_stock,capture_look,a7_pkg_expand,a7_pkg_compress);
+    int rc=0;
+    if(!capture_controls.prepared)
+        rc=a7_capture_prepare(&capture_controls,&module.platform.backup,capture_stock,capture_look,a7_pkg_expand,a7_pkg_compress);
     if(rc)return rc;
+    /* Reuse the immutable prepared tables on startup retry. A failed native
+     * write still requires restart and reconciliation, never an automatic retry. */
+    if(film_work.fault)return A7_FL_WORKLOG_FAULT;
     rc=a7_fl_worklog_open(&film_work,&module.platform.film_storage,a7_pkg_original_sha,a7_pkg_build);
     if(rc)return rc;
+    struct a7_fl_preference previous={0};int have_previous=0;
+    if(present&&a7_fl_store_previous(&module.store,&preference,&previous,&have_previous))return A7_FL_MODULE_STORE;
+    if(have_previous){
+        uint32_t crc=previous.candidate_crc;
+        if(previous.schema<4)have_previous=0;
+        else if(a7_fl_preference_migrate_film(&previous)<0||film_crc(&previous)||crc!=previous.candidate_crc)return A7_FL_TABLE;
+    }
     unsigned schema=preference.schema;
     uint32_t prior_crc=preference.candidate_crc;
     if(a7_fl_preference_migrate_film(&preference)<0||film_crc(&preference)||
        (schema>=3&&prior_crc!=preference.candidate_crc))return A7_FL_TABLE;
-    rc=a7_fl_curve_recover(&film_work,&film_io,&preference);
+    rc=a7_fl_curve_recover_history(&film_work,&film_io,&preference,have_previous?&previous:0);
     if(rc==A7_FL_WORKLOG_UNKNOWN&&schema<4&&film_work.latest<0){
         A7FLColorParams parameters=capture_params(&preference);
         rc=a7_capture_adopt(&capture_controls,&parameters);
@@ -571,6 +586,10 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
 #ifdef A7_FL_CAPTURE_HALATION
     if(!native_adjust_halation_spec(specs,preference.film[preference.enabled?preference.enabled-1:0][1])){rollback();return leave(A7_FL_MODULE_NODES);}
     editable|=1u<<NATIVE_ADJUST_HALATION_FIELD;
+#endif
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    if(!native_adjust_vignette_spec(specs,preference.vignette[preference.enabled?preference.enabled-1:0])){rollback();return leave(A7_FL_MODULE_NODES);}
+    editable|=1u<<NATIVE_ADJUST_VIGNETTE_FIELD;
 #endif
 #endif
     for(unsigned j=0;j<module.platform.parent_count;j++) {

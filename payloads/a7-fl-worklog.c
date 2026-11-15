@@ -16,13 +16,13 @@ static void put(uint8_t *p,uint32_t v) {
     for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));
 }
 static int encode(const struct a7_fl_worklog *j,const struct a7_fl_preference *p,uint8_t out[128]) {
-    if(p->schema!=4||a7_fl_preference_encode(out,p,j->original_sha,j->build))return -1;
+    if(!a7_fl_film_schema(p->schema)||a7_fl_preference_encode(out,p,j->original_sha,j->build))return -1;
     copy(out,work_magic,8);put(out+124,a7_fl_crc(out,124));return 0;
 }
 static int decode(const struct a7_fl_worklog *j,struct a7_fl_preference *p,const uint8_t *raw,unsigned n) {
     if(n!=128||!equal(raw,work_magic,8)||get(raw+124)!=a7_fl_crc(raw,124))return -1;
     uint8_t next[128];copy(next,raw,128);copy(next,pref_magic,8);put(next+124,a7_fl_crc(next,124));
-    if(a7_fl_preference_decode(p,next,128,j->original_sha,j->build)||p->schema!=4)return -1;
+    if(a7_fl_preference_decode(p,next,128,j->original_sha,j->build)||!a7_fl_film_schema(p->schema))return -1;
     return 0;
 }
 static int load(struct a7_fl_worklog *j) {
@@ -100,7 +100,7 @@ static int valid_curve_io(const struct a7_fl_worklog *j,const struct a7_fl_curve
 }
 static int curve_tables(const struct a7_fl_curve_io *io,const struct a7_fl_preference *p,
                         uint8_t tables[3][1280]){
-    if(!p||p->schema!=4)return -1;
+    if(!p||!a7_fl_film_schema(p->schema))return -1;
     for(unsigned t=0;t<3;t++)if(io->generate(io->opaque,p,t,tables[t]))return -1;
     if(p->enabled&&a7_fl_crc(tables[0],1280)!=p->candidate_crc)return -1;
     return 0;
@@ -128,22 +128,36 @@ static int write_curve_tables(struct a7_fl_worklog *j,const struct a7_fl_curve_i
     }
     return 0;
 }
-int a7_fl_curve_recover(struct a7_fl_worklog *j,const struct a7_fl_curve_io *io,
-                        const struct a7_fl_preference *committed){
+int a7_fl_curve_recover_history(struct a7_fl_worklog *j,const struct a7_fl_curve_io *io,
+                        const struct a7_fl_preference *committed,const struct a7_fl_preference *previous){
     if(!valid_curve_io(j,io))return A7_FL_WORKLOG_ARGUMENT;
     uint8_t (*actual)[1280]=io->scratch->before,(*target)[1280]=io->scratch->target;
     uint8_t *stock=io->scratch->row;
     if(curve_tables(io,committed,target))return A7_FL_WORKLOG_ARGUMENT;
+    if(previous&&(!a7_fl_film_schema(previous->schema)||
+       previous->generation==0xffffffffu||previous->generation+1!=committed->generation||
+       io->generate(io->opaque,previous,0,stock)||
+       (previous->enabled&&a7_fl_crc(stock,1280)!=previous->candidate_crc)))return A7_FL_WORKLOG_ARGUMENT;
     struct a7_fl_preference off=*committed;a7_fl_preference_switch(&off,0);
     for(unsigned t=0;t<3;t++){
         if(io->read(io->opaque,t,actual[t]))return A7_FL_WORKLOG_READ;
         if(equal(actual[t],target[t],1280))continue;
         if(io->generate(io->opaque,&off,t,stock))return A7_FL_WORKLOG_ARGUMENT;
         if(equal(actual[t],stock,1280))continue;
-        if(a7_fl_worklog_recognize(j,t,actual[t],io->generate,io->opaque)!=1)
-            return A7_FL_WORKLOG_UNKNOWN;
+        int recognized=a7_fl_worklog_recognize(j,t,actual[t],io->generate,io->opaque);
+        if(recognized==1)continue;
+        if(recognized<0)return recognized;
+        if(previous){
+            if(io->generate(io->opaque,previous,t,stock))return A7_FL_WORKLOG_ARGUMENT;
+            if(equal(actual[t],stock,1280))continue;
+        }
+        return A7_FL_WORKLOG_UNKNOWN;
     }
     return write_curve_tables(j,io,actual,target);
+}
+int a7_fl_curve_recover(struct a7_fl_worklog *j,const struct a7_fl_curve_io *io,
+                        const struct a7_fl_preference *committed){
+    return a7_fl_curve_recover_history(j,io,committed,0);
 }
 int a7_fl_curve_transition(struct a7_fl_worklog *j,const struct a7_fl_curve_io *io,
         const struct a7_fl_preference *before,const struct a7_fl_preference *next){

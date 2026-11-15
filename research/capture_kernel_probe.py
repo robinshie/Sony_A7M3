@@ -16,30 +16,31 @@ def build(a):
     av, kernel = a.avcam.read_bytes(), a.kernel.read_bytes()
     if sha(av)!=PINS['avcam'] or sha(kernel)!=PINS['kernel'] or sha(a.liro.read_bytes())!=LIRO_PIN:
         raise ValueError('Requires pinned original firmware')
-    film = a.route == 'film'
-    halo = a.route in ('halation','film')
-    banks = a.route in ('banks','halation','film')
-    repeat = a.route in ('repeat','banks','halation','film')
+    vignette = a.route == 'vignette'
+    film = a.route in ('film','vignette')
+    halo = a.route in ('halation','film','vignette')
+    banks = a.route in ('banks','halation','film','vignette')
+    repeat = a.route in ('repeat','banks','halation','film','vignette')
     fast = a.route == 'fast'
-    full = a.route in ('full','fast','repeat','banks','halation','film')
-    grain = a.route in ('grain','full','fast','repeat','banks','halation','film')
-    lease = a.route in ('lease','grain','full','fast','repeat','banks','halation','film')
-    early = a.route in ('early','lease','grain','full','fast','repeat','banks','halation','film')
-    frame = a.route in ('frame','early','lease','grain','full','fast','repeat','banks','halation','film')
-    vfx = a.route in ('vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film')
+    full = a.route in ('full','fast','repeat','banks','halation','film','vignette')
+    grain = a.route in ('grain','full','fast','repeat','banks','halation','film','vignette')
+    lease = a.route in ('lease','grain','full','fast','repeat','banks','halation','film','vignette')
+    early = a.route in ('early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
+    frame = a.route in ('frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
+    vfx = a.route in ('vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
     detail = a.route == 'detail'
-    multi = a.route in ('multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film')
-    fixture_path=ROOT/('.lab/capture-film-test/proof.json' if film else '.lab/capture-halation-test/proof.json' if halo else '.lab/capture-banks-test/proof.json' if banks else '.lab/capture-repeat-test/proof.json' if repeat else '.lab/capture-fast-test/proof.json' if fast else '.lab/capture-full-test/proof.json' if full else '.lab/capture-grain-test/proof.json' if grain else '.lab/capture-lease-test/proof.json' if lease else '.lab/capture-early-test/proof.json' if early else '.lab/capture-frame-test/proof.json' if frame else '.lab/capture-vfx-test/proof.json' if vfx else '.lab/capture-detail-test/proof.json' if detail else '.lab/capture-multi-test/proof.json' if multi else '.lab/jpeg-kernel-callback/proof.json')
+    multi = a.route in ('multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
+    fixture_path=ROOT/('.lab/capture-vignette-test/proof.json' if vignette else '.lab/capture-film-test/proof.json' if film else '.lab/capture-halation-test/proof.json' if halo else '.lab/capture-banks-test/proof.json' if banks else '.lab/capture-repeat-test/proof.json' if repeat else '.lab/capture-fast-test/proof.json' if fast else '.lab/capture-full-test/proof.json' if full else '.lab/capture-grain-test/proof.json' if grain else '.lab/capture-lease-test/proof.json' if lease else '.lab/capture-early-test/proof.json' if early else '.lab/capture-frame-test/proof.json' if frame else '.lab/capture-vfx-test/proof.json' if vfx else '.lab/capture-detail-test/proof.json' if detail else '.lab/capture-multi-test/proof.json' if multi else '.lab/jpeg-kernel-callback/proof.json')
     fixture = json.loads(fixture_path.read_text())
     if not fixture.get('bridge_and_exception_abi_tested' if multi else 'kernel_callback_bridge_tested') or any(
         sha((ROOT/n).read_bytes())!=v for n,v in fixture['source_sha256'].items()):
         raise ValueError('Run the current QEMU callback fixture first')
     if grain:
-        pixel_fixture=json.loads((ROOT/('.lab/capture-film-record/proof.json' if film else '.lab/capture-halation-record/proof.json' if halo else '.lab/capture-full-record/proof.json' if full else '.lab/capture-grain-record/proof.json')).read_text())
+        pixel_fixture=json.loads((ROOT/('.lab/capture-vignette-record/proof.json' if vignette else '.lab/capture-film-record/proof.json' if film else '.lab/capture-halation-record/proof.json' if halo else '.lab/capture-full-record/proof.json' if full else '.lab/capture-grain-record/proof.json')).read_text())
         if not pixel_fixture.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in pixel_fixture['source_sha256'].items()):
             raise ValueError('Run current bounded grain/lease/rollback fixture first')
     if repeat:
-        control_fixture=json.loads((ROOT/('.lab/capture-film-control/proof.json' if film else '.lab/capture-halation-control/proof.json' if halo else '.lab/capture-repeat-control/proof.json')).read_text())
+        control_fixture=json.loads((ROOT/('.lab/capture-vignette-control/proof.json' if vignette else '.lab/capture-film-control/proof.json' if film else '.lab/capture-halation-control/proof.json' if halo else '.lab/capture-repeat-control/proof.json')).read_text())
         if not control_fixture.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in control_fixture['source_sha256'].items()):
             raise ValueError('Run current repeat selection and dispatch fixture first')
     out = ROOT/'.lab/capture-kernel'/str(time.time_ns()); out.mkdir(parents=True)
@@ -64,16 +65,23 @@ def build(a):
         chosen=[n for n in chosen if n not in ('research/kernel_probe/capture_banks.c','research/kernel_probe/capture_banks_bridge.S','research/kernel_probe/capture_repeat_control.h','research/kernel_probe/capture_grain_record.h')]+['research/kernel_probe/capture_halation.c','research/kernel_probe/capture_halation_bridge.S','research/kernel_probe/capture_halation_control.h','research/kernel_probe/capture_halation_record.h']
     if film:
         chosen=[n for n in chosen if 'capture_halation' not in n]+['research/kernel_probe/capture_film.c','research/kernel_probe/capture_film_bridge.S','research/kernel_probe/capture_film_control.h','research/kernel_probe/capture_film_record.h']
+    if vignette:
+        chosen=[n for n in chosen if 'capture_film' not in n]+['research/kernel_probe/capture_vignette.c','research/kernel_probe/capture_vignette_bridge.S','research/kernel_probe/capture_vignette_control.h','research/kernel_probe/capture_vignette_record.h','research/kernel_probe/vignette_core.c','payloads/a7-film-vignette.c','payloads/a7-film-vignette.h']
     sources = {n:sha((ROOT/n).read_bytes()) for n in chosen}
     identity = list(struct.unpack('<4I', hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).digest()[:16]))
-    name='a7capfilm' if film else 'a7caphalo3' if halo else 'a7capbanks' if banks else 'a7caprepeat' if repeat else 'a7capfast' if fast else 'a7capfull' if full else 'a7capgrain' if grain else 'a7caplease' if lease else 'a7capearly' if early else 'a7capframe' if frame else 'a7capvfx' if vfx else 'a7capdetail' if detail else 'a7capmulti' if multi else 'a7capture'
+    name='a7capvig' if vignette else 'a7capfilm' if film else 'a7caphalo3' if halo else 'a7capbanks' if banks else 'a7caprepeat' if repeat else 'a7capfast' if fast else 'a7capfull' if full else 'a7capgrain' if grain else 'a7caplease' if lease else 'a7capearly' if early else 'a7capframe' if frame else 'a7capvfx' if vfx else 'a7capdetail' if detail else 'a7capmulti' if multi else 'a7capture'
     units=('capture_halation.c','capture_halation_bridge.S','grain_core.c') if halo else ('capture_banks.c','capture_banks_bridge.S','grain_core.c') if banks else ('capture_repeat.c','capture_repeat_bridge.S','grain_core.c') if repeat else ('capture_fast.c','capture_fast_bridge.S','grain_core.c') if fast else ('capture_full.c','capture_full_bridge.S','grain_core.c') if full else ('capture_grain.c','capture_grain_bridge.S','grain_core.c') if grain else ('capture_lease.c','capture_lease_bridge.S') if lease else ('capture_early.c','capture_early_bridge.S') if early else ('capture_frame.c','capture_frame_bridge.S') if frame else ('capture_vfx.c','capture_vfx_bridge.S') if vfx else ('capture_detail.c','capture_detail_bridge.S') if detail else ('capture_multi.c','capture_multi_bridge.S') if multi else ('capture_probe.c','capture_bridge.S')
     if film:units=('capture_film.c','capture_film_bridge.S','grain_core.c')
+    if vignette:units=('capture_vignette.c','capture_vignette_bridge.S','grain_core.c','vignette_core.c')
     (out/'Makefile').write_text(f'obj-m += {name}.o\n{name}-y := '+ ' '.join(Path(n).stem+'.o' for n in units)+'\n')
     if halo:
         for n in ('capture_halation_control.h','capture_halation_record.h'):shutil.copyfile(ROOT/'research/kernel_probe'/n,out/n)
     if film:
         for n in ('capture_film_control.h','capture_film_record.h'):shutil.copyfile(ROOT/'research/kernel_probe'/n,out/n)
+    if vignette:
+        for n in ('capture_vignette_control.h','capture_vignette_record.h'):shutil.copyfile(ROOT/'research/kernel_probe'/n,out/n)
+        for n in ('a7-film-vignette.c','a7-film-vignette.h'):shutil.copyfile(ROOT/'payloads'/n,out/n)
+        with (out/'Makefile').open('a') as f:f.write('CFLAGS_vignette_core.o += -std=gnu99\n')
     if repeat:shutil.copyfile(ROOT/'research/kernel_probe/capture_repeat_control.h',out/'capture_repeat_control.h')
     if grain:
         with (out/'Makefile').open('a') as f:f.write('ccflags-y += -I$(src)/compat\nCFLAGS_grain_core.o += -std=gnu99\n')
@@ -148,13 +156,13 @@ def build(a):
             '-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
             '-nostdlib','-shared','-Wl,--no-undefined','-Wl,-z,noexecstack','-Wall','-Wextra','-Werror',
             '-DA7_CAPTURE_ACTION='+str(i),
-            *(['-DA7_CAPTURE_ARGS="arm=1 selection=0"'] if film and action=='arm' else ['-DA7_CAPTURE_ARGS="arm=1 selection=1"'] if halo and action=='arm' else ['-DA7_CAPTURE_ARGS="arm=1 selection=57"'] if repeat and action=='arm' else []),'-DA7_CAPTURE_NAME="'+name+'"',
+            *(['-DA7_CAPTURE_ARGS="arm=1 selection=53904 diagnostic=1"'] if vignette and a.vignette_diagnostic and action=='arm' else ['-DA7_CAPTURE_ARGS="arm=1 selection=0"'] if film and action=='arm' else ['-DA7_CAPTURE_ARGS="arm=1 selection=1"'] if halo and action=='arm' else ['-DA7_CAPTURE_ARGS="arm=1 selection=57"'] if repeat and action=='arm' else []),'-DA7_CAPTURE_NAME="'+name+'"',
             '-DA7_REPORT_BYTES='+str(text_bytes),'-I'+str(out),str(ROOT/'research/kernel_probe_loader.c'),
             'embedded.S','-o',target],cwd=out,check=True)
         payloads[action]=sha((out/target).read_bytes())
     proof=dict(source_sha256=sources,source_id=identity,module_sha256=sha(module.read_bytes()),
         payload_sha256=payloads,pins=PINS,abi=actual,fixture_sha256=sha(fixture_path.read_bytes()),
-        route=a.route,module_name=name,text_bytes=text_bytes,report_words=368 if detail or vfx else 256 if multi else 64,
+        route=a.route,diagnostic=bool(vignette and a.vignette_diagnostic),module_name=name,text_bytes=text_bytes,report_words=368 if detail or vfx else 256 if multi else 64,
         live=[],image_pixel_write_requested=grain,image_pixels_written=False,firmware_written=False,flash_ready=False)
     (out/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
     print('BUNDLE',out)
@@ -193,15 +201,15 @@ def run(out,action):
         if action=='arm' and (values[1]!=1 or values[11]!=1):raise ValueError('Probe not armed')
         if action=='collect' and values[5]!=1:raise ValueError('Probe was not disarmed')
         result.update(verified=True,values=values,module_pinned_until_reboot=bool(values[11]))
-        if proof.get('route') in ('early','lease','grain','full','fast','repeat','banks','halation','film'):
+        if proof.get('route') in ('early','lease','grain','full','fast','repeat','banks','halation','film','vignette'):
             result['early_source']=dict(state=values[17],status=values[18] if values[18]<0x80000000 else values[18]-0x100000000,handle=hex(values[21]),unit=hex(values[22]),dmm_root=hex(values[20]),open_count=(values[228]>>8)&255,rendezvous=(values[228]>>16)&255,generation=values[228]>>24,unit_state=values[229]&65535,extent_count=values[229]>>16,extent_words=[hex(x) for x in values[256:268]])
-        if proof.get('route') in ('lease','grain','full','fast','repeat','banks','halation','film'):
+        if proof.get('route') in ('lease','grain','full','fast','repeat','banks','halation','film','vignette'):
             result['lease_test']=dict(attempted=bool(values[309]),passed=bool(values[310]),cache_type=values[305],open_status=values[306],close_status=values[307],count=values[308])
-        if proof.get('route') in ('grain','full','fast','repeat','banks','halation','film'):
+        if proof.get('route') in ('grain','full','fast','repeat','banks','halation','film','vignette'):
             result['grain_patch']=dict(state=values[344],status=values[345],changed=values[346],ticks=values[348],rollback=values[350],private_selftest=values[352])
-            result['grain_patch']['processed_luma_pixels' if proof.get('route') in ('full','fast','repeat','banks','halation','film') else 'written_luma_bytes']=values[349]
+            result['grain_patch']['processed_luma_pixels' if proof.get('route') in ('full','fast','repeat','banks','halation','film','vignette') else 'written_luma_bytes']=values[349]
             if values[349]:proof['image_pixels_written']=True
-        if proof.get('route') in ('repeat','banks','halation','film'):
+        if proof.get('route') in ('repeat','banks','halation','film','vignette'):
             result['repeat']=dict(selection=values[353],seed=values[354],completed=values[355],skipped_off=values[356],failed=values[357])
         if proof.get('route')=='frame':
             result['source_sample']=dict(state=values[17],status=values[18] if values[18]<0x80000000 else values[18]-0x100000000,rows=values[19],va=hex(values[20]),base=hex(values[21]))
@@ -238,7 +246,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('action',choices=['build','selftest','arm','collect'])
     p.add_argument('--bundle',type=Path)
-    p.add_argument('--route',choices=['stage','multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film'],default='stage')
+    p.add_argument('--route',choices=['stage','multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette'],default='stage')
+    p.add_argument('--vignette-diagnostic',action='store_true')
     for name in ('avcam','kernel','liro','kernel-source','dmm'):p.add_argument('--'+name,type=Path)
     a=p.parse_args()
     if a.bundle:out=a.bundle.resolve()

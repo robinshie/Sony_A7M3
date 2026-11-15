@@ -11,7 +11,10 @@
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
 #include "capture-pins.h"
-#ifdef A7_FILM_BANKS
+#ifdef A7_VIGNETTE_BANKS
+#define UDF_WORD 0xaa84f7f0U
+#define TEST_RETURN 0x7a84
+#elif defined(A7_FILM_BANKS)
 #define UDF_WORD 0xaa83f7f0U
 #define TEST_RETURN 0x7a83
 #elif defined(A7_HALATION_TEST)
@@ -57,7 +60,9 @@ static char *bridges[] = {a7_bridge_0,a7_bridge_1,a7_bridge_2,a7_bridge_3};
 
 #ifdef A7_GRAIN_REPEAT
 #include <linux/jiffies.h>
-#ifdef A7_FILM_BANKS
+#ifdef A7_VIGNETTE_BANKS
+#include "capture_vignette_control.h"
+#elif defined(A7_FILM_BANKS)
 #include "capture_film_control.h"
 #elif defined(A7_HALATION_TEST)
 #include "capture_halation_control.h"
@@ -74,7 +79,9 @@ static char *bridges[] = {a7_bridge_0,a7_bridge_1,a7_bridge_2,a7_bridge_3};
 #include "a7source.c"
 #endif
 #ifdef A7_GRAIN
-#ifdef A7_FILM_BANKS
+#ifdef A7_VIGNETTE_BANKS
+#include "capture_vignette_record.h"
+#elif defined(A7_FILM_BANKS)
 #include "capture_film_record.h"
 #elif defined(A7_HALATION_TEST)
 #include "capture_halation_record.h"
@@ -98,7 +105,12 @@ void a7_multi_record(unsigned index,const unsigned int *regs)
     n=atomic_inc_return(&total);report[2]=n;report[16]=n;
     frame_selection=ACCESS_ONCE(selection);
     report[353]=frame_selection;
-#ifdef A7_FILM_BANKS
+#ifdef A7_VIGNETTE_BANKS
+    frame_grain=frame_selection&15;frame_halation=(int)((frame_selection>>4)&31)-9;
+    frame_vignette=(int)((frame_selection>>9)&31)-9;
+    if(diagnostic){frame_grain=0;frame_halation=0;frame_vignette=completed==0?-9:completed==1?0:9;}
+    if(diagnostic?(!frame_selection||completed>=3):(!(frame_selection>>14)||(!frame_grain&&!frame_halation&&!frame_vignette))){
+#elif defined(A7_FILM_BANKS)
     frame_grain=frame_selection&15;frame_halation=(int)((frame_selection>>4)&31)-9;
     if(!(frame_selection>>9)||(!frame_grain&&!frame_halation)){
 #elif defined(A7_HALATION_TEST)

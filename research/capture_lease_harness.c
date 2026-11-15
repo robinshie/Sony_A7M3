@@ -21,6 +21,14 @@ static int frame_halation,disarmed=1;
 #ifdef TEST_FILM
 static unsigned frame_grain,frame_seed=0x5a7f1203;
 #endif
+#ifdef TEST_VIGNETTE
+#define A7_VIGNETTE_BANKS 1
+static int frame_vignette;
+static unsigned diagnostic;
+static unsigned busy_attempts;
+#define cpu_relax() ((void)0)
+#define module_param_array(a,b,c,d)
+#endif
 static unsigned test_physical=0x1a000000;
 static int bad_mapping,bad_cache;
 static unsigned char *const unit=(void *)0x42095ab8;
@@ -31,7 +39,12 @@ static void *memcpy(void *d,const void *s,size_t n){unsigned char *a=d;const uns
 static int memcmp(const void *a,const void *b,size_t n){const unsigned char *x=a,*y=b;while(n--){if(*x!=*y)return *x-*y;x++;y++;}return 0;}
 static int probe_kernel_read(void *d,const void *s,unsigned n){memcpy(d,s,n);return 0;}
 static unsigned long kallsyms_lookup_name(const char *s){(void)s;return 0;}
-static int raw_spin_trylock(raw_spinlock_t *p){(void)p;check(!held_lock);if(lock_busy)return 0;held_lock=1;return 1;}
+static int raw_spin_trylock(raw_spinlock_t *p){(void)p;check(!held_lock);
+#ifdef TEST_VIGNETTE
+    if(busy_attempts){busy_attempts--;return 0;}
+#endif
+    if(lock_busy)return 0;
+    held_lock=1;return 1;}
 static void raw_spin_unlock(raw_spinlock_t *p){(void)p;check(held_lock);held_lock=0;}
 #define raw_spin_trylock_irqsave(p,f) ((f)=0,raw_spin_trylock(p))
 #define raw_spin_unlock_irqrestore(p,f) ((void)(f),raw_spin_unlock(p))
@@ -63,7 +76,9 @@ static void mb(void){check(!held_lock);barriers++;jiffies++;if(barriers==corrupt
 *(volatile unsigned char *)(0x7a000000+1936*12160+2952*2+1)^=1;
 #endif
 }
-#ifdef TEST_FILM
+#ifdef TEST_VIGNETTE
+#include "kernel_probe/capture_vignette_record.h"
+#elif defined(TEST_FILM)
 #include "kernel_probe/capture_film_record.h"
 #elif defined(TEST_HALATION)
 #include "kernel_probe/capture_halation_record.h"
@@ -106,20 +121,60 @@ void guest_main(void){
     (void)disarmed;
     (void)module;(void)sysfs_create_bin_file;(void)sysfs_remove_bin_file;
     check(!grain_publish()&&report[352]==1);
+#ifdef TEST_VIGNETTE
+    for(bank=0;bank<2;bank++)for(c=0;c<8;c++){
+#else
     for(bank=0;bank<2;bank++)for(c=0;c<5;c++){
+#endif
         test_physical=bank?0x24000000:0x1a000000;pixels=(void *)(test_physical+0x60000000);
         frame_grain=c<2?0:9;frame_halation=c==0||c==3?-9:c==1||c==4?9:0;
+#ifdef TEST_VIGNETTE
+        frame_vignette=c%3==0?-9:c%3==1?0:9;
+        diagnostic=c>=5;completed=c-5;
+        if(diagnostic){frame_grain=0;frame_halation=0;frame_vignette=c==5?-9:c==6?0:9;}
+#endif
         for(i=0;i<12160*4000;i++)pixels[i]=(i%12160<160)?0xc7:(i&1)?((i%12160)/2<3080?105:250):128;
         reset();check(!take_lease_test()&&report[310]==1&&opens==1&&closes==1&&!held_lock);
-        check(report[344]==3&&!report[345]&&report[349]==24000000&&!report[350]);
+        check(report[344]==3&&!report[345]&&report[349]==((frame_grain||frame_halation
+#ifdef TEST_VIGNETTE
+          ||frame_vignette
+#endif
+        )?24000000:0)&&!report[350]);
         check(report[359]==test_physical&&report[360]==test_physical+0x60000000&&report[361]==frame_grain);
         changed=0;
         for(i=0;i<12160*4000;i++){
             unsigned char before=(i%12160<160)?0xc7:(i&1)?((i%12160)/2<3080?105:250):128;
-            if(pixels[i]!=before){check(i%12160>=160);if(frame_halation<=0)check(i&1);if(!frame_grain&&frame_halation<0)check(pixels[i]<before);changed++;}
+            if(pixels[i]!=before){check(i%12160>=160);if(frame_halation<=0)check(i&1);if(!frame_grain&&frame_halation<0
+#ifdef TEST_VIGNETTE
+        &&frame_vignette<=0
+#endif
+        ){check(pixels[i]<before);}
+                changed++;
+            }
         }
-        check(changed>0&&!unit[0x11]&&*(unsigned short *)(unit+0x14)==1);
+#ifdef TEST_VIGNETTE
+        check((changed>0)==(frame_grain||frame_halation||frame_vignette));
+        if(diagnostic){
+            unsigned *sample=completed==0?vignette_sample0:completed==1?vignette_sample1:vignette_sample2;
+            unsigned verify[160];sample_vignette(verify,pixels+160);
+            check(sample[0]==0x41375647&&sample[1]==completed&&(int)sample[4]==frame_vignette);
+            check(!memcmp(verify,sample+166,sizeof verify));
+            check(!memcmp(sample+6+128,sample+166+128,32*sizeof(unsigned)));
+            check((memcmp(sample+6,sample+166,128*sizeof(unsigned))!=0)==(frame_vignette!=0));
+        }
+        check(!unit[0x11]
+#else
+        check(changed>0&&!unit[0x11]
+#endif
+        &&*(unsigned short *)(unit+0x14)==1);
     }
+#ifdef TEST_VIGNETTE
+    diagnostic=0;reset();frame_vignette=10;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);frame_vignette=0;
+    reset();frame_grain=0;frame_halation=0;busy_attempts=3;
+    check(!take_lease_test()&&report[363]==4&&opens==1&&closes==1&&!held_lock);
+    reset();busy_attempts=64;
+    check(take_lease_test()==-EBUSY&&report[363]==64&&!opens&&!closes&&!held_lock);
+#endif
     reset();bad_mapping=1;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);
     reset();bad_cache=1;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);
     reset();frame_grain=10;check(take_lease_test()==-1&&closes==1&&!barriers);frame_grain=0;

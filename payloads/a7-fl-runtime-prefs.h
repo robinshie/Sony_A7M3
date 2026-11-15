@@ -28,8 +28,33 @@ struct a7_fl_preference {
      * Each bank: grain, halation, black, shadow, midtone, highlight, white.
      * Serialized as signed five-bit values alongside the original controls. */
     int8_t film[3][7];
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    /* Schema 5 appends three signed bytes at record offsets 116..118.
+     * All schema-4 field positions and the 128-byte record size stay fixed. */
+    int8_t vignette[3];
+#endif
 #endif
 };
+#ifdef A7_FL_FILM_CONTROLS
+#ifdef A7_FL_CAPTURE_VIGNETTE
+#define A7_FL_FILM_SCHEMA 5u
+#else
+#define A7_FL_FILM_SCHEMA 4u
+#endif
+static inline int a7_fl_film_schema(unsigned schema){return schema>=4&&schema<=A7_FL_FILM_SCHEMA;}
+static inline int a7_fl_film_get(const struct a7_fl_preference *p,unsigned bank,unsigned index){
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    if(index==7)return p->vignette[bank];
+#endif
+    return p->film[bank][index];
+}
+static inline void a7_fl_film_set(struct a7_fl_preference *p,unsigned bank,unsigned index,int value){
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    if(index==7){p->vignette[bank]=(int8_t)value;return;}
+#endif
+    p->film[bank][index]=(int8_t)value;
+}
+#endif
 void a7_fl_preference_switch(struct a7_fl_preference *,int preset);
 int a7_fl_preference_migrate(struct a7_fl_preference *);
 int a7_fl_preference_migrate_three(struct a7_fl_preference *);

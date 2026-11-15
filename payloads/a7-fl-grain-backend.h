@@ -5,4 +5,6 @@
 int a7_fl_grain_apply(unsigned preset,unsigned strength);
 /* Film kernel only: one atomic selection for preset, grain and signed halo. */
 int a7_fl_film_apply(unsigned preset,unsigned grain,int halation);
+/* Vignette kernel: all three capture controls in one atomic snapshot. */
+int a7_fl_vignette_apply(unsigned preset,unsigned grain,int halation,int vignette);
 #endif

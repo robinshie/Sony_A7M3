@@ -47,18 +47,32 @@ def main():
     ap.add_argument('--film-curves',action='store_true',help='Build the FL3 five-point curve candidate for offline validation')
     ap.add_argument('--capture-grain-menu',action='store_true',help='Offline grain menu and independent saved banks; not a flashable grain backend')
     ap.add_argument('--capture-halation-menu',action='store_true',help='Offline signed halation menu and persistence fixture; no device backend')
+    ap.add_argument('--capture-vignette-menu',action='store_true',help='Offline vignette menu and schema-5 persistence; not flashable')
     ap.add_argument('--capture-grain-kernel',type=Path,help='Verified dual-bank repeated-shot kernel bundle to embed')
     ap.add_argument('--capture-grain-bridge-proof',type=Path)
     ap.add_argument('--capture-film-kernel',type=Path)
     ap.add_argument('--capture-film-bridge-proof',type=Path)
     ap.add_argument('--capture-film-basis',type=Path)
+    ap.add_argument('--capture-vignette-kernel',type=Path)
+    ap.add_argument('--capture-vignette-bridge-proof',type=Path)
+    ap.add_argument('--capture-vignette-basis',type=Path)
     args=ap.parse_args()
-    film_mode=bool(args.capture_film_kernel)
-    if film_mode:
+    vignette_mode=bool(args.capture_vignette_kernel)
+    if vignette_mode:
+        if args.capture_film_kernel or args.capture_grain_kernel or not args.capture_vignette_bridge_proof:ap.error('Vignette build requires its own kernel and verified bridge')
+        args.capture_vignette_menu=True
+    if args.capture_vignette_menu:
+        if args.capture_film_kernel or args.capture_grain_kernel:ap.error('Vignette menu requires its own verified backend before device builds')
+        args.capture_halation_menu=True
+    film_mode=bool(args.capture_film_kernel) or vignette_mode
+    if film_mode and not vignette_mode:
         if args.capture_grain_kernel or not args.capture_film_bridge_proof or not args.capture_film_basis:ap.error('Film build requires its bridge and real-shot basis, not a grain kernel')
         args.capture_halation_menu=True
         args.capture_grain_kernel=args.capture_film_kernel
         args.capture_grain_bridge_proof=args.capture_film_bridge_proof
+    if vignette_mode:
+        args.capture_grain_kernel=args.capture_vignette_kernel
+        args.capture_grain_bridge_proof=args.capture_vignette_bridge_proof
     if args.capture_halation_menu:
         if args.capture_grain_kernel and not film_mode:ap.error('The offline halation menu cannot be built as a device candidate')
         args.capture_grain_menu=True
@@ -94,6 +108,8 @@ def main():
     if args.capture_halation_menu:OUT=OUT.with_name('native-module-halation-menu')
     if args.capture_grain_kernel:OUT=OUT.with_name('native-module-grain-capture')
     if film_mode:OUT=OUT.with_name('native-module-film-capture')
+    if args.capture_vignette_menu:OUT=OUT.with_name('native-module-vignette-menu')
+    if vignette_mode:OUT=OUT.with_name('native-module-vignette-capture')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -150,7 +166,7 @@ def main():
         for name,entry in locale['files'].items():
             if sha((ROOT/'.lab/native-fl-curve-strings'/name).read_bytes())!=entry['after_sha256']:
                 raise ValueError('Curve locale artifact identity differs')
-    for enabled,feature in ((args.capture_grain_menu,'grain'),(args.capture_halation_menu,'halation')):
+    for enabled,feature in ((args.capture_grain_menu,'grain'),(args.capture_halation_menu,'halation'),(args.capture_vignette_menu,'vignette')):
         if not enabled:continue
         locale_key=f'native-fl-{feature}-strings/proof.json'
         resource_key=f'native-resource-{feature}/report.json'
@@ -166,7 +182,11 @@ def main():
                 raise ValueError('Texture locale artifact identity differs')
     grain_kernel_proof=None
     film_ready=False
-    if film_mode:
+    if vignette_mode:
+        from capture_vignette_bind import bind
+        grain_kernel_proof,film_deps,film_ready=bind(args.capture_vignette_kernel.resolve(),args.capture_vignette_bridge_proof.resolve(),args.capture_vignette_basis.resolve() if args.capture_vignette_basis else None,OUT)
+        dependency_proofs.update(film_deps)
+    elif film_mode:
         from capture_film_bind import bind
         grain_kernel_proof,film_deps,film_ready=bind(args.capture_film_kernel.resolve(),args.capture_film_bridge_proof.resolve(),args.capture_film_basis.resolve(),OUT)
         dependency_proofs.update(film_deps)
@@ -309,12 +329,13 @@ call_kernel_writer:
         if args.film_curves:
             adjust_dir='native-adjust-film'
             run([sys.executable,str(ROOT/'research/native_adjust_fixture.py'),'--usr',str(args.usr),'--film-curve-menu'])
-            run([sys.executable,str(ROOT/'research/film_worklog_test.py')])
-            path=ROOT/'.lab/film-worklog/proof.json'
+            run([sys.executable,str(ROOT/'research/film_worklog_test.py'),*(['--vignette'] if args.capture_vignette_menu else [])])
+            worklog_key='film-worklog-vignette/proof.json' if args.capture_vignette_menu else 'film-worklog/proof.json'
+            path=ROOT/'.lab'/worklog_key
             worklog=json.loads(path.read_text())
             for source_path,digest in worklog['source_sha256'].items():
                 if sha((ROOT/source_path).read_bytes())!=digest:raise ValueError('Stale curve journal proof: '+source_path)
-            dependency_proofs['film-worklog/proof.json']=sha(path.read_bytes())
+            dependency_proofs[worklog_key]=sha(path.read_bytes())
         adjust_path=ROOT/'.lab'/adjust_dir/'report.json';adjust=json.loads(adjust_path.read_text())
         for source_path,digest in adjust['source_sha256'].items():
             if sha((ROOT/'research'/source_path).read_bytes())!=digest:raise ValueError('Stale node fixture: '+source_path)
@@ -341,6 +362,7 @@ call_kernel_writer:
     if args.film_curves:flags+=['-DA7_FL_FILM_CONTROLS','-Wno-missing-field-initializers']
     if args.capture_grain_menu:flags+=['-DA7_FL_CAPTURE_GRAIN']
     if args.capture_halation_menu:flags+=['-DA7_FL_CAPTURE_HALATION']
+    if args.capture_vignette_menu:flags+=['-DA7_FL_CAPTURE_VIGNETTE']
     if args.capture_grain_kernel:flags+=['-DA7_FL_CAPTURE_GRAIN_BACKEND']
     if args.spatial_settings_only:flags+=['-DA7_FL_SPATIAL_SETTINGS_ONLY']
     if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
@@ -364,11 +386,17 @@ call_kernel_writer:
     result=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     log=result.stdout+result.stderr;(OUT/'qemu.log').write_bytes(log);print(log.decode(),end='')
     if (b'NATIVE_FL_CURVE_MAIN_PASSED' if args.film_curves else b'NATIVE_FL_MODULE_PASSED') not in log or b'FAIL ' in log:raise ValueError('Integration fixture failed')
-    run(['arm-none-eabi-gcc',*flags,'-DA7_FL_TEST_SAVED_BOOT',*(['-DA7_FL_TEST_LEICA_BOOT'] if args.film_curves else []),'-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
+    run(['arm-none-eabi-gcc',*flags,'-DA7_FL_TEST_SAVED_BOOT',*(['-DA7_FL_TEST_LEICA_BOOT'] if args.film_curves else []),*(['-DA7_FL_TEST_BOOT_RECOVERY'] if args.film_curves and args.capture_grain_kernel else []),'-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
          str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p not in ('payloads/a7-fl-grain-backend.c','payloads/a7-fl-dialog.c','payloads/a7-fl-preview.c','payloads/a7-fl-preview-cycle.c')],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
     boot_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     boot_log=boot_run.stdout+boot_run.stderr;(OUT/'boot.log').write_bytes(boot_log);print(boot_log.decode(),end='')
     if (b'NATIVE_FL_CURVE_BOOT_PASSED' if args.film_curves else b'NATIVE_FL_MODULE_BOOT_PASSED') not in boot_log or b'FAIL ' in boot_log:raise ValueError('Cold boot integration fixture failed')
+    if args.film_curves and args.capture_grain_kernel and b'NATIVE_FL_CONFIRMED_HISTORY_RETRY_PASSED' not in boot_log:raise ValueError('Confirmed history and startup retry fixture missing')
+    if vignette_mode:
+        run([sys.executable,str(ROOT/'research/native_boot_recovery_test.py'),'--fixture',str(OUT)])
+        recovery_path=ROOT/'.lab/native-boot-recovery/proof.json'
+        if not json.loads(recovery_path.read_text()).get('passed'):raise ValueError('Boot recovery regression failed')
+        dependency_proofs['native-boot-recovery/proof.json']=sha(recovery_path.read_bytes())
     if capture_look and not args.film_curves and (b'NATIVE_FL_CAPTURE_MODULE_PASSED' not in log or
                          b'NATIVE_FL_CAPTURE_BOOT_PASSED' not in boot_log):
         raise ValueError('CAP transaction integration fixture failed')
@@ -420,7 +448,7 @@ call_kernel_writer:
            'preview_timed_cycle':args.preview_cycle,
            'dual_look':args.dual_look,
            'leica_look':args.leica_look,
-           'preference_schema':4 if args.film_curves else 3 if args.leica_look else 2 if args.look_banks else 1,
+           'preference_schema':5 if args.capture_vignette_menu else 4 if args.film_curves else 3 if args.leica_look else 2 if args.look_banks else 1,
            'independent_look_banks':args.look_banks,
            'fl2_resource':0x0204fda8 if args.look_banks else None,
            'preview_refresh_hardware_verified':False,
@@ -431,11 +459,11 @@ call_kernel_writer:
         # Release evidence is regenerated by its owning tests, never promoted
         # by editing a report. Physical camera acceptance remains separate.
         run([sys.executable,str(ROOT/'research/film_controls_test.py'),
-             *(['--signed-halation'] if args.capture_halation_menu else [])])
+             *(['--signed-halation'] if args.capture_halation_menu else []),*(['--vignette'] if args.capture_vignette_menu else [])])
         run([sys.executable,str(ROOT/'research/native_capture_controls_test.py'),
              '--route',str(args.capture_look_proof.resolve().parent),
              '--dual-look','--leica-look','--film-curves'])
-        storage_key='film-controls-halation/proof.json' if args.capture_halation_menu else 'film-controls/proof.json'
+        storage_key='film-controls-halation-vignette/proof.json' if args.capture_vignette_menu else 'film-controls-halation/proof.json' if args.capture_halation_menu else 'film-controls/proof.json'
         for key in (storage_key,'native-fivepoint-capture-test/proof.json'):
             path=ROOT/'.lab'/key
             check=json.loads(path.read_text())
@@ -472,10 +500,17 @@ call_kernel_writer:
         proof.update(capture_grain_kernel=True,ready_for_staging=True,kernel_sha256=grain_kernel_proof['module_sha256'],feature_scope='Capture-only JPEG L grain with menu strengths and independent FL banks; no halation or live-view grain')
         for n in ('payloads/a7-fl-grain-backend.h','research/capture_grain_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
         for n in ('grain.ko','a7-fl-grain-kernel.h','grain-blob.S','grain-sample-proof.json'):proof['artifact_sha256'][n]=sha((OUT/n).read_bytes())
-    if film_mode:
+    if film_mode and not vignette_mode:
         if b'NATIVE_FL_HALATION_CAPTURE_DISPATCH_PASSED' not in log or b'NATIVE_FL_HALATION_CAPTURE_BOOT_PASSED' not in boot_log:raise ValueError('Film capture lifecycle fixture missing')
         proof.update(capture_film_kernel=True,ready_for_staging=film_ready,feature_scope='Capture-only grain and signed halation, independent saved FL banks; cold-boot verification required',hardware_basis_verified=film_ready)
         for n in ('research/capture_film_bind.py','research/capture_halation_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
+    if args.capture_vignette_menu:
+        if b'NATIVE_FL_VIGNETTE_BANKS_PASSED' not in log or b'NATIVE_FL_VIGNETTE_BOOT_PASSED' not in boot_log:raise ValueError('Vignette menu and persistence evidence missing')
+        proof.update(capture_vignette_menu=True,ready_for_staging=False,feature_scope='Vignette menu and schema-5 storage only; no vignette capture kernel linked')
+    if vignette_mode:
+        if b'NATIVE_FL_VIGNETTE_CAPTURE_DISPATCH_PASSED' not in log or b'NATIVE_FL_VIGNETTE_CAPTURE_BOOT_PASSED' not in boot_log:raise ValueError('Vignette capture lifecycle missing')
+        proof.update(capture_vignette_kernel=True,ready_for_staging=film_ready,hardware_basis_verified=film_ready,confirmed_history_boot_recovery=True,feature_scope='Capture-only grain, signed halation and vignette, independent FL banks and confirmed-history boot recovery; cold-boot acceptance required')
+        for n in ('research/capture_vignette_bind.py','research/capture_vignette_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 if __name__=='__main__':main()

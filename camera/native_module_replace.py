@@ -33,10 +33,42 @@ REVISIONS[1502]=dict(old_sha='a35f7ffa0732f798c151e2ee7cb6bc9aa6bd7fd2ece842e197
 REVISIONS[151]=dict(old_sha='33d103c891660cf9521a7661a31c114252070bd2c49c92f930079bc10c15c49d',old_size=115380,temporary='.a7fl-r15h.new',backup='.a7fl-33d103c8.orig',journal='A7FLUP15H.LOG')
 REVISIONS[15101]=dict(old_sha='afe011239985632d26538559006d0a470dcea2b9e181a11979c6c6b7aef82d77',old_size=350332,temporary='.a7halo-zh.new',backup='.a7halo-zh.orig',journal='A7HALOZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='halation')
 REVISIONS[15102]=dict(old_sha='b96c0a7a441743ab6f202a0ed1364ae14cc844e12898918c783efea899529a59',old_size=393048,temporary='.a7halo-en.new',backup='.a7halo-en.orig',journal='A7HALOEN.LOG',locale='string_english.uxc',resource_set='halation')
+REVISIONS[16]=dict(old_sha='a44876fb9136b4fe31c9d82ad143bf87d9b10c3d05fc8b0ba77f0348a6c3324d',old_size=115120,temporary='.a7fl-r16.new',backup='.a7fl-a44876fb.orig',journal='A7FLUP16.LOG')
+REVISIONS[1601]=dict(old_sha='bf0e7522ca16885d18630a0fae44a7d57b07dc3f0c5fa12e44b91c495dec3ee1',old_size=350360,temporary='.a7vig-zh.new',backup='.a7vig-zh.orig',journal='A7VIGZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='vignette')
+REVISIONS[1602]=dict(old_sha='2ceb2896e97781a72a001a95fdccbf9b84eab96cdf9048af54b8083e1dc0577d',old_size=393076,temporary='.a7vig-en.new',backup='.a7vig-en.orig',journal='A7VIGEN.LOG',locale='string_english.uxc',resource_set='vignette')
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
+ if revision==16:
+  require(proof.get('ready_for_staging') is True and proof.get('hardware_basis_verified') is True and
+          proof.get('capture_vignette_kernel') is True and proof.get('capture_vignette_menu') is True and
+          proof.get('capture_halation_menu') is True and proof.get('capture_grain_menu') is True and
+          proof.get('all_look_curves') is True and proof.get('preference_schema')==5 and
+          proof.get('independent_look_banks') is True and proof.get('save_confirmation_dialog') is True and
+          proof.get('preview_timed_cycle') is True and proof.get('curve_release_verified') is True and
+          proof.get('confirmed_history_boot_recovery') is True,
+          'Vignette release requires full integrated controls and same-binary JPEG evidence.')
+  deps=proof.get('dependency_proof_sha256',{})
+  for key in ('film-worklog-vignette/proof.json','film-controls-halation-vignette/proof.json',
+              'native-fivepoint-capture-test/proof.json','native-resource-vignette/report.json',
+              'native-adjust-film/integration-proof.json','grain-backend/proof.json',
+              'capture-vignette-control/proof.json','capture-vignette-record/proof.json',
+              'capture-vignette-test/proof.json','film-vignette/proof.json','native-boot-recovery/proof.json'):
+   require(key in deps,'Missing vignette release evidence: '+key)
+  bases=[k for k in deps if k.startswith('capture-kernel/') and k.endswith('/jpeg-vignette-proof.json')]
+  require(len(bases)==1 and any(k.startswith('vignette-backend-live/') for k in deps),'Exact vignette JPEG and live bridge evidence missing.')
+  path=(LAB/bases[0]).resolve();root=path.parent
+  require(path.is_relative_to(LAB) and file_sha(path)==deps[bases[0]],'Vignette JPEG basis changed.')
+  jpeg=json.loads(path.read_text());pin_sources(jpeg)
+  require(jpeg.get('passed') is True and jpeg.get('partial') is False and jpeg.get('exposure_consistent') is True and
+          jpeg.get('kernel_sha256')==proof['kernel_sha256'],'Three fixed-exposure vignette JPEG results must pass.')
+  for name,digest in jpeg['artifact_sha256'].items():
+   target=(root/name).resolve();require(target.is_relative_to(root) and file_sha(target)==digest,'Vignette photo evidence changed.')
+  from research.capture_vignette_fetch import decode
+  require(all(s['verified'] for s in decode((root/'vignette-samples.bin').read_bytes())),'Vignette source samples failed.')
+  require(all(k in proof.get('artifact_sha256',{}) for k in ('grain.ko','grain-blob.S','a7-fl-grain-kernel.h','grain-sample-proof.json')),'Embedded vignette artifacts missing.')
+  return
  if revision==151:
   require(proof.get('ready_for_staging') is True and proof.get('hardware_basis_verified') is True and
           proof.get('capture_film_kernel') is True and proof.get('capture_halation_menu') is True and
@@ -188,8 +220,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15,151):
-  resource_set='fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151,16):
+  resource_set='fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

@@ -39,7 +39,7 @@ static void test_preferences(void){
     const int lo[8]={-9,-9,-9,0,-9,-3,1,0},hi[8]={9,9,9,9,9,3,5,9};
     uint8_t identity[32]={4},record[128],again[128];const char build[24]="37114_13.2026020901";
     for(unsigned trial=0;trial<2000;trial++){
-        struct a7_fl_preference p={0},q={0};p.generation=trial+1;p.enabled=(int)(trial%4);p.schema=4;p.candidate_crc=random_word();
+        struct a7_fl_preference p={0},q={0};p.generation=trial+1;p.enabled=(int)(trial%4);p.schema=A7_FL_FILM_SCHEMA;p.candidate_crc=random_word();
         int banks[3][8];for(unsigned b=0;b<3;b++)for(unsigned f=0;f<8;f++)banks[b][f]=lo[f]+(int)(random_word()%(unsigned)(hi[f]-lo[f]+1));
         unsigned active=p.enabled?(unsigned)p.enabled-1:0,n=0;
         for(unsigned b=0;b<3;b++){
@@ -47,14 +47,23 @@ static void test_preferences(void){
             if(b!=active)n++;
             for(unsigned f=0;f<7;f++)p.film[b][f]=(int8_t)(f<UNSIGNED_FILM_FIELDS?(int)(random_word()%10):(int)(random_word()%19)-9);
         }
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        for(unsigned b=0;b<3;b++)p.vignette[b]=(int8_t)((int)(random_word()%19)-9);
+#endif
         check(!a7_fl_preference_encode(record,&p,identity,build),"encode film");
         check(!a7_fl_preference_decode(&q,record,128,identity,build),"decode film");
-        check(q.schema==4&&q.enabled==p.enabled&&q.generation==p.generation&&q.candidate_crc==p.candidate_crc,"metadata roundtrip");
+        check(q.schema==A7_FL_FILM_SCHEMA&&q.enabled==p.enabled&&q.generation==p.generation&&q.candidate_crc==p.candidate_crc,"metadata roundtrip");
         check(equal(q.parameters,p.parameters,sizeof p.parameters)&&equal(q.other_parameters,p.other_parameters,8)&&equal(q.third_parameters,p.third_parameters,8)&&equal(q.film,p.film,21),"all banks roundtrip");
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        check(equal(q.vignette,p.vignette,3),"signed vignette banks roundtrip");
+#endif
         for(unsigned mode=0;mode<4;mode++){
             a7_fl_preference_switch(&q,(int)mode);unsigned bank=mode?mode-1:0;
             for(unsigned f=0;f<8;f++)check(q.parameters[f]==banks[bank][f],"original parameters remain independent");
             check(equal(q.film,p.film,21),"film parameters remain independent");
+#ifdef A7_FL_CAPTURE_VIGNETTE
+            check(equal(q.vignette,p.vignette,3),"vignettes independent of active mode");
+#endif
             check(!a7_fl_preference_encode(again,&q,identity,build),"switched encode");
             check(equal(record+24,again+24,29),"stable bank packing independent of selected mode");
         }
@@ -66,12 +75,12 @@ static void test_preferences(void){
         check(!a7_fl_preference_encode(record,&p,identity,build),"legacy encode");
         check(!a7_fl_preference_decode(&q,record,128,identity,build),"legacy decode with film build");
         struct a7_fl_preference expected=q;a7_fl_preference_migrate_three(&expected);
-        check(a7_fl_preference_migrate_film(&q)==1&&q.schema==4,"migrate film");
+        check(a7_fl_preference_migrate_film(&q)==1&&q.schema==A7_FL_FILM_SCHEMA,"migrate film");
         check(equal(q.parameters,expected.parameters,32)&&equal(q.other_parameters,expected.other_parameters,8)&&equal(q.third_parameters,expected.third_parameters,8),"migration preserves legacy banks");
         for(unsigned b=0;b<3;b++)for(unsigned f=0;f<7;f++)check(q.film[b][f]==0,"new controls neutral");
         check(a7_fl_preference_migrate_film(&q)==0,"idempotent migration");cases++;
     }
-    struct a7_fl_preference p={0},q={0};p.generation=2;p.schema=4;p.parameters[6]=p.other_parameters[6]=p.third_parameters[6]=3;
+    struct a7_fl_preference p={0},q={0};p.generation=2;p.schema=A7_FL_FILM_SCHEMA;p.parameters[6]=p.other_parameters[6]=p.third_parameters[6]=3;
     check(!a7_fl_preference_encode(record,&p,identity,build),"valid rejection baseline");
     for(unsigned bit=225;bit<256;bit++){
         for(unsigned i=0;i<128;i++)again[i]=record[i];
@@ -83,6 +92,18 @@ static void test_preferences(void){
         int valid=v>=(f<UNSIGNED_FILM_FIELDS?0:-9)&&v<=9;
         check((a7_fl_preference_encode(again,&p,identity,build)==0)==valid,"film control bounds");p.film[2][f]=0;
     }
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    for(unsigned b=0;b<3;b++)for(int v=-128;v<=127;v++){
+        p.vignette[b]=(int8_t)v;
+        check((a7_fl_preference_encode(again,&p,identity,build)==0)==(v>=-9&&v<=9),"vignette bounds");
+        p.vignette[b]=0;
+    }
+    for(unsigned byte=119;byte<124;byte++){
+        for(unsigned i=0;i<128;i++)again[i]=record[i];
+        again[byte]=1;crc(again);
+        check(a7_fl_preference_decode(&q,again,128,identity,build)<0,"schema 5 reserved bytes rejected");
+    }
+#endif
     check(!a7_fl_preference_encode(again,&p,identity,build),"valid record");again[12]=3;crc(again);
     check(a7_fl_preference_choose(&q,record,128,again,128,identity,build)==1&&q.generation==3,"new slot selected");
     for(unsigned n=0;n<128;n++)check(a7_fl_preference_choose(&q,record,128,again,n,identity,build)==0&&q.generation==2,"torn record ignored");
@@ -140,7 +161,10 @@ static void test_private(void){
         struct a7_fl_preference p={0},q={0};
         check(!a7_fl_preference_decode(&p,raw,128,raw+56,(const char *)raw+88),"actual saved record decodes");
         check(!a7_fl_preference_encode(out,&p,raw+56,(const char *)raw+88)&&equal(out,raw,128),"actual saved record byte-exact roundtrip");
-        int needs_migration=p.schema<4;
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        check(!p.vignette[0]&&!p.vignette[1]&&!p.vignette[2],"old camera configuration initializes vignette to zero");
+#endif
+        int needs_migration=p.schema<A7_FL_FILM_SCHEMA;
         struct a7_fl_preference expected=p;a7_fl_preference_migrate_three(&expected);
         check(a7_fl_preference_migrate_film(&p)==needs_migration,"actual saved record migrates only if needed");
         check(!a7_fl_preference_encode(out,&p,raw+56,(const char *)raw+88),"actual migrated record encodes");

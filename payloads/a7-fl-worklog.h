@@ -65,6 +65,12 @@ struct a7_fl_curve_io {
 int a7_fl_curve_verify(const struct a7_fl_curve_io *,const struct a7_fl_preference *);
 int a7_fl_curve_recover(struct a7_fl_worklog *,const struct a7_fl_curve_io *,
                         const struct a7_fl_preference *committed);
+/* Optional previous must come from a7_fl_store_previous, with its preview CRC
+ * checked after schema migration. Exact old confirmed tables can survive in
+ * Sony's own backup across a cold boot after the preview log has advanced. */
+int a7_fl_curve_recover_history(struct a7_fl_worklog *,const struct a7_fl_curve_io *,
+                               const struct a7_fl_preference *committed,
+                               const struct a7_fl_preference *previous);
 int a7_fl_curve_transition(struct a7_fl_worklog *,const struct a7_fl_curve_io *,
         const struct a7_fl_preference *before,const struct a7_fl_preference *next);
 #endif

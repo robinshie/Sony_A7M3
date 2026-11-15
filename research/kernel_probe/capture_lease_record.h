@@ -56,9 +56,24 @@ static int take_lease_test(void)
     for(acquired=184;acquired<208;acquired++)if(report[acquired])return -EBUSY;
     if(in_interrupt() || irqs_disabled() || in_atomic())return -EWOULDBLOCK;
     report[305]=arch_phys_to_cachetype2(physical,0x3000000);
-    /* Never wait for a lock potentially held by the intercepted caller.
-     * No pixel work, allocation, logging or sleeping while holding it. */
+    /* No unbounded wait: the intercepted caller could already own the lock.
+     * Vignette allows a finite series of try-locks for transient contention;
+     * interrupts are restored after every failed attempt. No pixel work,
+     * allocation, logging or sleeping while holding it. */
+#ifdef A7_VIGNETTE_BANKS
+    {
+        unsigned attempt;
+        report[363]=0;
+        for(attempt=0;attempt<64;attempt++){
+            report[363]=attempt+1;
+            if(raw_spin_trylock_irqsave(native_lock,irq_flags))break;
+            cpu_relax();
+        }
+        if(attempt==64)return -EBUSY;
+    }
+#else
     if(!raw_spin_trylock_irqsave(native_lock,irq_flags))return -EBUSY;
+#endif
     memcpy(before,(void *)(unsigned long)unit,sizeof(before));
     if(before[0x13]!=((handle>>10)&31) || before[0x11] || before[0x12] ||
        *(unsigned short *)(before+0x14)!=1 || *(unsigned short *)(before+0x16)!=1){

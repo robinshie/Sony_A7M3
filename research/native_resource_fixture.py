@@ -32,8 +32,9 @@ def main():
     p.add_argument('--fl3-curves',action='store_true')
     p.add_argument('--capture-grain',action='store_true')
     p.add_argument('--capture-halation',action='store_true')
+    p.add_argument('--capture-vignette',action='store_true')
     args=p.parse_args()
-    extension=(args.fl2,args.fl3,args.fl3_curves,args.capture_grain,args.capture_halation)
+    extension=(args.fl2,args.fl3,args.fl3_curves,args.capture_grain,args.capture_halation,args.capture_vignette)
     if sum(extension)>1:p.error("Select one resource extension")
     elf=ELF(args.usr/'lib/libObj.so')
     if sha(elf.data)!=OBJ_SHA:p.error('Unexpected libObj.so SHA-256')
@@ -55,10 +56,13 @@ def main():
     if args.capture_halation:
         from native_fl_halation_strings import LABELS
         expected=[('capture_halation',*LABELS)]
-    first=7600 if args.capture_halation else 7599 if args.capture_grain else 7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
+    if args.capture_vignette:
+        from native_fl_vignette_strings import LABELS
+        expected=[('capture_vignette',*LABELS)]
+    first=7601 if args.capture_vignette else 7600 if args.capture_halation else 7599 if args.capture_grain else 7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
     if proof['resources']!={name:0x0204e000+first+i for i,(name,_,_) in enumerate(expected)}:
         p.error('Unexpected resource assignment')
-    suffix=next((n for on,n in zip(extension,('-fl2','-fl3','-fl3-curves','-grain','-halation')) if on),'')
+    suffix=next((n for on,n in zip(extension,('-fl2','-fl3','-fl3-curves','-grain','-halation','-vignette')) if on),'')
     out=ROOT/('.lab/native-resource'+suffix);out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
     asm='.syntax unified\n';sections=[];parts=[]

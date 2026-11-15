@@ -8,7 +8,7 @@ static int valid(const struct a7_fl_preference *p) {
     static const int low[8]={-9,-9,-9,0,-9,-3,1,0},high[8]={9,9,9,9,9,3,5,9};
     if(!p||!p->generation||!a7_fl_preset_valid(p->enabled)||(p->schema!=0&&p->schema!=2&&p->schema!=3
 #ifdef A7_FL_FILM_CONTROLS
-       &&p->schema!=4
+       &&!a7_fl_film_schema(p->schema)
 #endif
        ))return 0;
     for(unsigned i=0;i<8;i++)if(p->parameters[i]<low[i]||p->parameters[i]>high[i])return 0;
@@ -25,6 +25,10 @@ static int valid(const struct a7_fl_preference *p) {
 #endif
         if(p->schema<4?value!=0:(value<minimum||value>9))return 0;
     }
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    for(unsigned b=0;b<3;b++)
+        if(p->schema<5?p->vignette[b]!=0:(p->vignette[b]<-9||p->vignette[b]>9))return 0;
+#endif
 #endif
     return 1;
 }
@@ -50,7 +54,7 @@ int a7_fl_preference_encode(uint8_t out[128],const struct a7_fl_preference *p,
     for(unsigned i=0;i<8;i++)next[i]=magic[i];
     word(next+8,128);word(next+12,p->generation);word(next+16,p->schema?p->schema:1);word(next+20,(uint32_t)p->enabled);
 #ifdef A7_FL_FILM_CONTROLS
-    if(p->schema==4) {
+    if(a7_fl_film_schema(p->schema)) {
         /* 3 * 15 * 5 = 225 bits. Leave all seven high bits and reserved bytes zero. */
         for(unsigned b=0;b<3;b++)for(unsigned f=0;f<15;f++) {
             unsigned v=(unsigned)bank_value(p,b,f)&31u,bit=(b*15+f)*5;
@@ -65,6 +69,9 @@ int a7_fl_preference_encode(uint8_t out[128],const struct a7_fl_preference *p,
     for(unsigned i=0;i<24;i++)next[88+i]=(uint8_t)build[i];
     word(next+112,p->candidate_crc);
     if(p->schema==2)for(unsigned i=0;i<8;i++)next[116+i]=(uint8_t)p->other_parameters[i];
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    if(p->schema==5)for(unsigned b=0;b<3;b++)next[116+b]=(uint8_t)p->vignette[b];
+#endif
     word(next+124,a7_fl_crc(next,124));
     for(unsigned i=0;i<128;i++)out[i]=next[i];
     return 0;
@@ -74,13 +81,24 @@ int a7_fl_preference_decode(struct a7_fl_preference *p,const uint8_t *in,unsigne
     if(!p||!in||!hash||!build||n!=128||!equal(in,magic,8)||read_word(in+8)!=128||
        (read_word(in+16)!=1&&read_word(in+16)!=2&&read_word(in+16)!=3
 #ifdef A7_FL_FILM_CONTROLS
-        &&read_word(in+16)!=4
+        &&!a7_fl_film_schema(read_word(in+16))
 #endif
        )||!equal(in+56,hash,32)||!equal(in+88,build,24)||
-       (read_word(in+16)!=2&&(read_word(in+116)||read_word(in+120)))||read_word(in+124)!=a7_fl_crc(in,124))return -1;
+       (read_word(in+16)!=2
+#ifdef A7_FL_CAPTURE_VIGNETTE
+        &&read_word(in+16)!=5
+#endif
+        &&(read_word(in+116)||read_word(in+120)))||read_word(in+124)!=a7_fl_crc(in,124))return -1;
     struct a7_fl_preference next;next.schema=0;
 #ifdef A7_FL_FILM_CONTROLS
     for(unsigned b=0;b<3;b++)for(unsigned f=0;f<7;f++)next.film[b][f]=0;
+#ifdef A7_FL_CAPTURE_VIGNETTE
+    for(unsigned b=0;b<3;b++)next.vignette[b]=0;
+    if(read_word(in+16)==5){
+        if(in[119]||read_word(in+120))return -1;
+        for(unsigned b=0;b<3;b++)next.vignette[b]=(int8_t)in[116+b];
+    }
+#endif
 #endif
     for(unsigned i=0;i<8;i++)next.other_parameters[i]=next.third_parameters[i]=0;
     next.generation=read_word(in+12);next.enabled=(int)read_word(in+20);
@@ -93,9 +111,9 @@ int a7_fl_preference_decode(struct a7_fl_preference *p,const uint8_t *in,unsigne
         for(unsigned i=0;i<8;i++){next.parameters[i]=(int8_t)in[24+i];next.other_parameters[i]=(int8_t)in[32+i];next.third_parameters[i]=(int8_t)in[40+i];}
     }
 #ifdef A7_FL_FILM_CONTROLS
-    if(read_word(in+16)==4){
+    if(a7_fl_film_schema(read_word(in+16))){
         if(in[52]&0xfe||in[53]||in[54]||in[55])return -1;
-        next.schema=4;
+        next.schema=read_word(in+16);
         for(unsigned b=0;b<3;b++)for(unsigned f=0;f<15;f++){
             unsigned bit=(b*15+f)*5,v=0;
             for(unsigned k=0;k<5;k++)v|=((unsigned)(in[24+(bit+k)/8]>>((bit+k)%8))&1u)<<k;
@@ -140,9 +158,9 @@ int a7_fl_preference_migrate_three(struct a7_fl_preference *p) {
 #ifdef A7_FL_FILM_CONTROLS
 int a7_fl_preference_migrate_film(struct a7_fl_preference *p) {
     if(!p||!valid(p))return -1;
-    if(p->schema==4)return 0;
+    if(p->schema==A7_FL_FILM_SCHEMA)return 0;
     a7_fl_preference_migrate_three(p);
-    p->schema=4;return 1;
+    p->schema=A7_FL_FILM_SCHEMA;return 1;
 }
 #endif
 int a7_fl_preference_choose(struct a7_fl_preference *out,const uint8_t *a,unsigned an,

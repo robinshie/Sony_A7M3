@@ -31,6 +31,21 @@ int a7_fl_store_open(struct a7_fl_store *s,const struct a7_fl_store_io *io,
     int rc=load(s,&r,latest);if(rc) return rc;
     *present=r.chosen>=0;s->initialized=1;return 0;
 }
+int a7_fl_store_previous(struct a7_fl_store *s,const struct a7_fl_preference *expected,
+                         struct a7_fl_preference *previous,int *present) {
+    if(!s||!s->initialized||!expected||!previous||!present)return -1;
+    *present=0;
+    struct slots records;struct a7_fl_preference latest;
+    if(load(s,&records,&latest)||records.chosen<0)return -2;
+    unsigned char encoded[128];
+    if(a7_fl_preference_encode(encoded,expected,s->original_sha,s->build)||
+       records.length[records.chosen]!=128||!equal(encoded,records.bytes[records.chosen],128))return -3;
+    unsigned other=(unsigned)(1-records.chosen);
+    if(!records.exists[other]||records.invalid[other])return 0;
+    if(a7_fl_preference_decode(previous,records.bytes[other],records.length[other],s->original_sha,s->build)||
+       previous->generation==0xffffffffu||previous->generation+1!=latest.generation)return -4;
+    *present=1;return 0;
+}
 int a7_fl_store_save(void *opaque,const struct a7_fl_preference *p) {
     struct a7_fl_store *s=opaque;
     if(!s || !s->initialized || !p) return -1;
