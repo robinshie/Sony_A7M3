@@ -32,7 +32,7 @@ long a7_grain_test_syscall(long nr,long a,long b,long c){
   if(n>(unsigned)c)n=(unsigned)c;if(n>13)n=13;memcpy((void*)b,s+position,n);position+=n;return n;}
  if(nr==122){memset((void*)a,0,390);strcpy((char*)a+130,bad_release?"wrong":"3.0.27_nl-rt106+");return 0;}
  if(nr==128){assert(b==16&&!strcmp((const char*)c,"arm=1 selection=0"));loads++;if(load_error)return load_error;installed=1;selection=0;return 0;}
- if(nr==4){assert(a==11&&c<=3);writes++;if(write_error)return write_error;if(short_write)return c-1;
+ if(nr==4){assert(a==11&&c<=5);writes++;if(write_error)return write_error;if(short_write)return c-1;
   const char*p=(const char*)b;selection=0;for(long i=0;i<c&&p[i]!='\n';i++){assert(p[i]>='0'&&p[i]<='9');selection=selection*10+p[i]-'0';}return c;}
  assert(!"unexpected syscall");return -1;
 }
@@ -41,6 +41,10 @@ int main(void){
  assert(!a7_fl_grain_apply(3,9)&&selection==57&&loads==1&&writes==1);
  for(unsigned p=1;p<=3;p++)for(unsigned s=0;s<=9;s++)assert(!a7_fl_grain_apply(p,s)&&selection==((p<<4)|s)&&loads==1);
  assert(!a7_fl_grain_apply(0,9)&&selection==0&&loads==1);
+ assert(a7_fl_film_apply(4,0,0)==-22&&a7_fl_film_apply(1,10,0)==-22&&a7_fl_film_apply(1,0,-10)==-22&&a7_fl_film_apply(1,0,10)==-22);
+ for(unsigned p=1;p<=3;p++)for(unsigned g=0;g<=9;g++)for(int h=-9;h<=9;h++)
+  assert(!a7_fl_film_apply(p,g,h)&&selection==((p<<9)|((unsigned)(h+9)<<4)|g)&&loads==1);
+ assert(!a7_fl_film_apply(0,9,-9)&&selection==0);
  reset();installed=1;bad_identity=1;assert(a7_fl_grain_apply(3,9)==-116&&!loads&&!writes);
  reset();installed=1;bad_parse=1;assert(a7_fl_grain_apply(3,9)==-71&&!loads&&!writes);
  reset();bad_release=1;assert(a7_fl_grain_apply(3,9)==-19&&!loads&&!writes);
@@ -49,7 +53,7 @@ int main(void){
  reset();short_write=1;assert(a7_fl_grain_apply(3,9)==-5&&writes==1&&selection==0);
  reset();readback_bad=1;assert(a7_fl_grain_apply(3,9)==-5&&selection==57);
  reset();installed=1;close_error=1;assert(a7_fl_grain_apply(3,9)==-5&&!writes);
- puts("GRAIN_BACKEND_PASSED: load defaults Off, exact source identity, 30 mode/strength pairs, zero, reuse and I/O failures");
+ puts("GRAIN_BACKEND_PASSED: load defaults Off, exact source identity, 30 grain and 570 film combinations, zero, reuse and I/O failures");
 }
 ''')
 subprocess.run(['clang','-O1','-g','-fsanitize=address,undefined','-Wall','-Wextra','-Werror','-DA7_FL_GRAIN_BACKEND_TEST','-I'+str(out),'-I'+str(ROOT/'payloads'),str(ROOT/'payloads/a7-fl-grain-backend.c'),str(out/'test.c'),str(out/'blob.S'),'-o',str(out/'test')],check=True)

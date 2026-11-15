@@ -11,6 +11,9 @@ static int custom(int id) {
 #ifdef A7_FL_CAPTURE_GRAIN
     if(id==0x700f)return 1;
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+    if(id==0x7010)return 1;
+#endif
 #endif
     return id >= A7_MENU_PROCESS_FIRST && id <= A7_MENU_PROCESS_LAST;
 }

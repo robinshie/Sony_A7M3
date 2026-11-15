@@ -106,7 +106,12 @@ static int film_crc(struct a7_fl_preference *p){
 }
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
 static int grain_sync(const struct a7_fl_preference *p){
+#ifdef A7_FL_CAPTURE_HALATION
+    return a7_fl_film_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
+                           p->enabled?p->film[p->enabled-1][1]:0);
+#else
     return a7_fl_grain_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0);
+#endif
 }
 #endif
 static int film_change(const struct a7_fl_preference *next){
@@ -562,6 +567,10 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
 #ifdef A7_FL_CAPTURE_GRAIN
     if(!native_adjust_grain_spec(specs,preference.film[preference.enabled?preference.enabled-1:0][0])){rollback();return leave(A7_FL_MODULE_NODES);}
     editable|=1u<<NATIVE_ADJUST_GRAIN_FIELD;
+#endif
+#ifdef A7_FL_CAPTURE_HALATION
+    if(!native_adjust_halation_spec(specs,preference.film[preference.enabled?preference.enabled-1:0][1])){rollback();return leave(A7_FL_MODULE_NODES);}
+    editable|=1u<<NATIVE_ADJUST_HALATION_FIELD;
 #endif
 #endif
     for(unsigned j=0;j<module.platform.parent_count;j++) {

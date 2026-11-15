@@ -19,7 +19,7 @@ static long syscall3(long nr,long a,long b,long c) {
 #if defined(A7_FILM_BENCH_FULL) && !defined(A7_FILM_BENCH_HOST)
 #error Full-size experiment is host-only
 #endif
-struct sample {uint32_t width,height,grain,halation;int32_t rc;uint32_t elapsed_us,before,after;};
+struct sample {uint32_t width,height,grain;int32_t halation,rc;uint32_t elapsed_us,before,after;};
 struct output {uint32_t magic,version,count,stopped;struct sample samples[12];};
 static struct output result;
 #ifdef A7_FILM_BENCH_FULL
@@ -79,6 +79,10 @@ static void run(void) {
 #ifdef A7_FILM_BENCH_GRAIN
         s->grain=effect*3;s->halation=0;
         p.grain=(int)s->grain;p.halation=0;
+#endif
+#ifdef A7_FILM_BENCH_SIGNED_HALATION
+        s->grain=0;s->halation=effect==0?-9:effect==1?0:effect==2?9:-3;
+        p.grain=0;p.halation=s->halation;p.radius=a7_film_frame_reference_radius(w);
 #endif
         uint32_t sec0,ns0,sec1,ns1;
         fill(w,h);s->before=checksum(w*h*2);

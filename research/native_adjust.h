@@ -6,9 +6,15 @@
 #define NATIVE_ADJUST_BASE_FIELDS 8
 #ifdef A7_FL_FILM_CONTROLS
 #ifdef A7_FL_CAPTURE_GRAIN
-#define NATIVE_ADJUST_FIELDS 14
 #define NATIVE_ADJUST_GRAIN_FIELD 13
 #define NATIVE_ADJUST_GRAIN_TITLE 0x0204fdafu
+#ifdef A7_FL_CAPTURE_HALATION
+#define NATIVE_ADJUST_FIELDS 15
+#define NATIVE_ADJUST_HALATION_FIELD 14
+#define NATIVE_ADJUST_HALATION_TITLE 0x0204fdb0u
+#else
+#define NATIVE_ADJUST_FIELDS 14
+#endif
 #else
 #define NATIVE_ADJUST_FIELDS 13
 #endif
@@ -113,16 +119,22 @@ int native_adjust_encode(const NativeAdjustTree *,int process_id,int value,int *
 int native_adjust_decode(const NativeAdjustTree *,int process_id,int encoded,int *value);
 uint32_t native_adjust_number_resid(int value);
 #ifdef A7_FL_FILM_CONTROLS
-/* UI fields 8..12 retain the existing five curve IDs; grain is appended.
+/* UI fields 8..12 retain the existing five curve IDs; textures are appended.
  * Caller must first bound the field to [8,NATIVE_ADJUST_FIELDS). */
 static inline unsigned native_adjust_film_index(unsigned field) {
 #ifdef A7_FL_CAPTURE_GRAIN
     if(field==NATIVE_ADJUST_GRAIN_FIELD)return 0;
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+    if(field==NATIVE_ADJUST_HALATION_FIELD)return 1;
+#endif
     return field-6;
 }
 #ifdef A7_FL_CAPTURE_GRAIN
 int native_adjust_grain_spec(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],int strength);
+#endif
+#ifdef A7_FL_CAPTURE_HALATION
+int native_adjust_halation_spec(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],int strength);
 #endif
 /* Fill the five new specs from the confirmed FL3 preference, before build. */
 int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const int8_t points[5]);

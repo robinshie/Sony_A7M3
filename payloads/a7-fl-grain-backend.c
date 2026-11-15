@@ -57,13 +57,11 @@ static int ensure_kernel(void){
     /* Default off. Never configure an existing foreign or disarmed module. */
     return kernel_identity();
 }
-int a7_fl_grain_apply(unsigned preset,unsigned strength){
-    if(preset>3||strength>9)return -22;
-    unsigned desired=preset?(preset<<4)|strength:0;
+static int apply_selection(unsigned desired){
     int rc=ensure_kernel();if(rc)return rc;
-    char value[4];unsigned used;
-    if(desired>=10){value[0]=(char)('0'+desired/10);value[1]=(char)('0'+desired%10);used=2;}
-    else{value[0]=(char)('0'+desired);used=1;}
+    char value[12],reverse[10];unsigned used=0,digits=desired;
+    do{reverse[used++]=(char)('0'+digits%10);digits/=10;}while(digits);
+    for(unsigned i=0;i<used;i++)value[i]=reverse[used-i-1];
     value[used++]='\n';
     long fd=syscall3(5,(long)"/sys/module/" A7_GRAIN_KERNEL_NAME "/parameters/selection",1|0x8000,0);
     if(fd<0)return (int)fd;
@@ -76,4 +74,12 @@ int a7_fl_grain_apply(unsigned preset,unsigned strength){
     if(!uint_word(&p,&actual))return -71;
     if(*p=='\n')p++;
     return *p||actual!=desired?-5:0;
+}
+int a7_fl_grain_apply(unsigned preset,unsigned strength){
+    if(preset>3||strength>9)return -22;
+    return apply_selection(preset?(preset<<4)|strength:0);
+}
+int a7_fl_film_apply(unsigned preset,unsigned grain,int halation){
+    if(preset>3||grain>9||halation<-9||halation>9)return -22;
+    return apply_selection(preset?(preset<<9)|((unsigned)(halation+9)<<4)|grain:0);
 }

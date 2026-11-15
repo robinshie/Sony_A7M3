@@ -8,4 +8,8 @@
 
 具体命令见 [机内菜单模块](docs/native-creative-look.md#构建与验证顺序)。涉及加载器、语言资源或配置格式的改动单独验证。生成的更新包、固件、相机备份和照片保存在忽略提交的 `.lab/` 中。
 
-当前本机验收基线为 r15（2026-11-15），模块 SHA-256 `33d103c891660cf9521a7661a31c114252070bd2c49c92f930079bc10c15c49d`，115,380 字节。颗粒菜单、拍摄回放及重启保留已获用户确认，冷启动回读模块和内核正常。验收限于全画幅 3:2 JPEG L 的拍后颗粒；实时颗粒、RAW、光晕未接入。当前颗粒 0 是用户试完主动关闭，不能擅自调回 9。证据与语言资源散列见 `docs/grain-research.md`，最终验收记录 `.lab/grain-resident-read/1794714565483365000/acceptance-final.json`。后续更新须绑定 r15 前像，不重复使用已完成的 r14→r15 安装包。
+当前本机验收基线为 **r15 光晕升级版**（2026-11-15），模块 SHA-256 `a44876fb9136b4fe31c9d82ad143bf87d9b10c3d05fc8b0ba77f0348a6c3324d`，115,120 字节。用户已确认光晕菜单可调、拍摄回放正常、负值 −9 重启保留；只读核对驻留模块和内核正常，保存 generation 53 与运行状态一致，FL3 颗粒 0、光晕 −9，处理完成 1 张、失败 0 张。保留用户当前设置，不擅自改回默认值。验收范围为全画幅 3:2 JPEG L 拍后光晕；不声称实时、RAW 或其它几何已验证。最终证据 `.lab/film-resident-read/1794721916077782000/acceptance-final.json`，语言资源散列及三档 JPEG 证据见 `docs/fl3-film-controls.md`。
+
+本机已执行 `.lab/native-fl-releases/update-r15-halation-haw04xx1/`，写入证据 `write-1794721551114287000/verified.json`；禁止重复执行该包。下次更新必须绑定当前模块及语言资源前像，不再使用旧 r14→r15 或颗粒 r15→光晕 r15 的安装包。
+
+旧颗粒 r15 模块 `33d103c891660cf9521a7661a31c114252070bd2c49c92f930079bc10c15c49d` 的验收保留在 `.lab/grain-resident-read/1794714565483365000/acceptance-final.json` 和 `docs/grain-research.md`，仅为历史记录。公开发布沿用 v0.01，清单以 `feature_revision=r15-halation` 区分旧包。使用 `tools/package_release.py` 从验收回读生成公开ZIP，不上传包含设置与备份的本机私有升级归档。发布后核对 main、v0.01 标签、ZIP清单源码提交及远端附件散列一致。

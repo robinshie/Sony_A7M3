@@ -21,7 +21,7 @@ def decode(raw):
         raise ValueError('Unexpected benchmark report header')
     samples = []
     for i in range(count):
-        row = struct.unpack_from('<4Ii3I', raw, 16 + 32 * i)
+        row = struct.unpack_from('<3Iii3I', raw, 16 + 32 * i)
         samples.append(dict(zip(('width', 'height', 'grain', 'halation', 'rc',
                                  'elapsed_us', 'before', 'after'), row)))
     return dict(count=count, stopped=stopped, samples=samples,
@@ -35,8 +35,11 @@ def main():
     cli.add_argument('--full-size', action='store_true',
                      help='Host only: 576, 960 and 6000 px widths using the approved 9/9 scale')
     cli.add_argument('--grain-only',action='store_true')
+    cli.add_argument('--signed-halation',action='store_true')
     cli.add_argument('--reference-grain',action='store_true',help='Use the original combined-loop implementation for comparison')
     args = cli.parse_args()
+    if args.signed_halation and (args.grain_only or args.reference_grain):
+        cli.error('Signed halation is a separate benchmark')
     if args.full_size and args.live:
         cli.error('The full-size benchmark cannot run on the camera')
     out = ROOT / '.lab/film-frame-benchmark' / str(time.time_ns())
@@ -46,6 +49,7 @@ def main():
     common = ['-O2', '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation',
               '-I', str(ROOT / 'payloads'),
               *(['-DA7_FILM_BENCH_GRAIN'] if args.grain_only else []),
+              *(['-DA7_FILM_BENCH_SIGNED_HALATION'] if args.signed_halation else []),
               *(['-DA7_FILM_REFERENCE_GRAIN'] if args.reference_grain else []),
               *(str(ROOT / p) for p in sources[:2])]
     subprocess.run(['clang', *common, '-DA7_FILM_BENCH_HOST',
@@ -62,6 +66,7 @@ def main():
     digest = lambda b: hashlib.sha256(b).hexdigest()
     proof = dict(source_sha256={p: digest((ROOT / p).read_bytes()) for p in sources},
                  full_size_host_only=args.full_size, grain_only=args.grain_only, reference_grain=args.reference_grain,
+                 signed_halation=args.signed_halation,
                  reference=reference, camera_run=False, flash_ready=False)
     if not args.full_size:
         subprocess.run(['arm-none-eabi-gcc', *common, '-mcpu=cortex-a9', '-marm',
@@ -80,6 +85,12 @@ def main():
             if (factory.contents('/version.txt') != b'37114_13.2026020901' or
                     bytes(camera.readBackup(0x3e0005)) != b'ILCE-7M3' + bytes(8)):
                 raise ValueError('Wrong model/build; benchmark not run')
+            if args.signed_halation:
+                installed = factory.contents('/usr/lib/a7fl.so')
+                if digest(installed) != '33d103c891660cf9521a7661a31c114252070bd2c49c92f930079bc10c15c49d':
+                    raise ValueError('Signed halation experiment requires accepted r15')
+                proof['installed_module_sha256'] = digest(installed)
+                (out / 'r15-readback.so').write_bytes(installed)
             live = factory.run((out / 'probe.so').read_bytes(), 'a7fb.bin')
             (out / 'live.bin').write_bytes(live)
             result = decode(live)

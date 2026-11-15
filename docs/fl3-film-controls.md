@@ -8,8 +8,128 @@
 |---|---|---|
 | FL3 配色和名称 | 第四个选项「FL3（徕卡胶片）」、独立第三组原有八项参数、取景和 JPEG 色表生成、旧双组配置迁移 | **r12 已烧录、完整回读通过；冷启动入口与驻留已确认，成片效果未验收** |
 | 颗粒 | 0–9 档算法；已接编码前真实源图，临时整幅固定强度版进入 JPEG | **r15 真机验收通过**：用户确认菜单、拍摄回放和重启保留，冷启动后模块及内核正常，完成 1 张、失败 0 张。当前 0 为用户测试后主动关闭；全画幅 3:2 JPEG L、强度 9 约增加 9 秒，实时取景与 RAW 不加颗粒 |
-| 光晕 | 0–9 档暖色高光扩散；从周围亮区计算，不用全局调色冒充 | 仅离线／自有缓冲区验证；尚未接入真实拍摄 |
+| 光晕 | −9…+9 档；负值压暗高光周围，正值加暖色亮晕，0 关闭；三个风格各自保存 | **r15 光晕升级版验收通过**：三档实拍及 JPEG 对照通过，持久写入完整回读；用户确认菜单、拍摄回放和 −9 重启保留，驻留模块与保存参数一致，处理 1 张、失败 0 张 |
 | 五点曲线 | 五个独立 −9…+9 控制，单调保护；RGB 参考与原生色表算法均已通过 Mac/ARM 检查 | r14 已写入并完整回读；用户确认 FL、FL2、FL3 曲线独立，重启后全部保留 |
+
+### 拍后正负光晕
+
+创意外观第三页在「颗粒（拍后）」之后新增「光晕（拍后）」，然后是「保存」。范围 −9…+9，默认 0。以同一块高光周边遮罩处理两种方向：+1…+9 提亮并带暖色；−1…−9 压低周边亮度，YUV 路径保留原有色度；0 不做光晕处理。颗粒可独立设置。FL、FL2、FL3 分别记忆，确认才持久保存，取消恢复上次确认值。
+
+使用已有 schema 4 的光晕槽位，文件长度和颗粒、五点曲线的位布局不变。Mac 与 ARM QEMU 均读写了两份 r15 回读配置，重编码逐字节一致。旧 r15 不接受保存为负数的光晕配置；未来接入设备后的回退须使用事先留存的 r15 设置备份。
+
+像素处理使用 [帧内核](../payloads/a7-film-frame.c) 与 `a7_film_capture_texture_dispatch`。适配器在取得帧前快照设置，只接受拍摄帧；预览、关闭或两项为零时直接跳过。它要求调用者提供已解码、有独占访问权的 JPEG 编码前源帧。阵列计算按输出宽度缩放；6000×4000 的 UYVY 桌面测试使用半径 167、约 1.04 MB 工作区，确认正负亮度方向、负值色度不变、0 字节恒等及行填充保留。不能用桌面耗时估计真机耗时。
+
+[拍后 JPEG 测试](../research/halation_jpeg_test.py) 使用 r15 同规格的 6000×4000 UYVY、12160 字节行跨度，在测试帧交接后由桌面的 libjpeg 编码，再解码核对三张 JPEG。高光外缘的 Y 值在 −9／0／+9 时分别为 **90／105／120**，远处和角落采样均为 105，光源中央均为 250。正值带暖色，负值色度和 0 相同。0 跳过帧处理且原图逐字节不变。输出和校验放在 `.lab/halation-jpeg/`，这是桌面编码的 JPEG，未验证 Sony 编码器、硬件同步和抓拍耗时。
+
+离线测试在 Mac ASan/UBSan 与 ARM QEMU 运行，YUV 和 RGB 均通过独立二维参考比对；原有颗粒的 6,720 个回归用例通过。简中和英文资源各追加一条，原厂解析器核对通过。菜单整合测试覆盖负值显示、正负值保存、取消、FL 切换及启动时恢复。早期仅菜单候选 `.lab/native-module-halation-menu/proof.json` 保留 `ready_for_staging=false`；后续编码前整合候选与真实照片证据见下一节，不改写旧报告。该阶段线上 v0.01 仍为颗粒 r15；最新发布说明见 [更新流程](release-workflow.md)。
+
+### 固定曝光实拍验证与 r15 升级包（2026-11-15）
+
+第三轮使用 M 档、1/10 秒、F4、ISO 100，三张照片为 `_DSC1783.JPG`、`_DSC1784.JPG`、`_DSC1785.JPG`。用户确认拍摄和回放正常。临时模块 `a7caphalo3` 自动寻找高光邻域，三次编码前处理均成功、失败 0 次，随后回调已停用。证据位于 `.lab/capture-kernel/1794719745157999000/`。
+
+源图抽样通过独立积分图算法逐字节验证。对每张 JPEG 分别比较它自己的处理前和处理后 32×16 源像素，避免跨照片构图或环境光变化影响判断：
+
+| 光晕 | 源图平均 Y 变化 | JPEG 与处理后源图平均绝对误差 | JPEG 与处理后源图 RMS |
+|---|---:|---:|---:|
+| −9 | −11.92 | 1.24 | 1.65 |
+| 0 | 0 | 1.32 | 1.69 |
+| +9 | +11.67 | 1.42 | 1.83 |
+
+负档不改变色度；正档加暖色；0 档源像素逐字节不变。活动两档 JPEG 与处理后源图的误差远小于与处理前源图的误差，证明效果进入直出。整幅运行成功不等于逐像素检查了整幅；验证范围是上述真实抽样区域，JPEG 有损编码也不会逐字节相同。脚本为 `research/capture_halation_jpeg_test.py`，报告 `jpeg-halation-proof.json`。实测 −9／+9 的处理约 22.78／25.03 秒，0 档诊断采样约 0.10 秒；驻留版在颗粒、光晕都为 0 时直接跳过。前两轮单缓冲拒绝和 A 档快门变化的记录保留，均不作为三档通过证据。
+
+驻留候选 `a7capfilm` 与三张诊断模块是不同的二进制；使用散列相同的像素滤波器和排他引用逻辑。驻留候选自身已完成真机加载、自检、菜单参数桥接、停用和卸载测试；全画幅处理、两个已观察缓冲区、原厂引用释放、错误退出和颗粒／光晕组合另有 ARM QEMU 检查。最终安装仍需冷启动验收，不把诊断模块的拍摄说成驻留候选已实拍。
+
+整合构建在原菜单命令后增加：
+
+```sh
+--capture-halation-menu \
+--capture-film-kernel .lab/capture-kernel/1794720273044574000 \
+--capture-film-bridge-proof .lab/film-backend-live/1794720444484240000/proof.json \
+--capture-film-basis .lab/capture-kernel/1794719745157999000
+```
+
+输出 `.lab/native-module-film-capture/`。`research/capture_film_bind.py` 校验生产内核、同内核桥接测试、源代码散列、独立像素参考及真实 JPEG 证据，全部通过才允许准备写入。
+
+`deploy_fl_halation.py --build-dir .lab/native-module-film-capture` 生成精确针对已验收 r15 的升级包。使用生成路径加 `--host-identity-check --write-device` 才写入；顺序为简中资源、英文资源、模块。写入前核对所有旧文件、机型、固件版本及事务是否已经执行，保留独立旧文件和日志，安装后完整回读并确认两份用户参数未改动。中途失败不能自动重试。此包不适用于原厂未改装机身，也不能用旧 r14→r15 包重复更新。写入及冷启动结果以本节后续记录为准。
+
+**写入已完成，后续冷启动验收结果见下。** 本机包 `.lab/native-fl-releases/update-r15-halation-haw04xx1/`，写入记录 `write-1794721551114287000/verified.json`。简中、英文和模块三个事务均为 phase 100、status 0；新文件及旧备份完整回读通过，`/usr` 已恢复只读，原加载器和 WBI 未变，两份配置前后逐字节相同。此包已经使用，不能重复执行。
+
+| 文件 | 新大小 | 新 SHA-256 |
+|---|---:|---|
+| a7fl.so | 115120 | `a44876fb9136b4fe31c9d82ad143bf87d9b10c3d05fc8b0ba77f0348a6c3324d` |
+| string_simplifiedchinese.uxc | 350360 | `bf0e7522ca16885d18630a0fae44a7d57b07dc3f0c5fa12e44b91c495dec3ee1` |
+| string_english.uxc | 393076 | `2ceb2896e97781a72a001a95fdccbf9b84eab96cdf9048af54b8083e1dc0577d` |
+
+写入后请用户冷启动，确认第三页光晕菜单、负值保存、JPEG 拍摄回放及再次重启保留，回连后核对驻留内核。写入回读证据与随后冷启动验收分别记录；原颗粒 r15 的已验收记录保留，验收步骤本身不修改线上发布。
+
+已为这个模块构建 `.lab/native-inspect-halation-r15/` 只读检查器，2,155 项原厂访问器检查通过。`research/film_resident_read.py` 只读核对模块、驻留状态、同一内核身份、三组 schema-4 设置及原子选择值，不加载或重新启用内核。准备检查已通过；用户回连后执行：
+
+```sh
+python3 research/film_resident_read.py \
+  --binding .lab/native-fl-releases/update-r15-halation-haw04xx1/151 \
+  --probe .lab/native-inspect-halation-r15 \
+  --kernel .lab/capture-kernel/1794720273044574000 --live
+```
+
+私有归档 `.lab/native-fl-releases/Sony_A7M3-r15-halation-local-upgrade.zip` 含安装绑定、回读文件、旧备份及写入记录；附 SHA-256 和状态说明。它依赖本机既有实验环境，不能当作面向原厂机身的独立安装器，也没有上传 GitHub。
+
+### r15 光晕升级版验收完成（2026-11-15）
+
+用户确认「光晕可调，拍摄回放正常，重启后 −9 保留，已接回 UTM」。随后只读检查 `.lab/film-resident-read/1794721916077782000/` 确认磁盘模块与已写入候选一致，bootstrap ready=1、stage=3，runtime fault=0、last_error=0、dirty=0。运行与保存配置均为 generation 53、FL3，颗粒 0、光晕 −9；内核选择值 1536 与保存值一致，同一生产内核记录完成 1 张、失败 0 张，最后处理强度为 −9、颗粒 0。
+
+菜单操作、物理重启和回放来自用户确认；模块身份、驻留状态、配置和处理计数来自独立回读。结合此前固定曝光 −9／0／+9 的真实 JPEG 像素证据，登记为本机新验收基线，范围仍限于全画幅 3:2 JPEG L 的拍后光晕。当前设置保持为用户保存的 FL3／−9，不重刷、不改参数。最终记录 `acceptance-final.json`；只读工具没有加载或重新启用内核。
+
+首次只读报告 `1794721827732999000` 的主机解码器漏了 `A7_FL_CAPTURE_HALATION` 编译选项，因此错误地跳过有效的负值配置，选了旧 generation 52；机内固件和内核当时已正确使用 −9。修正后，用同一份原始配置验证新记录选择、最新 CRC 损坏时回退、两份 CRC 损坏时拒绝，再次现场回读得到 generation 53 并一致。旧报告保留，不改写为成功；本次修复只涉及主机检查器。
+
+复现离线验证（`SONY_USR` 为本地解包的 4.04，`.lab` 需已有 r15 资源与原生测试输入）：
+
+```sh
+python3 research/film_frame_test.py
+python3 research/film_texture_test.py
+# 需 libjpeg 和 pkg-config，仅处理本机合成帧。
+python3 research/halation_jpeg_test.py
+python3 research/native_fl_halation_strings.py
+# 在同一版本的解析夹具上重新验证已有资源，再验证追加的光晕资源。
+python3 research/native_resource_fixture.py --usr "$SONY_USR" \
+  --before .lab/native-fl-strings --after .lab/native-fl2-strings --fl2
+python3 research/native_resource_fixture.py --usr "$SONY_USR" \
+  --before .lab/native-fl2-strings --after .lab/native-fl3-strings --fl3
+python3 research/native_resource_fixture.py --usr "$SONY_USR" \
+  --before .lab/native-fl3-strings --after .lab/native-fl-curve-strings --fl3-curves
+python3 research/native_resource_fixture.py --usr "$SONY_USR" \
+  --before .lab/native-fl-curve-strings --after .lab/native-fl-grain-strings --capture-grain
+python3 research/native_resource_fixture.py --usr "$SONY_USR" \
+  --before .lab/native-fl-grain-strings --after .lab/native-fl-halation-strings --capture-halation
+python3 research/native_module.py --usr "$SONY_USR" --bundle .lab/native-fl-01 \
+  --with-bootstrap --spatial-settings-only \
+  --capture-look-proof .lab/lut3d-fl2-reference-private/proof.json \
+  --capture-controls --save-dialog --preview-cycle --dual-look --look-banks --leica-look --film-curves \
+  --capture-halation-menu
+```
+
+### 正负光晕真机测试准备（2026-11-15，待三张实拍）
+
+机身持久模块仍是已验收 r15，SHA-256 `33d103c891660cf9521a7661a31c114252070bd2c49c92f930079bc10c15c49d`。先运行 `film_frame_benchmark.py --signed-halation --live`，只处理机内自有合成缓冲区。320×180、640×360、960×540 的 −9／0／+9／−3 共 12 组校验值全部和桌面一致；960×540 的 −9／0／+9 分别为 166439／15／188214 微秒。累计限时检查发生在第 12 组完成后；这些数据不能替代实际源图的处理耗时。证据 `.lab/film-frame-benchmark/1794717153730463000/`。
+
+临时模块 `a7caphalo` 复用颗粒已验证的编码前入口、DMM 排他引用和非缓存映射，但使用独立异常指令标识，并限制为三次成功处理：−9、0、+9。出现失败即停用；不支持的几何直接拒绝。每张保存 368×352 的原始中心邻域及处理后的 32×16 中心样本，用于离线独立验证；不保存或上传整幅原始源图。每次处理仍交还原厂引用。0 档不写像素；三张结束后不再应用光晕。
+
+验证结果：桥接执行 128 次、1,540 项检查；排他引用／实际处理夹具 4,400,086 项检查；三档顺序、关、重入和失败停用检查通过。原颗粒的重复拍摄控制回归也通过。`capture_halation_fetch.py --selftest` 使用独立积分图参考，和解析图案及生产滤波器比对，1,554 项检查通过。
+
+`halation_r15_handoff.py --live` 在核对 r15 散列、原内核身份及颗粒关闭后，临时停用原颗粒回调。读到选择值 16（FL、颗粒 0）；两份保存配置先备份、后回读，逐字节未变。没有写入固件或保存参数。证据 `.lab/halation-r15-handoff/1794717720073313000/`。冷启动会恢复原 r15。
+
+候选 `.lab/capture-kernel/1794717423437206000/`，模块 SHA-256 `a730886df79f133e7b101e3a8dad329a681f58bdfc61a806e0e3ff82bf8e54ee`。同包真机自检加载、私有图像测试、正常卸载均成功；随后 arm 成功。当前回调命中 **0**、真实帧处理 **0**，已请用户保持开机，按全画幅、3:2、JPEG L 拍三张并回放，之后接回 UTM，不重启。
+
+回传后先 `capture_kernel_probe.py collect --bundle <上述候选>` 停用回调并读取计数，再 `capture_halation_fetch.py --bundle <上述候选>` 对原始样本独立计算。样本一致只证明编码前抽样区域；仍需读取实际 JPEG，核对三档效果、正常回放和耗时。**此时不能宣称 JPEG 光晕已验证，也尚无可发布的 r15 光晕升级包。**
+
+### 第一轮实拍回读与双缓冲区修正（2026-11-15）
+
+用户反馈三张拍摄与回放正常。第一轮回读实际为 3 次命中、1 次成功、1 次拒绝、1 次关闭后跳过，不能记作三档通过。第二张的编码源切换到物理地址 `0x24000000`，原固定 `0x1a000000` 的检查返回 −22，尚未取得引用或写像素。第一张 −9 的中心样本和独立积分图参考一致，但变化字节为 0：采样中心位于棉签盒标签，未覆盖高光外缘。
+
+三张实际 JPEG `_DSC1777.JPG`、`_DSC1778.JPG`、`_DSC1779.JPG` 均已只读复制和散列核对，尺寸 6000×4000，曝光均为 1/15 秒、F4、ISO 100。第二、三张不能标成有效的 0／+9 对照。第一轮记录、原始样本及照片见 `.lab/capture-kernel/1794717423437206000/three-shot-result.json` 和 `photos/`；旧临时回调已停用。
+
+修正版 `a7caphalo2` 只扩展到这两块已观察的缓冲区，仍要求源描述、DMM extent、原厂排他 Open 返回的地址与长度一致，原厂非缓存映射也必须一致。原有 r15 颗粒构建不启用此扩展。双地址 × 三档强度、无效地址／映射／缓存类型、引用释放和读回错误的 QEMU 检查共 8,800,164 项通过；原引用管理和颗粒控制回归通过。新样本格式还记录每张物理／虚拟地址、缓存类型和耗时。
+
+候选 `.lab/capture-kernel/1794718400082808000/`，模块 SHA-256 `4b5c53fad198118dc62e689ebb4498f400c8c57fec8c6d23ec6faf6cd304a9ad`。同包真机自检成功加载及卸载，读到两组映射为 `0x1a000000 → 0x7a000000` 和 `0x24000000 → 0x84000000`，缓存类型均为 `0x12`。随后临时 arm 成功，已请用户将盒子亮反光边缘放在画面中央，再拍三张。**修正版仍待实拍回读，未持久刷入。** 两个实验内核均在内存中，冷启动后恢复已验收 r15。
 
 ### 三个风格的独立五点曲线（r14）
 
@@ -130,7 +250,7 @@ python3 research/native_capture_controls_test.py \
 
 - 五点输入亮度位置为 `0,64,128,192,255`。每级移动输出亮度 4 个码值；端点限制在 0…255，并保持非递减。相邻点作线性插值，亮度差加回 RGB；全零时精确保持像素。限制会使极端相邻设置出现平台，不允许暗部比亮部更亮。纯黑不能继续降低、纯白不能继续升高。
 - 颗粒把确定性三角分布噪声与 2×2 的空间相关成分组合，三个通道共享同一颗粒。中间调较明显，最暗和最亮区减弱。种子只用于可复现测试；未来接入取景还需要明确帧种子策略，不能把固定噪声图案当成完成的动态胶片模拟。
-- 光晕从曲线后的亮度超过 200 的区域产生遮罩，对周边求均值，扣除中心高光量，再按红、绿、蓝 `1,3/8,1/8` 加回。半径 1…16 是**当前输入分辨率的像素**，不是相机统一的光学尺度。它是简化高光扩散参考，没有复刻胶片乳剂的物理散射。
+- 光晕从曲线后的亮度超过 200 的区域产生遮罩，对周边求均值，扣除中心高光量。正档按红、绿、蓝 `1,3/8,1/8` 加回；负档在三通道减去同等亮度。半径 1…16 是**当前输入分辨率的像素**。它是简化高光扩散参考，没有复刻胶片乳剂的物理散射。
 - 模糊使用环形行缓冲，无堆分配、文件访问或浮点运算。最大半径的工作区约 `70 × 宽度` 字节，宽 6000 时为 420,000 字节，**另需输入和输出 RGB 全帧**。24 MP 的每张 RGB 平面约 72 MB，不能用桌面成功来保证机内内存或实时速度。
 - 拒绝越界参数、尺寸/跨度/长度错误、算术溢出、不允许的别名和未对齐工作区。当前接口不支持原地覆盖，也没有访问 Sony 缓冲区。
 

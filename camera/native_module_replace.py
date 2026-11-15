@@ -30,10 +30,37 @@ REVISIONS[14]=dict(old_sha='79772dfce51d90663de65fda7d54ed48bfcbe8c9fd46df7797ca
 REVISIONS[15]=dict(old_sha='28a7c2178d701324363d8824a9bc1648f5df44c2d75f260565e51e2c96ccdd38',old_size=89812,temporary='.a7fl-r15.new',backup='.a7fl-28a7c217.orig',journal='A7FLUP15.LOG')
 REVISIONS[1501]=dict(old_sha='c6930e3feccae9b74436e3cbdc92abac92ff15a0ad725793756ab9ab65135966',old_size=350304,temporary='.a7grain-zh.new',backup='.a7grain-zh.orig',journal='A7GRAINZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='grain')
 REVISIONS[1502]=dict(old_sha='a35f7ffa0732f798c151e2ee7cb6bc9aa6bd7fd2ece842e197ec6a28e7801eb8',old_size=393024,temporary='.a7grain-en.new',backup='.a7grain-en.orig',journal='A7GRAINEN.LOG',locale='string_english.uxc',resource_set='grain')
+REVISIONS[151]=dict(old_sha='33d103c891660cf9521a7661a31c114252070bd2c49c92f930079bc10c15c49d',old_size=115380,temporary='.a7fl-r15h.new',backup='.a7fl-33d103c8.orig',journal='A7FLUP15H.LOG')
+REVISIONS[15101]=dict(old_sha='afe011239985632d26538559006d0a470dcea2b9e181a11979c6c6b7aef82d77',old_size=350332,temporary='.a7halo-zh.new',backup='.a7halo-zh.orig',journal='A7HALOZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='halation')
+REVISIONS[15102]=dict(old_sha='b96c0a7a441743ab6f202a0ed1364ae14cc844e12898918c783efea899529a59',old_size=393048,temporary='.a7halo-en.new',backup='.a7halo-en.orig',journal='A7HALOEN.LOG',locale='string_english.uxc',resource_set='halation')
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
+ if revision==151:
+  require(proof.get('ready_for_staging') is True and proof.get('hardware_basis_verified') is True and
+          proof.get('capture_film_kernel') is True and proof.get('capture_halation_menu') is True and
+          proof.get('capture_grain_menu') is True and proof.get('all_look_curves') is True and
+          proof.get('preference_schema')==4 and proof.get('independent_look_banks') is True and
+          proof.get('save_confirmation_dialog') is True and proof.get('preview_timed_cycle') is True and
+          proof.get('curve_release_verified') is True,'Film upgrade requires complete integrated controls and verified hardware basis.')
+  deps=proof.get('dependency_proof_sha256',{})
+  for key in ('film-worklog/proof.json','film-controls-halation/proof.json','native-fivepoint-capture-test/proof.json',
+              'native-resource-halation/report.json','native-adjust-film/integration-proof.json',
+              'grain-backend/proof.json','capture-film-control/proof.json','capture-film-record/proof.json','capture-film-test/proof.json'):
+   require(key in deps,'Missing film release evidence: '+key)
+  bases=[k for k in deps if k.startswith('film-hardware-basis/') and k.endswith('/proof.json')]
+  require(len(bases)==1 and any(k.startswith('film-backend-live/') for k in deps),'Missing exact film hardware/bridge evidence.')
+  basis=json.loads((LAB/bases[0]).read_text());root=Path(basis['basis_dir']).resolve()
+  require(root.is_relative_to(LAB) and basis.get('passed') is True and basis['resident_kernel_sha256']==proof['kernel_sha256'],'Unverified or foreign film basis.')
+  for name,key in [('proof.json','basis_proof_sha256'),('jpeg-halation-proof.json','jpeg_proof_sha256'),('halation-samples.bin','sample_sha256')]:
+   require(file_sha(root/name)==basis[key],'Real capture basis changed: '+name)
+  jpeg=json.loads((root/'jpeg-halation-proof.json').read_text())
+  require(jpeg.get('passed') is True and jpeg.get('exposure_consistent') is True,'Three fixed-exposure JPEG results must pass.')
+  for name,digest in basis['evidence_sha256'].items():
+   target=(root/name).resolve();require(target.is_relative_to(root) and file_sha(target)==digest,'Real photo evidence changed.')
+  require(all(k in proof.get('artifact_sha256',{}) for k in ('grain.ko','grain-blob.S','a7-fl-grain-kernel.h','grain-sample-proof.json')),'Embedded film artifacts missing.')
+  return
  if revision==15:
   require_capture_release(14,proof)
   require(proof.get('capture_grain_menu') is True and proof.get('capture_grain_kernel') is True and
@@ -161,8 +188,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15):
-  resource_set='fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151):
+  resource_set='fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

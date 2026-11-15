@@ -26,7 +26,7 @@ static void horizontal(const uint8_t *row,unsigned w,unsigned r,const uint8_t cu
 int a7_film_texture(const uint8_t *src,size_t sn,unsigned ss,uint8_t *dst,size_t dn,unsigned ds,
                     unsigned w,unsigned h,const A7FilmTexture *p,void *workspace,size_t wn){
     if(!src||!dst||!p||!workspace||!w||!h||w>16384||h>16384||w>ss/3||w>ds/3)return -1;
-    if(p->grain<0||p->grain>9||p->halation<0||p->halation>9)return -1;
+    if(p->grain<0||p->grain>9||p->halation<-9||p->halation>9)return -1;
     for(unsigned i=0;i<5;i++)if(p->curve[i]<-9||p->curve[i]>9)return -1;
     size_t needed=a7_film_texture_workspace(w,p->radius);
     if(h>1&&(ss>(SIZE_MAX-(size_t)3*w)/(h-1)||ds>(SIZE_MAX-(size_t)3*w)/(h-1)))return -1;
@@ -60,7 +60,9 @@ int a7_film_texture(const uint8_t *src,size_t sn,unsigned ss,uint8_t *dst,size_t
             int luma=(int)y8(a),shift=(int)curve[luma]-luma,glow=0,noise=0;
             if(p->halation){
                 int halo=(int)((sum[x0]+area/2)/area)-(int)mask(a,curve);
-                glow=clamp(halo,0,255)*p->halation/24;
+                int strength=p->halation<0?-p->halation:p->halation;
+                glow=clamp(halo,0,255)*strength/24;
+                if(p->halation<0){shift-=glow/2;glow=0;}
             }
             if(p->grain){
                 uint32_t coarse=mix(p->seed^(x0/2)*0x9e3779b9u^(y/2)*0x85ebca6bu);

@@ -49,7 +49,8 @@ static void oracle(unsigned w,unsigned h,unsigned x,unsigned y,const A7FilmTextu
             for(int xx=(int)x-(int)p->radius;xx<=(int)x+(int)p->radius;xx++){
                 sum+=(unsigned)highlight(input+(unsigned)clamp(yy,(int)h-1)*STRIDE+3*(unsigned)clamp(xx,(int)w-1),p);n++;
             }
-        glow=clamp((int)((sum+n/2)/n)-highlight(a,p),255)*p->halation/24;
+        int strength=p->halation<0?-p->halation:p->halation;
+        glow=clamp((int)((sum+n/2)/n)-highlight(a,p),255)*strength/24;
     }
     if(p->grain){
         uint32_t c=random_word(p->seed^(x/2)*0x9e3779b9u^(y/2)*0x85ebca6bu);
@@ -58,6 +59,7 @@ static void oracle(unsigned w,unsigned h,unsigned x,unsigned y,const A7FilmTextu
         int envelope=64+(mapped<128?mapped:255-mapped);
         noise=(3*cn+fn)*p->grain*envelope/65536;
     }
+    if(p->halation<0){noise-=glow/2;glow=0;}
     out[0]=(uint8_t)clamp(a[0]+mapped-v+glow+noise,255);
     out[1]=(uint8_t)clamp(a[1]+mapped-v+glow*3/8+noise,255);
     out[2]=(uint8_t)clamp(a[2]+mapped-v+glow/8+noise,255);
@@ -149,7 +151,7 @@ static void rejection(void){
     check(CALL(input,SIZE_MAX,UINT32_MAX,output,SIZE_MAX,UINT32_MAX,1,16384,&p,work,sizeof work)<0,"size overflow");
     for(unsigned k=0;k<5;k++)for(int v=-10;v<=10;v+=20){p.curve[k]=v;check(VALID(&p)<0,"curve range");p.curve[k]=0;}
     p.grain=10;check(VALID(&p)<0,"grain range");p.grain=-1;check(VALID(&p)<0,"grain negative");p.grain=0;
-    p.halation=10;check(VALID(&p)<0,"halo range");p.halation=-1;check(VALID(&p)<0,"halo negative");p.halation=0;
+    p.halation=10;check(VALID(&p)<0,"halo range");p.halation=-10;check(VALID(&p)<0,"halo negative range");p.halation=0;
     p.radius=0;check(VALID(&p)<0,"radius zero");p.radius=17;check(VALID(&p)<0,"radius bound");
     for(unsigned i=0;i<sizeof output;i++)check(output[i]==0xa5,"reject before write");
 }
@@ -159,8 +161,9 @@ void guest_main(void){
         {0,0,{0,0,0,0,0},1,1},{9,0,{0,0,0,0,0},1,1},
         {0,9,{0,0,0,0,0},1,7},{4,5,{2,-3,0,2,-2},1,1987},
         {9,9,{9,9,9,9,9},1,0xffffffff},{1,1,{-9,-9,-9,-9,-9},1,0},
-        {5,8,{-9,9,-9,9,-9},1,7},{8,5,{9,-9,9,-9,9},1,9}};
-    for(unsigned d=0;d<5;d++)for(unsigned pat=0;pat<6;pat++)for(unsigned r=0;r<4;r++)for(unsigned k=0;k<8;k++){
+        {5,8,{-9,9,-9,9,-9},1,7},{8,5,{9,-9,9,-9,9},1,9},
+        {0,-9,{0,0,0,0,0},1,7},{5,-6,{-9,9,-9,9,-9},1,9}};
+    for(unsigned d=0;d<5;d++)for(unsigned pat=0;pat<6;pat++)for(unsigned r=0;r<4;r++)for(unsigned k=0;k<sizeof ps/sizeof ps[0];k++){
         A7FilmTexture p=ps[k];p.radius=radii[r];exercise(dims[d][0],dims[d][1],pat,p);
     }
     semantics();rejection();

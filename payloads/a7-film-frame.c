@@ -16,7 +16,7 @@ int a7_film_frame_params_from_preference(const struct a7_fl_preference *p,unsign
     unsigned radius=a7_film_frame_reference_radius(width);
     if(!radius)return -1;
     unsigned bank=p->enabled?(unsigned)p->enabled-1:0;
-    for(unsigned i=0;i<7;i++)if(p->film[bank][i]<(i<2?0:-9)||p->film[bank][i]>9)return -1;
+    for(unsigned i=0;i<7;i++)if(p->film[bank][i]<(i==0?0:-9)||p->film[bank][i]>9)return -1;
     struct a7_film_frame_params next={p->enabled?p->film[bank][0]:0,p->enabled?p->film[bank][1]:0,
         radius,hash(1987u^sequence)};
     *out=next;return 0;
@@ -45,7 +45,7 @@ int a7_film_frame_validate(const struct a7_film_frame *f,const struct a7_film_fr
        (f->width&1)||!f->height||f->height>A7_FILM_FRAME_MAX_DIMENSION||
        f->format<A7_FILM_NV12||f->format>A7_FILM_UYVY||f->range<A7_FILM_FULL||f->range>A7_FILM_LIMITED||
        f->path<A7_FILM_PREVIEW||f->path>A7_FILM_CAPTURE||!f->cookie||
-       (f->format==A7_FILM_NV12&&(f->height&1))||p->grain<0||p->grain>9||p->halation<0||p->halation>9)return -1;
+       (f->format==A7_FILM_NV12&&(f->height&1))||p->grain<0||p->grain>9||p->halation<-9||p->halation>9)return -1;
     size_t need=a7_film_frame_workspace(f->width,p->radius),n[2]={plane_used(f,0),0};
     if(!need||need>wn||!n[0]||overlap(f,sizeof *f,ws,need)||overlap(p,sizeof *p,ws,need))return -1;
     if(packed(f)) {if(f->plane[1].data||f->plane[1].bytes||f->plane[1].stride)return -1;}
@@ -144,6 +144,7 @@ int a7_film_frame_apply(struct a7_film_frame *f,const struct a7_film_frame_param
     uint8_t *previous=history+(size_t)w*(r+1);
     uint8_t masks[256],levels[256];
     int limited=f->range==A7_FILM_LIMITED;
+    int dark=p->halation<0,strength=dark?-p->halation:p->halation;
     for(unsigned i=0;i<256;i++){
         int v=limited?clamp(((int)i-16)*255/219,0,255):(int)i;
         levels[i]=(uint8_t)v;
@@ -177,16 +178,18 @@ int a7_film_frame_apply(struct a7_film_frame *f,const struct a7_film_frame_param
                     if(numerator-mean*area>=area)mean++;
                     line[xx]=masks[*a];
                     int halo=(int)mean-(int)line[xx];
-                    glow=clamp(halo,0,255)*p->halation/24;
+                    glow=clamp(halo,0,255)*strength/24;
                     if(xx+1<w){
                         unsigned left=xx>=r?xx-r:0,right=xx+r+1<w?xx+r+1:w-1;
                         sum=sum-vertical[left]+vertical[right];
                     }
-                    if(f->format==A7_FILM_NV12){
-                        if(!(y&1))previous[xx]=(uint8_t)glow;
-                        else glow_sum+=previous[xx];
+                    if(!dark){
+                        if(f->format==A7_FILM_NV12){
+                            if(!(y&1))previous[xx]=(uint8_t)glow;
+                            else glow_sum+=previous[xx];
+                        }
+                        glow_sum+=(unsigned)glow;
                     }
-                    glow_sum+=(unsigned)glow;
                 }
                 if(p->grain){
                     int field;
@@ -205,11 +208,11 @@ int a7_film_frame_apply(struct a7_film_frame *f,const struct a7_film_frame_param
                     }
                     noise=field*p->grain*(64+(v<128?v:255-v))/65536;
                 }
-                int delta=noise+glow/2;if(limited)delta=delta*219/255;
+                int delta=noise+(dark?-glow:glow)/2;if(limited)delta=delta*219/255;
                 /* Zero delta preserves headroom/footroom as well as identity. */
                 if(delta)*a=(uint8_t)clamp((int)*a+delta,limited?16:0,limited?235:255);
             }
-            if(p->halation&&(f->format!=A7_FILM_NV12||(y&1))){
+            if(strength&&!dark&&(f->format!=A7_FILM_NV12||(y&1))){
                 int glow=(int)(glow_sum/(f->format==A7_FILM_NV12?4:2));
                 int cb=-glow*13/64,cr=glow*21/64;
                 if(limited){cb=cb*224/255;cr=cr*224/255;}
@@ -302,5 +305,18 @@ int a7_film_capture_grain_dispatch(struct a7_film_frame_stage *s,uintptr_t token
     if(snapshot.film[bank][0]<0||snapshot.film[bank][0]>9)return A7_FILM_FRAME_ARGUMENT;
     if(!snapshot.enabled||!snapshot.film[bank][0])return A7_FILM_FRAME_SKIP;
     return dispatch(s,token,path,&snapshot,capture_grain);
+}
+
+int a7_film_capture_texture_dispatch(struct a7_film_frame_stage *s,uintptr_t token,unsigned path,
+                                     const struct a7_fl_preference *p){
+    if(path==A7_FILM_PREVIEW)return A7_FILM_FRAME_SKIP;
+    if(path!=A7_FILM_CAPTURE||!p||p->schema!=4||!p->generation||!a7_fl_preset_valid(p->enabled))
+        return A7_FILM_FRAME_ARGUMENT;
+    struct a7_fl_preference snapshot=*p;
+    if(!snapshot.enabled)return A7_FILM_FRAME_SKIP;
+    const int8_t *film=snapshot.film[snapshot.enabled-1];
+    if(film[0]<0||film[0]>9||film[1]<-9||film[1]>9)return A7_FILM_FRAME_ARGUMENT;
+    if(!film[0]&&!film[1])return A7_FILM_FRAME_SKIP;
+    return dispatch(s,token,path,&snapshot,film[1]?preference:capture_grain);
 }
 #endif

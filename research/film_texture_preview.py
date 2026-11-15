@@ -30,7 +30,8 @@ def main():
     cli.add_argument('--out', type=Path, default=ROOT / '.lab/fl3-film-preview')
     cli.add_argument('--recipe', type=Path, default=ROOT / 'recipes/leica-film-inspired.json')
     cli.add_argument('--grain', type=int, choices=range(10), default=5)
-    cli.add_argument('--halation', type=int, choices=range(10), default=6)
+    cli.add_argument('--halation', type=int, choices=range(-9, 10), default=6,
+                     help='Negative darkens near highlights; positive adds warm glow')
     cli.add_argument('--curve', type=int, nargs=5, default=[2, -3, 0, 2, -2],
                      metavar=('BLACK', 'SHADOW', 'MID', 'HIGHLIGHT', 'WHITE'))
     cli.add_argument('--radius', type=int, choices=range(1, 17), default=8)

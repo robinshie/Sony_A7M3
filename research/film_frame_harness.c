@@ -57,16 +57,17 @@ static void oracle(struct a7_film_frame f,struct a7_film_frame_params p){
                 for(int xx=(int)x-(int)p.radius;xx<=(int)x+(int)p.radius;xx++){
                     s+=mask((unsigned)clamp(xx,0,(int)w-1),(unsigned)clamp(yy,0,(int)h-1),f.range);count++;
                 }
-            g=clamp((int)((s+count/2)/count)-(int)mask(x,y,f.range),0,255)*p.halation/24;
+            int strength=p.halation<0?-p.halation:p.halation;
+            g=clamp((int)((s+count/2)/count)-(int)mask(x,y,f.range),0,255)*strength/24;
         }
-        glow[y][x]=(unsigned)g;
+        glow[y][x]=p.halation<0?0:(unsigned)g;
         if(p.grain){
             uint32_t a=rnd(p.seed^(x/2)*0x9e3779b9u^(y/2)*0x85ebca6bu);
             uint32_t b=rnd(p.seed^0x51ed270bu^x*0x9e3779b9u^y*0x85ebca6bu);
             int aa=(int)(a%256)+(int)((a/256)%256)-255,bb=(int)(b%256)+(int)((b/256)%256)-255;
             n=(3*aa+bb)*p.grain*(64+(int)(v<128?v:255-v))/65536;
         }
-        int delta=n+g/2;if(limited)delta=delta*219/255;
+        int delta=n+(p.halation<0?-g:g)/2;if(limited)delta=delta*219/255;
         if(delta)expected[0][ypos(x,y,fmt)]=(uint8_t)clamp(y_original[y][x]+delta,limited?16:0,limited?235:255);
     }
     for(unsigned y=0;y<h;y+=fmt==1?2:1)for(unsigned x=0;x<w;x+=2){
@@ -137,7 +138,7 @@ static void guards(void){
         case 4:f.format=5;break;case 5:f.range=0;break;case 6:f.cookie=0;break;case 7:f.path=3;break;
         case 8:f.plane[0].bytes=1;break;case 9:f.plane[1].bytes=1;break;case 10:f.plane[1].data=f.plane[0].data;break;
         case 11:f.plane[0].stride=11;break;case 12:f.plane[0].data=0;break;case 13:p.grain=10;break;
-        case 14:p.halation=-1;break;case 15:p.radius=0;break;case 16:p.radius=A7_FILM_FRAME_MAX_RADIUS+1;break;
+        case 14:p.halation=-10;break;case 15:p.radius=0;break;case 16:p.radius=A7_FILM_FRAME_MAX_RADIUS+1;break;
         case 17:ws=buffer[0];break;case 18:ws=(uint8_t *)work+1;break;case 19:n=1;break;
         case 20:f.plane[0].data=(uint8_t *)(UINTPTR_MAX-8);break;case 21:f.format=3;break;
         }
@@ -227,7 +228,7 @@ static void stream_fill(uint8_t *p,size_t n){
 }
 static void dispatch_paths(void){
     struct a7_fl_preference p={0};
-    p.schema=4;p.generation=2;p.film[2][0]=p.film[2][1]=9;
+    p.schema=4;p.generation=2;p.film[2][0]=9;
     struct stream preview={.path=A7_FILM_PREVIEW,.token=405,.sequence=35,.settings=&p};
     struct stream capture={.path=A7_FILM_CAPTURE,.token=730,.sequence=77,.settings=&p};
     uint32_t capture_work[64],preview_work[64];
@@ -240,12 +241,16 @@ static void dispatch_paths(void){
         stream_fill(s->pixels,sizeof s->pixels);
         stream_fill(reference,sizeof reference);
         p.enabled=A7_FL_PRESET_LEICA;
+        p.film[2][1]=path==A7_FILM_CAPTURE?-9:9;
         struct a7_film_frame_params params;
         check(!a7_film_frame_params_from_preference(&p,16,s->sequence,&params),"derive target parameters");
         struct a7_film_frame f={16,8,A7_FILM_UYVY,A7_FILM_FULL,path,
             {{reference,sizeof reference,32},{0,0,0}},s->token,s->sequence};
         check(!a7_film_frame_apply(&f,&params,work,sizeof work),"standalone target");
-        check(!a7_film_frame_dispatch_preference(stage,s->token,path,&p),"process selected stream");
+        if(path==A7_FILM_CAPTURE)
+            check(!a7_film_capture_texture_dispatch(stage,s->token,path,&p),"process signed capture");
+        else
+            check(!a7_film_frame_dispatch_preference(stage,s->token,path,&p),"process selected stream");
         check(s->phase==4&&s->completed==1&&s->disposition==1&&
               stage->processed[path-1]==1&&!stage->processed[2-path],"publish selected stream only");
         for(size_t i=0;i<sizeof reference;i++)check(s->pixels[i]==reference[i],"selected output pixels");
@@ -255,6 +260,8 @@ static void dispatch_paths(void){
     check(a7_film_frame_dispatch_preference(&cv,capture.token,capture.path,&p)==A7_FILM_FRAME_SYNC_DEVICE&&
           capture.disposition==-1&&capture.completed==1,"do not publish incoherent capture");
     preview.phase=0;stream_fill(preview.pixels,sizeof preview.pixels);stream_fill(reference,sizeof reference);
+    check(a7_film_capture_texture_dispatch(&pv,preview.token,preview.path,&p)==A7_FILM_FRAME_SKIP&&
+          !preview.phase,"capture texture never acquires preview");
     p.enabled=A7_FL_PRESET_OFF;
     check(!a7_film_frame_dispatch_preference(&pv,preview.token,preview.path,&p)&&
           preview.disposition==0&&preview.completed==1,"capture fault does not break preview or Off");
@@ -292,11 +299,11 @@ static void capture_only(void){
 }
 static void settings(void){
     struct a7_fl_preference pref={0};pref.schema=4;pref.generation=1;
-    for(unsigned bank=0;bank<3;bank++){pref.film[bank][0]=(int8_t)(bank+2);pref.film[bank][1]=(int8_t)(bank+5);}
+    for(unsigned bank=0;bank<3;bank++){pref.film[bank][0]=(int8_t)(bank+2);pref.film[bank][1]=(int8_t)(bank==1?-9:5+(int)bank);}
     for(int mode=0;mode<4;mode++)for(unsigned width=2;width<=6000;width+=2){
         pref.enabled=mode;struct a7_film_frame_params p={0},again={0};
         check(!a7_film_frame_params_from_preference(&pref,width,123,&p),"settings bridge");
-        check(p.grain==(mode?mode+1:0)&&p.halation==(mode?mode+4:0),"independent bank and Off");
+        check(p.grain==(mode?mode+1:0)&&p.halation==(mode==2?-9:mode?mode+4:0),"independent signed bank and Off");
         check(p.radius==(unsigned)clamp((int)((width+18)/36),1,167),"resolution-scaled halo");
         check(!a7_film_frame_params_from_preference(&pref,width,124,&again)&&p.seed!=again.seed,"frame sequence grain");
     }
@@ -316,6 +323,8 @@ int main(void){
     for(unsigned fmt=1;fmt<=4;fmt++)for(unsigned strength=1;strength<=9;strength++){
         struct a7_film_frame_params p={(int)strength,0,16,78};exercise(24,12,fmt,1,5,p);
         p.grain=0;p.halation=(int)strength;exercise(24,12,fmt,2,3,p);
+        p.halation=-(int)strength;exercise(24,12,fmt,2,4,p);
+        p.grain=(int)strength;exercise(24,12,fmt,1,5,p);
     }
     /* Edge replication beyond both dimensions, with values that overflow the
        old uint16 horizontal accumulator on a wide highlight. */

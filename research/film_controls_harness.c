@@ -1,4 +1,9 @@
 #include "a7-fl-runtime-prefs.h"
+#ifdef A7_FL_CAPTURE_HALATION
+#define UNSIGNED_FILM_FIELDS 1
+#else
+#define UNSIGNED_FILM_FIELDS 2
+#endif
 #include "a7-fl-fivepoint.h"
 #ifndef A7_FILM_QEMU
 #include <stdio.h>
@@ -40,7 +45,7 @@ static void test_preferences(void){
         for(unsigned b=0;b<3;b++){
             for(unsigned f=0;f<8;f++)if(b==active)p.parameters[f]=banks[b][f];else (n?p.third_parameters:p.other_parameters)[f]=(int8_t)banks[b][f];
             if(b!=active)n++;
-            for(unsigned f=0;f<7;f++)p.film[b][f]=(int8_t)(f<2?(int)(random_word()%10):(int)(random_word()%19)-9);
+            for(unsigned f=0;f<7;f++)p.film[b][f]=(int8_t)(f<UNSIGNED_FILM_FIELDS?(int)(random_word()%10):(int)(random_word()%19)-9);
         }
         check(!a7_fl_preference_encode(record,&p,identity,build),"encode film");
         check(!a7_fl_preference_decode(&q,record,128,identity,build),"decode film");
@@ -75,7 +80,7 @@ static void test_preferences(void){
     }
     for(unsigned f=0;f<7;f++)for(int v=-16;v<=15;v++){
         p.film[2][f]=(int8_t)v;
-        int valid=v>=(f<2?0:-9)&&v<=9;
+        int valid=v>=(f<UNSIGNED_FILM_FIELDS?0:-9)&&v<=9;
         check((a7_fl_preference_encode(again,&p,identity,build)==0)==valid,"film control bounds");p.film[2][f]=0;
     }
     check(!a7_fl_preference_encode(again,&p,identity,build),"valid record");again[12]=3;crc(again);
@@ -135,14 +140,15 @@ static void test_private(void){
         struct a7_fl_preference p={0},q={0};
         check(!a7_fl_preference_decode(&p,raw,128,raw+56,(const char *)raw+88),"actual saved record decodes");
         check(!a7_fl_preference_encode(out,&p,raw+56,(const char *)raw+88)&&equal(out,raw,128),"actual saved record byte-exact roundtrip");
+        int needs_migration=p.schema<4;
         struct a7_fl_preference expected=p;a7_fl_preference_migrate_three(&expected);
-        check(a7_fl_preference_migrate_film(&p)==1,"actual saved record migrates");
+        check(a7_fl_preference_migrate_film(&p)==needs_migration,"actual saved record migrates only if needed");
         check(!a7_fl_preference_encode(out,&p,raw+56,(const char *)raw+88),"actual migrated record encodes");
         check(!a7_fl_preference_decode(&q,out,128,raw+56,(const char *)raw+88),"actual migrated record decodes");
         for(int mode=0;mode<4;mode++){
             a7_fl_preference_switch(&q,mode);a7_fl_preference_switch(&expected,mode);
             check(equal(q.parameters,expected.parameters,32),"actual saved banks preserved through mode switches");
-            for(unsigned b=0;b<3;b++)for(unsigned f=0;f<7;f++)check(q.film[b][f]==0,"actual migration initializes film controls neutral");
+            check(equal(q.film,expected.film,21),"actual saved film controls preserved or initialized neutral");
         }
         cases++;
     }

@@ -38,15 +38,24 @@ static int source_publish(void)
 static int take_lease_test(void)
 {
     unsigned handle=report[21],unit=report[22],extents[32]={0};
+    unsigned physical=0x1a000000;
     unsigned short count=0;unsigned char before[32],held[32],after[32];
     int acquired,closed,processing=0;unsigned long irq_flags;
+#ifdef A7_HALATION_TEST
+    /* Both bases were observed in the exact full-size source descriptor.
+     * Do not admit arbitrary buffers: descriptor, extent and native Open
+     * must agree, and grain_patch verifies the native uncached mapping. */
+    physical=report[40+0xc0/4];
+    if((physical!=0x1a000000&&physical!=0x24000000)||
+       report[257]!=physical||report[258]||report[259]!=0x3000000)return -EINVAL;
+#endif
     /* Exact observed image, source handle and idle stage guard. No pixel access. */
     if(((handle&0x3ff)+((handle>>15)<<10))>=0x580 || report[40+0x90/4]!=0x0fa01770 || report[40+0x94/4]!=0x0fa017c0 ||
        report[40+0x98/4]!=80 || (report[40+0xbc/4]&255)!=1 ||
-       report[40+0xc0/4]!=0x1a000000 || report[40+0xc4/4]!=0x3000000)return -EINVAL;
+       report[40+0xc0/4]!=physical || report[40+0xc4/4]!=0x3000000)return -EINVAL;
     for(acquired=184;acquired<208;acquired++)if(report[acquired])return -EBUSY;
     if(in_interrupt() || irqs_disabled() || in_atomic())return -EWOULDBLOCK;
-    report[305]=arch_phys_to_cachetype2(0x1a000000,0x3000000);
+    report[305]=arch_phys_to_cachetype2(physical,0x3000000);
     /* Never wait for a lock potentially held by the intercepted caller.
      * No pixel work, allocation, logging or sleeping while holding it. */
     if(!raw_spin_trylock_irqsave(native_lock,irq_flags))return -EBUSY;
@@ -58,7 +67,7 @@ static int take_lease_test(void)
     acquired=native_open(handle,4,extents,&count);
     memcpy(held,(void *)(unsigned long)unit,sizeof(held));
 #ifdef A7_GRAIN
-    if(!acquired && count==1 && extents[0]==0x1a000000 && extents[1]==0x3000000 &&
+    if(!acquired && count==1 && extents[0]==physical && extents[1]==0x3000000 &&
        held[0x11]==1 && *(unsigned short *)(held+0x14)==3){
         raw_spin_unlock_irqrestore(native_lock,irq_flags);
         processing=grain_patch(handle);
@@ -77,7 +86,7 @@ static int take_lease_test(void)
     report[309]=1;
     if(acquired)return acquired;
     if(closed)return closed;
-    if(count!=1 || extents[0]!=0x1a000000 || extents[1]!=0x3000000 ||
+    if(count!=1 || extents[0]!=physical || extents[1]!=0x3000000 ||
        held[0x11]!=1 || *(unsigned short *)(held+0x14)!=3 || memcmp(before,after,32))return -EIO;
     report[310]=1;return processing;
 }

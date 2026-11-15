@@ -14,9 +14,12 @@ def main():
     global OUT
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--legacy-records', nargs=2, type=Path, help='Optional two previously read camera preferences; offline only')
+    cli.add_argument('--signed-halation', action='store_true')
     options = cli.parse_args()
     if options.legacy_records:
         OUT = ROOT / '.lab/film-controls-private'
+    if options.signed_halation:
+        OUT = OUT.with_name(OUT.name + '-halation')
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / 'proof.json').unlink(missing_ok=True)
     sources = ['payloads/a7-fl-fivepoint.c', 'payloads/a7-fl-fivepoint.h',
@@ -24,6 +27,8 @@ def main():
                'research/film_controls_harness.c', 'research/film_controls_test.py', 'ui/start.S']
     common = ['-O2', '-Wall', '-Wextra', '-Werror', '-DA7_FL_FILM_CONTROLS', '-DA7_FL_LEICA_LOOK',
               '-I', str(ROOT / 'payloads'), *[str(ROOT / sources[i]) for i in (0, 2, 4)]]
+    if options.signed_halation:
+        common += ['-DA7_FL_CAPTURE_HALATION']
     private_hashes = []
     if options.legacy_records:
         data = [p.read_bytes() for p in options.legacy_records]

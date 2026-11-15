@@ -46,9 +46,22 @@ def main():
     ap.add_argument("--leica-look",action="store_true",help="Add independent FL3 warm film preset (schema 3)")
     ap.add_argument('--film-curves',action='store_true',help='Build the FL3 five-point curve candidate for offline validation')
     ap.add_argument('--capture-grain-menu',action='store_true',help='Offline grain menu and independent saved banks; not a flashable grain backend')
+    ap.add_argument('--capture-halation-menu',action='store_true',help='Offline signed halation menu and persistence fixture; no device backend')
     ap.add_argument('--capture-grain-kernel',type=Path,help='Verified dual-bank repeated-shot kernel bundle to embed')
     ap.add_argument('--capture-grain-bridge-proof',type=Path)
+    ap.add_argument('--capture-film-kernel',type=Path)
+    ap.add_argument('--capture-film-bridge-proof',type=Path)
+    ap.add_argument('--capture-film-basis',type=Path)
     args=ap.parse_args()
+    film_mode=bool(args.capture_film_kernel)
+    if film_mode:
+        if args.capture_grain_kernel or not args.capture_film_bridge_proof or not args.capture_film_basis:ap.error('Film build requires its bridge and real-shot basis, not a grain kernel')
+        args.capture_halation_menu=True
+        args.capture_grain_kernel=args.capture_film_kernel
+        args.capture_grain_bridge_proof=args.capture_film_bridge_proof
+    if args.capture_halation_menu:
+        if args.capture_grain_kernel and not film_mode:ap.error('The offline halation menu cannot be built as a device candidate')
+        args.capture_grain_menu=True
     if bool(args.capture_grain_kernel)!=bool(args.capture_grain_bridge_proof):ap.error('Kernel and bridge proof must be supplied together')
     if args.capture_grain_kernel and not args.capture_grain_menu:ap.error('Kernel requires --capture-grain-menu')
     if args.capture_grain_menu and not args.film_curves:ap.error('--capture-grain-menu requires --film-curves')
@@ -78,7 +91,9 @@ def main():
             ap.error('--film-curves requires the complete FL3 build')
         OUT=OUT.with_name('native-module-fl3-curves')
     if args.capture_grain_menu:OUT=OUT.with_name('native-module-grain-menu')
+    if args.capture_halation_menu:OUT=OUT.with_name('native-module-halation-menu')
     if args.capture_grain_kernel:OUT=OUT.with_name('native-module-grain-capture')
+    if film_mode:OUT=OUT.with_name('native-module-film-capture')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -135,15 +150,27 @@ def main():
         for name,entry in locale['files'].items():
             if sha((ROOT/'.lab/native-fl-curve-strings'/name).read_bytes())!=entry['after_sha256']:
                 raise ValueError('Curve locale artifact identity differs')
-    if args.capture_grain_menu:
-        for key in ('native-fl-grain-strings/proof.json','native-resource-grain/report.json'):
+    for enabled,feature in ((args.capture_grain_menu,'grain'),(args.capture_halation_menu,'halation')):
+        if not enabled:continue
+        locale_key=f'native-fl-{feature}-strings/proof.json'
+        resource_key=f'native-resource-{feature}/report.json'
+        for key in (locale_key,resource_key):
             path=ROOT/'.lab'/key;data=json.loads(path.read_text())
             for source_path,digest in data['source_sha256'].items():
-                if sha((ROOT/source_path).read_bytes())!=digest:raise ValueError('Stale grain resource proof: '+source_path)
+                if sha((ROOT/source_path).read_bytes())!=digest:raise ValueError('Stale texture resource proof: '+source_path)
             dependency_proofs[key]=sha(path.read_bytes())
-        if data['input_proof_sha256']!=dependency_proofs['native-fl-grain-strings/proof.json']:raise ValueError('Grain resource evidence mismatch')
+        if data['input_proof_sha256']!=dependency_proofs[locale_key]:raise ValueError('Texture resource evidence mismatch')
+        locale=json.loads((ROOT/'.lab'/locale_key).read_text())
+        for name,entry in locale['files'].items():
+            if sha((ROOT/f'.lab/native-fl-{feature}-strings'/name).read_bytes())!=entry['after_sha256']:
+                raise ValueError('Texture locale artifact identity differs')
     grain_kernel_proof=None
-    if args.capture_grain_kernel:
+    film_ready=False
+    if film_mode:
+        from capture_film_bind import bind
+        grain_kernel_proof,film_deps,film_ready=bind(args.capture_film_kernel.resolve(),args.capture_film_bridge_proof.resolve(),args.capture_film_basis.resolve(),OUT)
+        dependency_proofs.update(film_deps)
+    if args.capture_grain_kernel and not film_mode:
         grain_dir=args.capture_grain_kernel.resolve()
         grain_kernel_proof=json.loads((grain_dir/'proof.json').read_text())
         if grain_kernel_proof.get('route')!='banks' or grain_kernel_proof.get('module_name')!='a7capbanks':raise ValueError('Wrong grain kernel route')
@@ -313,6 +340,7 @@ call_kernel_writer:
     if args.leica_look:flags+=['-DA7_FL_LEICA_LOOK']
     if args.film_curves:flags+=['-DA7_FL_FILM_CONTROLS','-Wno-missing-field-initializers']
     if args.capture_grain_menu:flags+=['-DA7_FL_CAPTURE_GRAIN']
+    if args.capture_halation_menu:flags+=['-DA7_FL_CAPTURE_HALATION']
     if args.capture_grain_kernel:flags+=['-DA7_FL_CAPTURE_GRAIN_BACKEND']
     if args.spatial_settings_only:flags+=['-DA7_FL_SPATIAL_SETTINGS_ONLY']
     if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
@@ -402,11 +430,13 @@ call_kernel_writer:
     if args.film_curves:
         # Release evidence is regenerated by its owning tests, never promoted
         # by editing a report. Physical camera acceptance remains separate.
-        run([sys.executable,str(ROOT/'research/film_controls_test.py')])
+        run([sys.executable,str(ROOT/'research/film_controls_test.py'),
+             *(['--signed-halation'] if args.capture_halation_menu else [])])
         run([sys.executable,str(ROOT/'research/native_capture_controls_test.py'),
              '--route',str(args.capture_look_proof.resolve().parent),
              '--dual-look','--leica-look','--film-curves'])
-        for key in ('film-controls/proof.json','native-fivepoint-capture-test/proof.json'):
+        storage_key='film-controls-halation/proof.json' if args.capture_halation_menu else 'film-controls/proof.json'
+        for key in (storage_key,'native-fivepoint-capture-test/proof.json'):
             path=ROOT/'.lab'/key
             check=json.loads(path.read_text())
             for name,digest in check['source_sha256'].items():
@@ -432,11 +462,20 @@ call_kernel_writer:
     if args.capture_grain_menu:
         if b'NATIVE_FL_GRAIN_BANKS_PASSED' not in log or b'NATIVE_FL_GRAIN_BOOT_PASSED' not in boot_log:raise ValueError('Grain menu persistence evidence missing')
         proof.update(capture_grain_menu=True,ready_for_staging=False,feature_scope='Grain menu, independent saved banks and simulated cold boot only; actual capture backend not linked')
+    if args.capture_halation_menu:
+        if b'NATIVE_FL_HALATION_BANKS_PASSED' not in log or b'NATIVE_FL_HALATION_BOOT_PASSED' not in boot_log:
+            raise ValueError('Signed halation menu and persistence evidence missing')
+        proof.update(capture_halation_menu=True,ready_for_staging=False,
+                     feature_scope='Signed capture-halation menu, independent saved banks and simulated boot only; no registered capture producer')
     if args.capture_grain_kernel:
         if b'NATIVE_FL_GRAIN_CAPTURE_DISPATCH_PASSED' not in log or b'NATIVE_FL_GRAIN_CAPTURE_BOOT_PASSED' not in boot_log:raise ValueError('Capture settings lifecycle not verified')
         proof.update(capture_grain_kernel=True,ready_for_staging=True,kernel_sha256=grain_kernel_proof['module_sha256'],feature_scope='Capture-only JPEG L grain with menu strengths and independent FL banks; no halation or live-view grain')
         for n in ('payloads/a7-fl-grain-backend.h','research/capture_grain_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
         for n in ('grain.ko','a7-fl-grain-kernel.h','grain-blob.S','grain-sample-proof.json'):proof['artifact_sha256'][n]=sha((OUT/n).read_bytes())
+    if film_mode:
+        if b'NATIVE_FL_HALATION_CAPTURE_DISPATCH_PASSED' not in log or b'NATIVE_FL_HALATION_CAPTURE_BOOT_PASSED' not in boot_log:raise ValueError('Film capture lifecycle fixture missing')
+        proof.update(capture_film_kernel=True,ready_for_staging=film_ready,feature_scope='Capture-only grain and signed halation, independent saved FL banks; cold-boot verification required',hardware_basis_verified=film_ready)
+        for n in ('research/capture_film_bind.py','research/capture_halation_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 if __name__=='__main__':main()

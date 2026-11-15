@@ -19,7 +19,7 @@ struct a7_film_frame {
     uintptr_t cookie; /* producer-owned lease, never interpreted as an address */
     uint32_t sequence;
 };
-struct a7_film_frame_params { int grain,halation; unsigned radius; uint32_t seed; };
+struct a7_film_frame_params { int grain,halation; /* 0..9, -9..9 */ unsigned radius; uint32_t seed; };
 enum a7_film_frame_result {
     A7_FILM_FRAME_OK=0,A7_FILM_FRAME_SKIP=1,A7_FILM_FRAME_BUSY=2,
     A7_FILM_FRAME_ARGUMENT=-1,A7_FILM_FRAME_ACQUIRE=-2,
@@ -27,7 +27,8 @@ enum a7_film_frame_result {
     A7_FILM_FRAME_RELEASE=-5,A7_FILM_FRAME_FAULT=-6
 };
 /* Full-range and studio-range BT.709 8-bit, progressive, linear frames only.
- * Grain changes luma; halation spreads highlights and warms their surroundings.
+ * Grain changes luma. Positive halation adds warm light around highlights;
+ * negative halation dims the same area while preserving stored chroma.
  * Curves belong in the upstream LUT; this stage does not apply them twice.
  * All preflight failures leave pixels unchanged. No allocation or file I/O. */
 size_t a7_film_frame_workspace(unsigned width,unsigned radius);
@@ -77,6 +78,11 @@ int a7_film_frame_dispatch_preference(struct a7_film_frame_stage *,uintptr_t tok
  * Settings are copied at submission; halation is not applied on this route. */
 int a7_film_capture_grain_dispatch(struct a7_film_frame_stage *,uintptr_t token,unsigned path,
                                    const struct a7_fl_preference *);
+/* Capture-only signed halation with optional grain. The producer supplies the
+ * exclusive pre-encode lease; this adapter does not register it. Workspace
+ * must cover the acquired width and scaled radius if halation is enabled. */
+int a7_film_capture_texture_dispatch(struct a7_film_frame_stage *,uintptr_t token,unsigned path,
+                                     const struct a7_fl_preference *);
 
 #endif
 #endif

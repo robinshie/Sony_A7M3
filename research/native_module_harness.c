@@ -20,11 +20,22 @@
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
 static unsigned grain_selection,grain_calls;
 static int grain_fail_once;
+#ifdef A7_FL_CAPTURE_HALATION
+static int halo_selection;
+#endif
 int a7_fl_grain_apply(unsigned preset,unsigned strength){
     check(preset<=3&&strength<=9,"valid grain backend settings");grain_calls++;
     if(grain_fail_once){grain_fail_once=0;return -5;}
     grain_selection=preset?(preset<<4)|strength:0;return 0;
 }
+#ifdef A7_FL_CAPTURE_HALATION
+int a7_fl_film_apply(unsigned preset,unsigned strength,int halation){
+    check(halation>=-9&&halation<=9,"signed capture halo range");
+    int rc=a7_fl_grain_apply(preset,strength);
+    if(!rc)halo_selection=preset?halation:0;
+    return rc;
+}
+#endif
 #endif
 extern int stock_get(void *,int,int *);
 extern int stock_set(void *,int,int);
@@ -230,6 +241,14 @@ void guest_main(void) {
     int grain_id=native_adjust_field_id(NATIVE_ADJUST_GRAIN_FIELD);
     test(set_value(grain_id,7)&&get_value(grain_id,&enum_value)&&enum_value==7,"FL3 grain edit");
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+    int halo_id=native_adjust_field_id(NATIVE_ADJUST_HALATION_FIELD);
+    test(halo_id==0x7010&&film_look->children[2]->count==5,"signed halo before Save on page 3");
+    test(!set_value(halo_id,-1)&&!set_value(halo_id,19)&&
+         get_value(halo_id,&enum_value)&&enum_value==9,"new halo starts at zero; invalid enum rejected");
+    test(set_value(halo_id,8)&&get_value(halo_id,&enum_value)&&enum_value==8,"native enum 8 represents -1");
+    test(set_value(halo_id,0),"set FL3 halo to -9");
+#endif
     original_action(action_view);
     test(dialog_commit&&slot_writes==0,"open native Save dialog without a settings write");
     test(!confirm_dialog()&&!film->dirty&&slot_writes==1,"native confirmed Save writes curve preference once");
@@ -243,6 +262,11 @@ void guest_main(void) {
     test(result.film[2][0]==7,"FL3 grain saved in existing schema");
     test(set_value(grain_id,4)&&!a7_fl_cancel()&&get_value(grain_id,&enum_value)&&enum_value==7,"cancel restores saved grain");
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+    test(result.film[2][1]==-9,"negative halo saved");
+    test(set_value(halo_id,18)&&!a7_fl_cancel()&&get_value(halo_id,&enum_value)&&enum_value==0,"cancel restores negative halo");
+    const int halo_values[3]={15,6,0};
+#endif
     const int bank_points[3][5]={{11,6,13,8,7},{12,7,14,9,8},{18,7,10,11,5}};
     for(unsigned bank=1;bank<=2;bank++){
         test(set_value(0x7000,(int)bank)&&capture_matches(bank),"activate zero-curve FL/FL2");
@@ -252,12 +276,21 @@ void guest_main(void) {
 #ifdef A7_FL_CAPTURE_GRAIN
         test(set_value(grain_id,(int)bank*2),"set independent FL and FL2 grain");
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+        test(set_value(halo_id,halo_values[bank-1]),"set independent positive and negative halo");
+#endif
         original_action(action_view);test(!confirm_dialog(),"save independent FL/FL2 curve");
     }
     for(unsigned bank=1;bank<=3;bank++){
         test(set_value(0x7000,(int)bank),"switch all three curve banks");
 #ifdef A7_FL_CAPTURE_GRAIN
         test(get_value(grain_id,&enum_value)&&enum_value==(bank==3?7:(int)bank*2),"switch restores each grain bank");
+#endif
+#ifdef A7_FL_CAPTURE_HALATION
+        test(get_value(halo_id,&enum_value)&&enum_value==halo_values[bank-1],"switch restores signed halo");
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+        test(halo_selection==halo_values[bank-1]-9,"selected signed halo reaches capture backend");
+#endif
 #endif
         for(unsigned f=0;f<5;f++)test(get_value(native_adjust_field_id(8+f),&enum_value)&&enum_value==bank_points[bank-1][f],"selected curve bank restored exactly");
     }
@@ -275,9 +308,19 @@ void guest_main(void) {
     test(!set_value(grain_id,4)&&get_value(grain_id,&enum_value)&&enum_value==7&&grain_selection==55&&!film->fault,"backend failure rejects edit and restores previous capture setting");
     test(set_value(0x7000,0)&&grain_selection==0&&set_value(0x7000,2)&&grain_selection==36,"Off and FL2 reach capture adapter");
     test(!a7_fl_cancel()&&grain_selection==36,"cancel restores last committed capture setting");
+#ifdef A7_FL_CAPTURE_HALATION
+    test(halo_selection==-3,"cancel restores confirmed FL2 signed halo to capture backend");
+    put("NATIVE_FL_HALATION_CAPTURE_DISPATCH_PASSED\n");
+#endif
     put("NATIVE_FL_GRAIN_CAPTURE_DISPATCH_PASSED\n");
 #endif
     put("NATIVE_FL_GRAIN_BANKS_PASSED\n");
+#endif
+#ifdef A7_FL_CAPTURE_HALATION
+    for(unsigned b=0;b<3;b++)test(result.film[b][1]==halo_values[b]-9,"all signed halo banks durable");
+    test(set_value(0x7000,0)&&!set_value(halo_id,2)&&set_value(0x7000,3)&&
+         get_value(halo_id,&enum_value)&&enum_value==0,"Off blocks edit and preserves halo");
+    put("NATIVE_FL_HALATION_BANKS_PASSED\n");
 #endif
     put("NATIVE_FL_ALL_CURVE_BANKS_PASSED\n");
     test(!film->fault,"no resident fault after curve flow");
@@ -322,10 +365,16 @@ void guest_main(void) {
 #ifdef A7_FL_CAPTURE_GRAIN
     recovering.film[0][0]=2;recovering.film[1][0]=4;recovering.film[2][0]=7;
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+    recovering.film[0][1]=6;recovering.film[1][1]=-3;recovering.film[2][1]=-9;
+#endif
     test(!a7_fl_preference_encode(slot_bytes[0],&recovering,a7_pkg_original_sha,a7_pkg_build),"store previous confirmed curve");slot_exists[0]=1;
     struct a7_fl_preference pending=recovering;pending.film[2][2]=-5;
 #ifdef A7_FL_CAPTURE_GRAIN
     pending.film[2][0]=9;
+#endif
+#ifdef A7_FL_CAPTURE_HALATION
+    pending.film[2][1]=9;
 #endif
     test(!a7_fl_fivepoint_preview(saved_base,EXPAND,COMPRESS,&desired,transient,data_guarded+1),"partially serialized unsaved curve");
     pending.candidate_crc=a7_fl_crc(data_guarded+1,1280);
@@ -348,6 +397,10 @@ void guest_main(void) {
     int grain_enum=-1;
     test(get_value(native_adjust_field_id(NATIVE_ADJUST_GRAIN_FIELD),&grain_enum)&&grain_enum==7,"cold boot restores confirmed grain, discards unsaved grain");
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+    int halo_enum=-1,halo_id=native_adjust_field_id(NATIVE_ADJUST_HALATION_FIELD);
+    test(get_value(halo_id,&halo_enum)&&halo_enum==0,"cold boot restores saved negative halo, discards pending positive");
+#endif
     for(unsigned f=0;f<5;f++){
         int saved_enum=-1;
         test(get_value(native_adjust_field_id(8+f),&saved_enum)&&saved_enum==points[f]+9,
@@ -357,6 +410,12 @@ void guest_main(void) {
         test(set_value(0x7000,(int)bank),"cold boot switches FL and FL2");
 #ifdef A7_FL_CAPTURE_GRAIN
         test(get_value(native_adjust_field_id(NATIVE_ADJUST_GRAIN_FIELD),&grain_enum)&&grain_enum==(int)bank*2,"cold boot retains independent grain banks");
+#endif
+#ifdef A7_FL_CAPTURE_HALATION
+        test(get_value(halo_id,&halo_enum)&&halo_enum==recovering.film[bank-1][1]+9,"cold boot retains independent signed halos");
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+        test(halo_selection==recovering.film[bank-1][1],"cold boot restores signed capture halo");
+#endif
 #endif
         int bank_curve[5];
         for(unsigned f=0;f<5;f++){
@@ -375,10 +434,16 @@ void guest_main(void) {
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
     test(grain_calls&&grain_selection==36,"cold menu bank selection reaches capture adapter");
     put("NATIVE_FL_GRAIN_CAPTURE_BOOT_PASSED\n");
+#ifdef A7_FL_CAPTURE_HALATION
+    put("NATIVE_FL_HALATION_CAPTURE_BOOT_PASSED\n");
+#endif
 #endif
     put("NATIVE_FL_GRAIN_BOOT_PASSED\n");
 #endif
     put("NATIVE_FL_ALL_CURVE_BOOT_PASSED\n");
+#ifdef A7_FL_CAPTURE_HALATION
+    put("NATIVE_FL_HALATION_BOOT_PASSED\n");
+#endif
     put("NATIVE_FL_CURVE_BOOT_PASSED\n");finish();
 #endif
     check(a7_fl_adjust_lut(saved_base,1280,EXPAND,COMPRESS,&desired,desired_table,1280)==0,"saved boot generation");

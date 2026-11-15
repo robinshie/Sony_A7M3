@@ -18,7 +18,12 @@ static int valid(const struct a7_fl_preference *p) {
 #ifdef A7_FL_FILM_CONTROLS
     for(unsigned b=0;b<3;b++)for(unsigned i=0;i<7;i++) {
         int value=p->film[b][i];
-        if(p->schema<4?value!=0:(value<(i<2?0:-9)||value>9))return 0;
+#ifdef A7_FL_CAPTURE_HALATION
+        int minimum=i==0?0:-9;
+#else
+        int minimum=i<2?0:-9;
+#endif
+        if(p->schema<4?value!=0:(value<minimum||value>9))return 0;
     }
 #endif
     return 1;

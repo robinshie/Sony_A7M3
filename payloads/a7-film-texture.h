@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 typedef struct {
-    int grain,halation; /* 0..9 */
+    int grain,halation; /* 0..9, -9..9 */
     int curve[5]; /* black,shadow,midtone,highlight,white: -9..9 */
     unsigned radius; /* 1..16 pixels at this working resolution */
     uint32_t seed;

@@ -16,7 +16,7 @@ def check(ok,label):
  checks+=1
  if not ok:raise AssertionError(label)
 class Env:
- def __init__(self):self.disk=old;self.backup=None;self.log=None;self.writes=0;self.preflights=0;self.fail_preflight=False;self.fail_write=False;self.fail_readback=False;self.model=b'ILCE-7M3'+bytes(8);self.wbi_zero=True;self.journal_bad=False
+ def __init__(self):self.disk=old;self.backup=None;self.log=None;self.writes=0;self.preflights=0;self.fail_preflight=False;self.fail_write=False;self.fail_readback=False;self.model=b'ILCE-7M3'+bytes(8);self.wbi_zero=True;self.journal_bad=False;self.bad_locale=None
  def readBackup(self,key):check(key==0x3e0005,'model-only host backup read');return self.model
 def report(env,write):
  status=-3 if (env.fail_write if write else env.fail_preflight) else 0
@@ -34,8 +34,11 @@ class Factory:
   st,data=self.read(path,maximum);check(st==(0,0),'existing mock contents');return data
  def read(self,path,maximum=1048576):
   values={bundle.target:self.e.disk,host.VIEW:view,bundle.backup:self.e.backup,bundle.journal:self.e.log,bundle.temporary:None}
-  if m['version'] in (11,12,13,14,15):
-   for name in ('string_simplifiedchinese.uxc','string_english.uxc'):values['/usr/share/app/'+name]=(ROOT/('.lab/native-fl-grain-strings' if m['version']==15 else '.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
+  if m['version'] in (11,12,13,14,15,151):
+   for name in ('string_simplifiedchinese.uxc','string_english.uxc'):
+    value=(ROOT/('.lab/native-fl-halation-strings' if m['version']==151 else '.lab/native-fl-grain-strings' if m['version']==15 else '.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
+    if self.e.bad_locale==name:value=value[:-1]+bytes([value[-1]^1])
+    values['/usr/share/app/'+name]=value
   check(path in values,'bounded file read path');v=values[path]
   if v is None:return self.missing,b''
   check(len(v)<=maximum,'bounded read size');return (0,0),v
@@ -66,6 +69,10 @@ with tempfile.TemporaryDirectory(dir=B) as temp:
  check((root/'good/write-intent.json').exists() and (root/'good/device-journal.json').exists(),'intent and exact journal retained')
  for name,field,value in [('model','model',b'OTHER'+bytes(11)),('wbi','wbi_zero',False),('preflight-fail','fail_preflight',True),('existing-journal','log',b'old')]:
   env=Env();setattr(env,field,value);reject(env,name,True);check(env.writes==0,'guard sends no writer: '+name)
+ if m['version']==151:
+  for name in ('string_simplifiedchinese.uxc','string_english.uxc'):
+   env=Env();env.bad_locale=name;reject(env,'wrong-'+name,True)
+   check(env.writes==0 and env.preflights==0,'new module requires installed halation locale: '+name)
  for name,field in [('writer-failure','fail_write'),('readback-failure','fail_readback'),('torn-journal','journal_bad')]:
   env=Env();setattr(env,field,True);reject(env,name,True);check(env.writes==1,'failure never retries: '+name);check(not(root/name/'verified.json').exists(),'failure not declared success: '+name)
   check((root/name/'replace-report.bin').exists(),'failure report retained: '+name)

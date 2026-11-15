@@ -13,6 +13,16 @@
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
 typedef struct {unsigned value,break_lock;} raw_spinlock_t;
 static unsigned report[368],checks,held_lock,lock_busy,atomic_context,opens,closes;
+#ifdef TEST_HALATION
+#define A7_HALATION_TEST 1
+static unsigned completed;
+static int frame_halation,disarmed=1;
+#endif
+#ifdef TEST_FILM
+static unsigned frame_grain,frame_seed=0x5a7f1203;
+#endif
+static unsigned test_physical=0x1a000000;
+static int bad_mapping,bad_cache;
 static unsigned char *const unit=(void *)0x42095ab8;
 static unsigned ext[12];
 static void check(int ok);
@@ -29,7 +39,7 @@ static void raw_spin_unlock(raw_spinlock_t *p){(void)p;check(held_lock);held_loc
 static int in_interrupt(void){return 0;}
 static int irqs_disabled(void){return 0;}
 static int in_atomic(void){return atomic_context;}
-int arch_phys_to_cachetype2(unsigned long p,unsigned long s){check(p==0x1a000000&&s==0x3000000);return 0x12;}
+int arch_phys_to_cachetype2(unsigned long p,unsigned long s){check((p==0x1a000000||p==0x24000000)&&s==0x3000000);return bad_cache?0:0x12;}
 #include "kernel_probe/capture_lease_record.h"
 #ifdef TEST_GRAIN
 typedef long long loff_t;typedef long ssize_t;
@@ -40,10 +50,27 @@ static struct{struct{struct kobject kobj;}mkobj;}module;
 static unsigned long jiffies;static unsigned barriers,corrupt_at;
 static int sysfs_create_bin_file(struct kobject *k,struct bin_attribute *b){(void)k;(void)b;return 0;}
 static void sysfs_remove_bin_file(struct kobject *k,struct bin_attribute *b){(void)k;(void)b;}
-unsigned long arch_phys_to_va(unsigned long p){check(!held_lock&&p==0x1a000000);return 0x7a000000;}
-int arch_va_to_cachetype(unsigned long v){check(v==0x7a000000);return 0x12;}
-static void mb(void){check(!held_lock);barriers++;jiffies++;if(barriers==corrupt_at)*(volatile unsigned char *)(0x7a000000+1936*12160+2952*2+1)^=1;}
+unsigned long arch_phys_to_va(unsigned long p){check(!held_lock&&(p==0x1a000000||p==0x24000000));return p+0x60000000+(bad_mapping?4096:0);}
+int arch_va_to_cachetype(unsigned long v){check(v==0x7a000000||v==0x84000000);return bad_cache?0:0x12;}
+#if defined(TEST_HALATION) && !defined(TEST_FILM)
+static unsigned halo_corrupt_offset(void);
+#endif
+static void mb(void){check(!held_lock);barriers++;jiffies++;if(barriers==corrupt_at)
+#if defined(TEST_HALATION) && !defined(TEST_FILM)
+/* The diagnostic region is chosen from source highlights before the filter. */
+*(volatile unsigned char *)(test_physical+0x60000000+halo_corrupt_offset())^=1;
+#else
+*(volatile unsigned char *)(0x7a000000+1936*12160+2952*2+1)^=1;
+#endif
+}
+#ifdef TEST_FILM
+#include "kernel_probe/capture_film_record.h"
+#elif defined(TEST_HALATION)
+#include "kernel_probe/capture_halation_record.h"
+static unsigned halo_corrupt_offset(void){return (halo[completed].y+HB)*12160+(halo[completed].x+HB)*2+1;}
+#else
 #include "kernel_probe/capture_grain_record.h"
+#endif
 #endif
 static int wrapped_open(unsigned h,unsigned mode,void *out,unsigned short *n){
     int (*fn)(unsigned,unsigned,void *,unsigned short *)=(void *)0x4100889c;
@@ -58,10 +85,12 @@ static void reset(void){
     unsigned i;for(i=0;i<368;i++)report[i]=0;for(i=0;i<0x150;i++)unit[i]=0;for(i=0;i<12;i++)ext[i]=0;
     report[21]=(3<<10)|7;report[22]=(unsigned)unit;
     report[40+0x90/4]=0x0fa01770;report[40+0x94/4]=0x0fa017c0;report[40+0x98/4]=80;
-    report[40+0xbc/4]=1;report[40+0xc0/4]=0x1a000000;report[40+0xc4/4]=0x3000000;
+    report[40+0xbc/4]=1;report[40+0xc0/4]=test_physical;report[40+0xc4/4]=0x3000000;
+    report[257]=test_physical;report[259]=0x3000000;
     unit[0x13]=3;*(unsigned short *)(unit+0x14)=1;*(unsigned short *)(unit+0x16)=1;
-    *(unsigned *)(unit+0x18)=(unsigned)ext;ext[1]=0x1a000000;ext[3]=0x3000000;
+    *(unsigned *)(unit+0x18)=(unsigned)ext;ext[1]=test_physical;ext[3]=0x3000000;
     held_lock=lock_busy=atomic_context=opens=closes=0;
+    bad_mapping=bad_cache=0;
 #ifdef TEST_GRAIN
     barriers=corrupt_at=0;
 #endif
@@ -71,6 +100,61 @@ void guest_main(void){
     (void)source_publish;(void)source_remove;(void)take_early_record;
 #ifdef TEST_GRAIN
     unsigned i,changed=0;unsigned char *pixels=(void *)0x7a000000;
+#endif
+#ifdef TEST_FILM
+    unsigned bank,c;
+    (void)disarmed;
+    (void)module;(void)sysfs_create_bin_file;(void)sysfs_remove_bin_file;
+    check(!grain_publish()&&report[352]==1);
+    for(bank=0;bank<2;bank++)for(c=0;c<5;c++){
+        test_physical=bank?0x24000000:0x1a000000;pixels=(void *)(test_physical+0x60000000);
+        frame_grain=c<2?0:9;frame_halation=c==0||c==3?-9:c==1||c==4?9:0;
+        for(i=0;i<12160*4000;i++)pixels[i]=(i%12160<160)?0xc7:(i&1)?((i%12160)/2<3080?105:250):128;
+        reset();check(!take_lease_test()&&report[310]==1&&opens==1&&closes==1&&!held_lock);
+        check(report[344]==3&&!report[345]&&report[349]==24000000&&!report[350]);
+        check(report[359]==test_physical&&report[360]==test_physical+0x60000000&&report[361]==frame_grain);
+        changed=0;
+        for(i=0;i<12160*4000;i++){
+            unsigned char before=(i%12160<160)?0xc7:(i&1)?((i%12160)/2<3080?105:250):128;
+            if(pixels[i]!=before){check(i%12160>=160);if(frame_halation<=0)check(i&1);if(!frame_grain&&frame_halation<0)check(pixels[i]<before);changed++;}
+        }
+        check(changed>0&&!unit[0x11]&&*(unsigned short *)(unit+0x14)==1);
+    }
+    reset();bad_mapping=1;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);
+    reset();bad_cache=1;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);
+    reset();frame_grain=10;check(take_lease_test()==-1&&closes==1&&!barriers);frame_grain=0;
+    reset();report[257]^=4096;check(take_lease_test()==-EINVAL&&!opens&&!closes);
+    test_physical=0x1a000000;
+    grain_remove();
+#elif defined(TEST_HALATION)
+    {int err=grain_publish();if(err){print("HALO_INIT ");number((unsigned)err);print(" code ");number(report[359]);print(" values ");number(report[360]);print(" ");number(report[361]);print(" ");number(report[362]);print("\n");}check(!err&&report[352]==1);}
+    unsigned bank;
+    for(bank=0;bank<2;bank++)for(completed=0;completed<3;completed++){
+        test_physical=bank?0x24000000:0x1a000000;
+        pixels=(void *)(test_physical+0x60000000);
+        frame_halation=completed==0?-9:completed==1?0:9;
+        for(i=0;i<12160*4000;i++)pixels[i]=(i%12160<160)?0xc7:(i&1)?((i%12160)/2<3080?105:250):128;
+        reset();check(!take_lease_test()&&report[310]==1&&opens==1&&closes==1&&!held_lock);
+        check(!unit[0x11]&&*(unsigned short *)(unit+0x14)==1&&report[350]==0);
+        check(!memcmp(halo[completed].actual,halo[completed].wanted,HBYTES));
+        changed=0;
+        for(i=0;i<12160*4000;i++){
+            unsigned char before=(i%12160<160)?0xc7:(i&1)?((i%12160)/2<3080?105:250):128;
+            if(pixels[i]!=before){check(i%12160>=160);check(frame_halation!=0);if(frame_halation<0)check((i&1)&&pixels[i]<before);changed++;}
+        }
+        check((changed>0)==(frame_halation!=0));
+    }
+    completed=0;frame_halation=-9;reset();corrupt_at=2;
+    check(take_lease_test()==-EIO&&report[350]==2&&!unit[0x11]&&closes==1);
+    reset();bad_mapping=1;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);
+    reset();bad_cache=1;check(take_lease_test()==-EINVAL&&closes==1&&!barriers);
+    reset();report[257]^=4096;check(take_lease_test()==-EINVAL&&!opens&&!closes);
+    reset();report[258]=1;check(take_lease_test()==-EINVAL&&!opens&&!closes);
+    reset();ext[1]=0x1a000000;check(take_lease_test()==-EIO&&opens==1&&closes==1&&!barriers);
+    test_physical=0x1a000000;
+    grain_remove();
+#else
+#ifdef TEST_GRAIN
     for(i=0;i<12160*4000;i++)pixels[i]=(unsigned char)(i*37+53);
     check(!grain_publish()&&report[352]==1);
 #endif
@@ -99,6 +183,7 @@ void guest_main(void){
     reset();corrupt_at=2;check(take_lease_test()==-EIO&&report[350]==1&&!unit[0x11]&&closes==1);
 #endif
     grain_remove();
+#endif
 #endif
     reset();lock_busy=1;check(take_lease_test()==-EBUSY&&!opens&&!closes&&!held_lock);
     reset();atomic_context=1;check(take_lease_test()==-EWOULDBLOCK&&!opens&&!closes);

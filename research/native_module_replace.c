@@ -40,6 +40,12 @@ static const char temporary[]=".a7fl2-zh.new",backup[]=".a7fl2-zh.orig",logname[
 static const char temporary[]=".a7fl2-en.new",backup[]=".a7fl2-en.orig",logname[]="A7FL2EN.LOG";
 #elif NMR_REVISION == 15
 static const char temporary[]=".a7fl-r15.new",backup[]=".a7fl-28a7c217.orig",logname[]="A7FLUP15.LOG";
+#elif NMR_REVISION == 151
+static const char temporary[]=".a7fl-r15h.new",backup[]=".a7fl-33d103c8.orig",logname[]="A7FLUP15H.LOG";
+#elif NMR_REVISION == 15101
+static const char temporary[]=".a7halo-zh.new",backup[]=".a7halo-zh.orig",logname[]="A7HALOZH.LOG";
+#elif NMR_REVISION == 15102
+static const char temporary[]=".a7halo-en.new",backup[]=".a7halo-en.orig",logname[]="A7HALOEN.LOG";
 #elif NMR_REVISION == 1501
 static const char temporary[]=".a7grain-zh.new",backup[]=".a7grain-zh.orig",logname[]="A7GRAINZH.LOG";
 #elif NMR_REVISION == 1502
@@ -55,9 +61,9 @@ static const char temporary[]=".a7curve-en.new",backup[]=".a7curve-en.orig",logn
 #else
 #error Unsupported module replacement revision
 #endif
-#if NMR_REVISION == 1101 || NMR_REVISION == 1201 || NMR_REVISION == 1301 || NMR_REVISION == 1501
+#if NMR_REVISION == 1101 || NMR_REVISION == 1201 || NMR_REVISION == 1301 || NMR_REVISION == 1501 || NMR_REVISION == 15101
 static const char current[]="string_simplifiedchinese.uxc",directory[]="/usr/share/app";
-#elif NMR_REVISION == 1102 || NMR_REVISION == 1202 || NMR_REVISION == 1302 || NMR_REVISION == 1502
+#elif NMR_REVISION == 1102 || NMR_REVISION == 1202 || NMR_REVISION == 1302 || NMR_REVISION == 1502 || NMR_REVISION == 15102
 static const char current[]="string_english.uxc",directory[]="/usr/share/app";
 #else
 static const char current[]="a7fl.so",directory[]="/usr/lib";
@@ -151,7 +157,7 @@ int nmr_run(const NMRBundle*b,const unsigned char expected[32],NMRCall call,void
     b->view_size<4096||b->view_size>16*1048576||!same(expected,r->binding,32)||same(b->old_sha,b->new_sha,32)||!any(b->new_proof_sha,32))goto done;
  sha_update(&h,b->new_bytes,b->new_size);sha_finish(&h,sum);
  if(!same(sum,b->new_sha,32))goto done;
-#if NMR_REVISION == 1101 || NMR_REVISION == 1102 || NMR_REVISION == 1201 || NMR_REVISION == 1202 || NMR_REVISION == 1301 || NMR_REVISION == 1302 || NMR_REVISION == 1501 || NMR_REVISION == 1502
+#if NMR_REVISION == 1101 || NMR_REVISION == 1102 || NMR_REVISION == 1201 || NMR_REVISION == 1202 || NMR_REVISION == 1301 || NMR_REVISION == 1302 || NMR_REVISION == 1501 || NMR_REVISION == 1502 || NMR_REVISION == 15101 || NMR_REVISION == 15102
  if(!same(b->new_bytes,"uxc\7\0\0\0\0\17\0\47\0",12))goto done;
 #else
  if(!same(b->new_bytes,"\177ELF\1\1\1",7)||!same(b->new_bytes+16,"\3\0\50\0",4))goto done;

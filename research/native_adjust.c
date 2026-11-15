@@ -62,6 +62,13 @@ int native_adjust_grain_spec(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],int st
     return 1;
 }
 #endif
+#ifdef A7_FL_CAPTURE_HALATION
+int native_adjust_halation_spec(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],int strength){
+    if(!specs||strength<-9||strength>9)return 0;
+    specs[NATIVE_ADJUST_HALATION_FIELD]=(NativeAdjustSpec){NATIVE_ADJUST_HALATION_TITLE,0,-9,9,strength};
+    return 1;
+}
+#endif
 #ifdef A7_FL_FILM_CONTROLS
 int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const int8_t points[5]){
     if(!specs||!points)return 0;
