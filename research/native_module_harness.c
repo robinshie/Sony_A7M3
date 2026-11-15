@@ -11,6 +11,9 @@
 #include "a7-fl-fivepoint-preview.h"
 #include "a7-fl-worklog.h"
 #endif
+#ifdef A7_FL_SIX_LOOKS
+#include "a7-fl-classic-looks.h"
+#endif
 #ifdef A7_FL_DUAL_LOOK
 #include "a7-fl-cinema.h"
 #ifdef A7_FL_LEICA_LOOK
@@ -168,6 +171,12 @@ int a7_fl_preview_request(uintptr_t base,const struct a7_fl_api *backup,
 #endif
 #ifdef A7_FL_LEICA_LOOK
     if(enabled==3){test(!a7_leica_base(ORIGINAL,EXPAND,COMPRESS,cinema_base),"FL3 expected base");base_table=cinema_base;}
+#endif
+#ifdef A7_FL_SIX_LOOKS
+    if(enabled>=A7_FL_EXTENDED_FIRST){
+        test(!a7_classic_base(enabled,ORIGINAL,EXPAND,COMPRESS,cinema_base),"classic expected base");
+        base_table=cinema_base;
+    }
 #endif
  #ifdef A7_FL_FILM_CONTROLS
     if(enabled>0) {
@@ -367,10 +376,95 @@ void guest_main(void) {
 #endif
     put("NATIVE_FL_VIGNETTE_BANKS_PASSED\n");
 #endif
+#ifdef A7_FL_SIX_LOOKS
+    a7_menu_node *selector=look_row(film_look,0);
+    test(selector->count==7,"Off and six native mode leaves");
+    const int expected_labels[]={0x0204fdb2,0x0204fdb3,0x0204fdb4};
+    uint32_t look_crc[3][3];
+    for(int m=4;m<=6;m++){
+        int label=0;
+        test(((int(*)(void *,int,int *))0x40683297)(selector->children[m],0,&label)&&
+             label==expected_labels[m-4],"new native mode label");
+        test(set_value(0x7000,m)&&capture_matches(m),"new look generates both CAP tables");
+        test(!film->parameters[0]&&film->parameters[6]==3,"new look starts with neutral controls");
+        for(unsigned t=0;t<3;t++){
+            const uint8_t *table=t?other_tables_data[t-1]:data_guarded+1;
+            look_crc[m-4][t]=a7_fl_crc(table,1280);
+            test(!same(table,a7_pkg_original[t],1280),"new look differs from factory table");
+            for(int prior=4;prior<m;prior++)
+                test(look_crc[m-4][t]!=look_crc[prior-4][t],"new look distinct on each pipeline");
+        }
+        test(set_value(0x7001,m)&&set_value(black,m+2)&&set_value(grain_id,m)&&
+             set_value(halo_id,m+1)&&set_value(vignette_id,m+11),"edit each new preset independently");
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+        test(grain_selection==(unsigned)(16|m)&&halo_selection==m-8&&vignette_selection==m+2,
+             "new look passes correct signed settings on existing backend");
+#endif
+        original_action(action_view);test(!confirm_dialog(),"save new bank through native confirmation");
+    }
+    test(set_value(0x7000,0)&&capture_matches(0)&&same(data_guarded+1,a7_pkg_original[0],1280),
+         "Off restores all original tables byte for byte");
+    for(int m=1;m<=6;m++){
+        test(set_value(0x7000,m)&&get_value(black,&enum_value),"reselect each saved bank");
+        test(enum_value==(m<4?bank_points[m-1][0]:m+2),"original and new curve banks remain independent");
+        if(m>=4)test(film->parameters[0]==m-9&&get_value(grain_id,&enum_value)&&enum_value==m,
+                     "reselect restores contrast and grain of each new look");
+    }
+    test(set_value(black,18)&&!a7_fl_cancel()&&get_value(black,&enum_value)&&enum_value==8,
+         "cancel restores last confirmed FL6 curve");
+    test(a7_fl_preference_choose(&result,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0&&
+         result.schema==6&&result.enabled==6,"durable record selects the most recent FL6 save");
+    for(int m=4;m<=6;m++)
+        test(result.film[m-1][0]==m&&result.film[m-1][1]==m-8&&result.vignette[m-1]==m+2,
+             "compact six-bank record retains each spatial effect");
+    put("NATIVE_FL_SIX_LOOKS_PASSED\n");
+#endif
     put("NATIVE_FL_ALL_CURVE_BANKS_PASSED\n");
     test(!film->fault,"no resident fault after curve flow");
     put("NATIVE_FL_CURVE_MAIN_PASSED\n");finish();
 #endif
+#ifdef A7_FL_TEST_SIX_SAVED_BOOT
+    platform.view_manager=0;
+    struct a7_fl_preference six={0},decoded={0};
+    six.generation=6;six.schema=5;
+    six.parameters[6]=six.other_parameters[6]=six.third_parameters[6]=3;
+    test(a7_fl_preference_migrate_film(&six)==1,"create six-bank settings by upgrading legacy r16");
+    for(int mode=1;mode<=6;mode++){
+        a7_fl_preference_switch(&six,mode);
+        six.parameters[0]=mode-4;six.film[mode-1][2]=mode-3;
+        six.film[mode-1][0]=mode;six.film[mode-1][1]=mode-6;six.vignette[mode-1]=mode;
+    }
+    uint8_t classic[1280],target[1280],torn[128];
+    A7FLColorParams color={2,0,0,0,0};
+    const int points6[5]={3,0,0,0,0};
+    test(!a7_classic_base(6,ORIGINAL,EXPAND,COMPRESS,classic)&&
+         !a7_fl_fivepoint_preview(classic,EXPAND,COMPRESS,&color,points6,target),"rebuild known saved FL6 table");
+    six.candidate_crc=a7_fl_crc(target,1280);
+    test(!a7_fl_preference_encode(slot_bytes[0],&six,a7_pkg_original_sha,a7_pkg_build),"persist new-format FL6");
+    slot_exists[0]=1;
+    bytes(torn,slot_bytes[0],128);torn[31]^=0x40;
+    test(a7_fl_preference_decode(&decoded,torn,128,a7_pkg_original_sha,a7_pkg_build)<0,"reject corrupted six-bank slot");
+    test(!a7_fl_prepare(&platform)&&!a7_fl_initialize_color_prepared()&&!slot_writes&&
+         a7_fl_status()->mode==6&&same(data_guarded+1,target,1280),"cold startup restores confirmed FL6 without a save");
+    platform.view_manager=process_element;
+    test(!a7_fl_configure_menu(&platform)&&!a7_fl_install(0x40000000,process_element),"attach six-bank menu after startup");
+    a7_menu_node *restored_look=parent.children[3];
+    test(row_title(restored_look,0)!=0&&look_row(restored_look,0)->count==7,"restored native mode selector");
+    for(int mode=1;mode<=6;mode++){
+        int value=-1;
+        test(set_value(0x7000,mode)&&a7_fl_status()->parameters[0]==mode-4&&
+             get_value(native_adjust_field_id(8),&value)&&value==mode+6&&
+             get_value(native_adjust_field_id(NATIVE_ADJUST_GRAIN_FIELD),&value)&&value==mode&&
+             get_value(native_adjust_field_id(NATIVE_ADJUST_HALATION_FIELD),&value)&&value==mode+3&&
+             get_value(native_adjust_field_id(NATIVE_ADJUST_VIGNETTE_FIELD),&value)&&value==mode+9,
+             "cold startup restores each old and new bank independently");
+    }
+    test(set_value(0x7000,0)&&capture_matches(0),"Off after startup restores original CAP tables");
+    *(uint32_t *)(action_view+0x130)=1;*(uintptr_t *)(action_view+0x150)=(uintptr_t)manager_words;
+    *(int *)(action_view+0x158)=7;action_selected=look_row(restored_look,NATIVE_ADJUST_FIELDS+1);
+    original_action(action_view);test(!confirm_dialog()&&slot_writes==1,"cold startup can save the next change");
+    put("NATIVE_FL_SIX_BOOT_PASSED\n");finish();
+#else
 #ifdef A7_FL_TEST_SAVED_BOOT
     platform.view_manager=0;parent.depth=0;
     struct a7_fl_preference saved_boot={7,1,{2,-3,4,5,-2,
@@ -401,7 +495,12 @@ void guest_main(void) {
 #endif
 #ifdef A7_FL_FILM_CONTROLS
     struct a7_fl_preference recovering=saved_boot;
-    recovering.schema=A7_FL_FILM_SCHEMA;recovering.other_parameters[6]=recovering.third_parameters[6]=3;
+#ifdef A7_FL_SIX_LOOKS
+    recovering.schema=5; /* Boot this fixture from the exact r16 record layout. */
+#else
+    recovering.schema=A7_FL_FILM_SCHEMA;
+#endif
+    recovering.other_parameters[6]=recovering.third_parameters[6]=3;
     for(unsigned b=0;b<2;b++)for(unsigned f=0;f<5;f++)recovering.film[b][f+2]=(int8_t)((int)b+(int)f-3);
     const int points[5]={5,-2,1,2,-4},transient[5]={-5,-2,1,2,-4};
     for(unsigned f=0;f<5;f++)recovering.film[2][2+f]=(int8_t)points[f];
@@ -825,4 +924,5 @@ void guest_main(void) {
 #endif
     put("NATIVE_FL_MODULE_PASSED: original nodes + 618 stock routes + runtime421checks; integrated preview/commit/cancel/store/rollback\n");
     put("PLATFORM_AND_FILESYSTEM_MODELED; NO_CAMERA_ACTIVATION_OR_NATIVE_RENDERER_TEST\n");finish();
+#endif
 }

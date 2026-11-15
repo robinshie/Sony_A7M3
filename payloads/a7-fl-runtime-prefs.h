@@ -3,13 +3,24 @@
 #define A7_FL_RUNTIME_PREFS_H
 #include <stdint.h>
 #define A7_FL_RECORD_SIZE 128u
-enum a7_fl_preset { A7_FL_PRESET_OFF=0, A7_FL_PRESET_FL=1, A7_FL_PRESET_CINEMA=2, A7_FL_PRESET_LEICA=3 };
+enum a7_fl_preset { A7_FL_PRESET_OFF=0, A7_FL_PRESET_FL=1, A7_FL_PRESET_CINEMA=2, A7_FL_PRESET_LEICA=3,
+                    A7_FL_PRESET_NEGATIVE=4, A7_FL_PRESET_DOCUMENTARY=5, A7_FL_PRESET_PORTRAIT=6 };
+#ifdef A7_FL_SIX_LOOKS
+#if !defined(A7_FL_CAPTURE_VIGNETTE) || !defined(A7_FL_FILM_CONTROLS) || !defined(A7_FL_LEICA_LOOK)
+#error Six looks require the full film controls and vignette codec
+#endif
+#define A7_FL_PRESET_MAX A7_FL_PRESET_PORTRAIT
+#define A7_FL_FILM_BANKS 6u
+#define A7_FL_EXTENDED_FIRST A7_FL_PRESET_NEGATIVE
+#else
+#define A7_FL_FILM_BANKS 3u
 #ifdef A7_FL_LEICA_LOOK
 #define A7_FL_PRESET_MAX A7_FL_PRESET_LEICA
 #elif defined(A7_FL_DUAL_LOOK)
 #define A7_FL_PRESET_MAX A7_FL_PRESET_CINEMA
 #else
 #define A7_FL_PRESET_MAX A7_FL_PRESET_FL
+#endif
 #endif
 static inline int a7_fl_preset_valid(int preset) {return preset>=0 && preset<=A7_FL_PRESET_MAX;}
 struct a7_fl_preference {
@@ -27,16 +38,21 @@ struct a7_fl_preference {
     /* Schema 4: explicit FL/FL2/FL3 banks, unaffected by active-bank exchange.
      * Each bank: grain, halation, black, shadow, midtone, highlight, white.
      * Serialized as signed five-bit values alongside the original controls. */
-    int8_t film[3][7];
+    int8_t film[A7_FL_FILM_BANKS][7];
 #ifdef A7_FL_CAPTURE_VIGNETTE
     /* Schema 5 appends three signed bytes at record offsets 116..118.
      * All schema-4 field positions and the 128-byte record size stay fixed. */
-    int8_t vignette[3];
+    int8_t vignette[A7_FL_FILM_BANKS];
+#ifdef A7_FL_SIX_LOOKS
+    int8_t extra_parameters[3][8]; /* Remaining inactive-bank rows, ordered by look ID. */
+#endif
 #endif
 #endif
 };
 #ifdef A7_FL_FILM_CONTROLS
-#ifdef A7_FL_CAPTURE_VIGNETTE
+#ifdef A7_FL_SIX_LOOKS
+#define A7_FL_FILM_SCHEMA 6u
+#elif defined(A7_FL_CAPTURE_VIGNETTE)
 #define A7_FL_FILM_SCHEMA 5u
 #else
 #define A7_FL_FILM_SCHEMA 4u

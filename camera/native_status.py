@@ -175,7 +175,7 @@ def select_preferences(raw,original_sha,*,dual_look=False,leica_look=False):
     return dict(state='valid',selected=chosen,slots=slots,preference=slots[chosen])
 
 
-def decode_report(raw,expected_symbols=None,*,dual_look=False,leica_look=False):
+def decode_report(raw,expected_symbols=None,*,dual_look=False,leica_look=False,six_looks=False):
     require(len(raw) in (148,184),'Unexpected resident report length.')
     values=struct.unpack_from('<IIi4Ii3I',raw)
     names=('magic','version','status','view_base','module_base','bootstrap_symbol','runtime_symbol',
@@ -207,7 +207,7 @@ def decode_report(raw,expected_symbols=None,*,dual_look=False,leica_look=False):
     runtime['parameters']=list(values[9:])
     require(bootstrap['version'] in (0,1) and bootstrap['ready'] in (0,1) and
             all(runtime[k] in (0,1) for k in ('prepared','installed','fault','dirty','runtime_ready')) and
-            runtime['parents']<=8 and runtime['mode'] in range(-2,4 if leica_look else 3 if dual_look else 2), 'Resident status fields are invalid.')
+            runtime['parents']<=8 and runtime['mode'] in range(-2,7 if six_looks else 4 if leica_look else 3 if dual_look else 2), 'Resident status fields are invalid.')
     if runtime['runtime_ready']:
         require(all(LOW[i]<=v<=HIGH[i] for i,v in enumerate(runtime['parameters'])), 'Resident controls out of range.')
     state=('unstable' if not header['stable'] else 'probe-error' if header['dlclose_result'] else
@@ -279,6 +279,7 @@ class Profile:
                 sha(self.base)==p['base_fl_sha256'] and sha(self.codec)==p['codec_sha256'] and
                 p['build'].encode()==BUILD_ID and p['original_sha256']==sha(self.original[0]),'Private diagnostic data identity mismatch.')
         self.original_sha=sha(self.original[0])
+        self.six_looks=json.loads(module_proof.read_text()).get('look_count')==6
         self.leica_look=json.loads(module_proof.read_text()).get('leica_look') is True
         self.dual_look=json.loads(module_proof.read_text()).get('dual_look') is True
         self.capture=capture_candidates(capture_proof,json.loads(module_proof.read_text()),self.original)
@@ -294,6 +295,7 @@ class Profile:
 
 def observations(profile,report,prefs,tables):
     require(len(tables)==4 and all(len(t)==1280 for t in tables),'Four complete LUT reads required.')
+    require(not getattr(profile,'six_looks',False),'Six-look records require the six-look reader; use report-only here.')
     selection=select_preferences(prefs,profile.original_sha,dual_look=getattr(profile,'dual_look',False),leica_look=getattr(profile,'leica_look',False))
     candidate=None
     if selection['selected'] is not None:
@@ -346,7 +348,7 @@ def inspect_camera(camera,profile,evidence,report_only=False):
     module=factory.contents('/usr/lib/a7fl.so')
     require(sha(module)==profile.module_record['sha256'],'Installed module differs from attested artifact.')
     raw=factory.run(profile.payload,'a7status.bin');save(evidence/'resident.bin',raw)
-    result=decode_report(raw,profile.symbols,dual_look=profile.dual_look,leica_look=profile.leica_look)
+    result=decode_report(raw,profile.symbols,dual_look=profile.dual_look,leica_look=profile.leica_look,six_looks=getattr(profile,'six_looks',False))
     if not report_only:
         prefs=[]
         for index,path in enumerate(PREFERENCES):

@@ -1,5 +1,8 @@
 #include "a7-fl-capture-controls.h"
 #include "a7-fl-runtime-prefs.h"
+#ifdef A7_FL_SIX_LOOKS
+#include "a7-fl-classic-looks.h"
+#endif
 #ifdef A7_FL_FILM_CONTROLS
 #include "a7-fl-fivepoint.h"
 #endif
@@ -60,11 +63,18 @@ int a7_capture_prepare(struct a7_capture_controls *c,const struct a7_fl_api *api
 #ifdef A7_FL_LEICA_LOOK
         if(a7_leica_base(scratch,expand,compress,c->leica[t]))return A7_FL_TABLE;
 #endif
+#ifdef A7_FL_SIX_LOOKS
+        for(int preset=A7_FL_EXTENDED_FIRST;preset<=A7_FL_PRESET_MAX;preset++)
+            if(a7_classic_base(preset,scratch,expand,compress,c->classic[preset-A7_FL_EXTENDED_FIRST][t]))return A7_FL_TABLE;
+#endif
 #endif
     }
     c->prepared=1;return 0;
 }
 static const uint8_t *preset_base(const struct a7_capture_controls *c,unsigned t,int preset) {
+#ifdef A7_FL_SIX_LOOKS
+    if(preset>=A7_FL_EXTENDED_FIRST&&preset<=A7_FL_PRESET_MAX)return c->classic[preset-A7_FL_EXTENDED_FIRST][t];
+#endif
 #ifdef A7_FL_DUAL_LOOK
     if(preset==A7_FL_PRESET_CINEMA)return c->cinema[t];
 #ifdef A7_FL_LEICA_LOOK

@@ -15,6 +15,9 @@ struct a7_capture_controls {
     uint8_t leica[2][1280];
 #endif
 #endif
+#ifdef A7_FL_SIX_LOOKS
+    uint8_t classic[3][2][1280];
+#endif
     int8_t low[2][1215],high[2][1215];
     unsigned prepared,initialized;
 };

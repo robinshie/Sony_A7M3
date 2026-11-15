@@ -56,6 +56,7 @@ def main():
     ap.add_argument('--capture-vignette-kernel',type=Path)
     ap.add_argument('--capture-vignette-bridge-proof',type=Path)
     ap.add_argument('--capture-vignette-basis',type=Path)
+    ap.add_argument('--six-looks',action='store_true',help='Build FL4–FL6 with schema 6 for offline verification')
     args=ap.parse_args()
     vignette_mode=bool(args.capture_vignette_kernel)
     if vignette_mode:
@@ -64,6 +65,8 @@ def main():
     if args.capture_vignette_menu:
         if args.capture_film_kernel or args.capture_grain_kernel:ap.error('Vignette menu requires its own verified backend before device builds')
         args.capture_halation_menu=True
+    if args.six_looks and not (args.capture_vignette_menu and args.preview_cycle and args.film_curves):
+        ap.error('--six-looks requires the complete vignette menu and preview cycle')
     film_mode=bool(args.capture_film_kernel) or vignette_mode
     if film_mode and not vignette_mode:
         if args.capture_grain_kernel or not args.capture_film_bridge_proof or not args.capture_film_basis:ap.error('Film build requires its bridge and real-shot basis, not a grain kernel')
@@ -110,6 +113,7 @@ def main():
     if film_mode:OUT=OUT.with_name('native-module-film-capture')
     if args.capture_vignette_menu:OUT=OUT.with_name('native-module-vignette-menu')
     if vignette_mode:OUT=OUT.with_name('native-module-vignette-capture')
+    if args.six_looks:OUT=OUT.with_name('native-module-six-looks')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -166,7 +170,7 @@ def main():
         for name,entry in locale['files'].items():
             if sha((ROOT/'.lab/native-fl-curve-strings'/name).read_bytes())!=entry['after_sha256']:
                 raise ValueError('Curve locale artifact identity differs')
-    for enabled,feature in ((args.capture_grain_menu,'grain'),(args.capture_halation_menu,'halation'),(args.capture_vignette_menu,'vignette')):
+    for enabled,feature in ((args.capture_grain_menu,'grain'),(args.capture_halation_menu,'halation'),(args.capture_vignette_menu,'vignette'),(args.six_looks,'classic')):
         if not enabled:continue
         locale_key=f'native-fl-{feature}-strings/proof.json'
         resource_key=f'native-resource-{feature}/report.json'
@@ -363,6 +367,7 @@ call_kernel_writer:
     if args.capture_grain_menu:flags+=['-DA7_FL_CAPTURE_GRAIN']
     if args.capture_halation_menu:flags+=['-DA7_FL_CAPTURE_HALATION']
     if args.capture_vignette_menu:flags+=['-DA7_FL_CAPTURE_VIGNETTE']
+    if args.six_looks:flags+=['-DA7_FL_SIX_LOOKS']
     if args.capture_grain_kernel:flags+=['-DA7_FL_CAPTURE_GRAIN_BACKEND']
     if args.spatial_settings_only:flags+=['-DA7_FL_SPATIAL_SETTINGS_ONLY']
     if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
@@ -391,6 +396,11 @@ call_kernel_writer:
     boot_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     boot_log=boot_run.stdout+boot_run.stderr;(OUT/'boot.log').write_bytes(boot_log);print(boot_log.decode(),end='')
     if (b'NATIVE_FL_CURVE_BOOT_PASSED' if args.film_curves else b'NATIVE_FL_MODULE_BOOT_PASSED') not in boot_log or b'FAIL ' in boot_log:raise ValueError('Cold boot integration fixture failed')
+    if args.six_looks:
+        run(['arm-none-eabi-gcc',*flags,'-DA7_FL_TEST_SAVED_BOOT','-DA7_FL_TEST_SIX_SAVED_BOOT','-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
+             str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p not in ('payloads/a7-fl-grain-backend.c','payloads/a7-fl-dialog.c','payloads/a7-fl-preview.c','payloads/a7-fl-preview-cycle.c')],'-lgcc','-o','module-six-boot-test.elf'],cwd=OUT)
+        six_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-six-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
+        six_log=six_run.stdout+six_run.stderr;(OUT/'six-boot.log').write_bytes(six_log);print(six_log.decode(),end='')
     if args.film_curves and args.capture_grain_kernel and b'NATIVE_FL_CONFIRMED_HISTORY_RETRY_PASSED' not in boot_log:raise ValueError('Confirmed history and startup retry fixture missing')
     if vignette_mode:
         run([sys.executable,str(ROOT/'research/native_boot_recovery_test.py'),'--fixture',str(OUT)])
@@ -511,6 +521,13 @@ call_kernel_writer:
         if b'NATIVE_FL_VIGNETTE_CAPTURE_DISPATCH_PASSED' not in log or b'NATIVE_FL_VIGNETTE_CAPTURE_BOOT_PASSED' not in boot_log:raise ValueError('Vignette capture lifecycle missing')
         proof.update(capture_vignette_kernel=True,ready_for_staging=film_ready,hardware_basis_verified=film_ready,confirmed_history_boot_recovery=True,feature_scope='Capture-only grain, signed halation and vignette, independent FL banks and confirmed-history boot recovery; cold-boot acceptance required')
         for n in ('research/capture_vignette_bind.py','research/capture_vignette_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
+    if args.six_looks:
+        if b'NATIVE_FL_SIX_LOOKS_PASSED' not in log or b'NATIVE_FL_SIX_BOOT_PASSED' not in six_log or b'FAIL ' in six_log:
+            raise ValueError('Six-look menu, color and persistence evidence missing')
+        proof.update(look_count=6,preference_schema=6,ready_for_staging=False,
+                     feature_scope='Six independent Creative Looks; offline verified only, requires dedicated device deployment and acceptance.')
+        n='payloads/a7-fl-classic-looks.h';proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
+        for p in ('module-six-boot-test.elf','six-boot.log'):proof['artifact_sha256'][p]=sha((OUT/p).read_bytes())
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 if __name__=='__main__':main()

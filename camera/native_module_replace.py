@@ -37,14 +37,26 @@ REVISIONS[16]=dict(old_sha='a44876fb9136b4fe31c9d82ad143bf87d9b10c3d05fc8b0ba77f
 REVISIONS[1601]=dict(old_sha='bf0e7522ca16885d18630a0fae44a7d57b07dc3f0c5fa12e44b91c495dec3ee1',old_size=350360,temporary='.a7vig-zh.new',backup='.a7vig-zh.orig',journal='A7VIGZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='vignette')
 REVISIONS[1602]=dict(old_sha='2ceb2896e97781a72a001a95fdccbf9b84eab96cdf9048af54b8083e1dc0577d',old_size=393076,temporary='.a7vig-en.new',backup='.a7vig-en.orig',journal='A7VIGEN.LOG',locale='string_english.uxc',resource_set='vignette')
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
+REVISIONS[17]=dict(old_sha='9fcaf13e5bcc5914d5721d797f16c3b059dc6f9b0cb99c94eda7632176306fe8',old_size=120468,temporary='.a7six.new',backup='.a7fl-9fcaf13e.orig',journal='A7SIXUP.LOG')
+REVISIONS[1701]=dict(old_sha='99c3292522faeb0bcd6e8ede63cc2da41baf54ff572901273007fbc2eef9d611',old_size=350388,temporary='.a7six-zh.new',backup='.a7six-zh.orig',journal='A7SIXZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='classic')
+REVISIONS[1702]=dict(old_sha='4e797657592371db1eb1912e73e9c928ac7dbbe93df0d711b26ce5c86f6f47d0',old_size=393104,temporary='.a7six-en.new',backup='.a7six-en.orig',journal='A7SIXEN.LOG',locale='string_english.uxc',resource_set='classic')
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
- if revision==16:
-  require(proof.get('ready_for_staging') is True and proof.get('hardware_basis_verified') is True and
+ if revision in (16,17):
+  if revision==17:
+   require(proof.get('look_count')==6 and proof.get('camera_integration') is False and
+           proof.get('flash_ready') is False and proof.get('ready_for_staging') is False,
+           'Six-look deployment is a dedicated candidate trial, not hardware acceptance.')
+   deps=proof.get('dependency_proof_sha256',{})
+   require('native-resource-classic/report.json' in deps and 'native-fl-classic-strings/proof.json' in deps,
+           'Six-look original-parser resource evidence missing.')
+   require(all(n in proof.get('artifact_sha256',{}) for n in ('six-boot.log','module-six-boot-test.elf')),
+           'Six-look cold startup evidence missing.')
+  require((revision==17 or proof.get('ready_for_staging') is True) and proof.get('hardware_basis_verified') is True and
           proof.get('capture_vignette_kernel') is True and proof.get('capture_vignette_menu') is True and
           proof.get('capture_halation_menu') is True and proof.get('capture_grain_menu') is True and
-          proof.get('all_look_curves') is True and proof.get('preference_schema')==5 and
+          proof.get('all_look_curves') is True and proof.get('preference_schema')==(6 if revision==17 else 5) and
           proof.get('independent_look_banks') is True and proof.get('save_confirmation_dialog') is True and
           proof.get('preview_timed_cycle') is True and proof.get('curve_release_verified') is True and
           proof.get('confirmed_history_boot_recovery') is True,
@@ -175,7 +187,7 @@ class Bundle:
    require(resource['input_proof_sha256']==m['module_proof_sha256'],'Locale parser input changed.')
    require(p.get('kind')==resource_set+'-additive-locales-v1' and p['files'][self.locale]['after_sha256']==m['new']['sha256'] and p['files'][self.locale]['before_sha256']==r['old_sha'],'Unattested additive locale.')
   else:
-   require(p.get('ready_for_staging') is True and p.get('placeholder') is False and p['module_sha256']==m['new']['sha256'],'Unattested module.')
+   require((revision==17 or p.get('ready_for_staging') is True) and p.get('placeholder') is False and p['module_sha256']==m['new']['sha256'],'Unattested module.')
   require_capture_release(revision,p)
   for n,h in p.get('dependency_proof_sha256',{}).items():
    path=(LAB/n).resolve();require(path.is_relative_to(LAB) and file_sha(path)==h,'Dependency changed: '+n);pin_sources(json.loads(path.read_text()))
@@ -220,8 +232,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15,151,16):
-  resource_set='fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151,16,17):
+  resource_set='fl-classic' if m['version']==17 else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

@@ -9,6 +9,9 @@
 #ifdef A7_FL_LEICA_LOOK
 #include "a7-fl-leica.h"
 #endif
+#ifdef A7_FL_SIX_LOOKS
+#include "a7-fl-classic-looks.h"
+#endif
 #endif
 #include "native_adjust.h"
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
@@ -64,7 +67,7 @@ static struct {
 } module;
 #ifdef A7_FL_FILM_CONTROLS
 static struct a7_fl_worklog film_work;
-static uint8_t film_base[3][1280];
+static uint8_t film_base[A7_FL_FILM_BANKS][1280];
 static unsigned film_saved;
 static int film_equal(const uint8_t *a,const uint8_t *b){
     for(unsigned i=0;i<1280;i++)if(a[i]!=b[i])return 0;
@@ -107,7 +110,12 @@ static int film_crc(struct a7_fl_preference *p){
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
 static int grain_sync(const struct a7_fl_preference *p){
 #ifdef A7_FL_CAPTURE_VIGNETTE
-    return a7_fl_vignette_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
+    unsigned wire_mode=(unsigned)p->enabled;
+#ifdef A7_FL_SIX_LOOKS
+    /* Kernel only needs Off/On and the three strengths. Keep r16's wire format. */
+    if(wire_mode>=A7_FL_EXTENDED_FIRST)wire_mode=A7_FL_PRESET_FL;
+#endif
+    return a7_fl_vignette_apply(wire_mode,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
                                p->enabled?p->film[p->enabled-1][1]:0,p->enabled?p->vignette[p->enabled-1]:0);
 #elif defined(A7_FL_CAPTURE_HALATION)
     return a7_fl_film_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
@@ -434,6 +442,10 @@ static int initialize_color(void) {
     memcpy(film_base[0],a7_pkg_base,1280);
     if(a7_cinema_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[1])||
        a7_leica_base(a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[2]))return A7_FL_TABLE;
+#ifdef A7_FL_SIX_LOOKS
+    for(int preset=A7_FL_EXTENDED_FIRST;preset<=A7_FL_PRESET_MAX;preset++)
+        if(a7_classic_base(preset,a7_pkg_original[0],a7_pkg_expand,a7_pkg_compress,film_base[preset-1]))return A7_FL_TABLE;
+#endif
     int rc=0;
     if(!capture_controls.prepared)
         rc=a7_capture_prepare(&capture_controls,&module.platform.backup,capture_stock,capture_look,a7_pkg_expand,a7_pkg_compress);
@@ -609,6 +621,10 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
 #endif
 #ifdef A7_FL_LEICA_LOOK
         if(!native_adjust_add_look(&module.trees[j],0x0204fda9)){rollback();return leave(A7_FL_MODULE_NODES);}
+#endif
+#ifdef A7_FL_SIX_LOOKS
+        for(unsigned label=0x0204fdb2;label<=0x0204fdb4;label++)
+            if(!native_adjust_add_look(&module.trees[j],label)){rollback();return leave(A7_FL_MODULE_NODES);}
 #endif
         if(!native_adjust_add_save(&module.trees[j],0x0204eaab)){rollback();return leave(A7_FL_MODULE_NODES);}
     }

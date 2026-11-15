@@ -23,12 +23,18 @@ def bind(old,module,proof,view,out,revision=1):
  if 'locale' in profile:
   name=profile['locale']
   if p.get('kind')!=profile.get('resource_set','fl2')+'-additive-locales-v1' or p['files'][name]['after_sha256']!=sha(module) or p['files'][name]['before_sha256']!=profile['old_sha']:raise ValueError('Unattested locale')
- elif p.get('placeholder') is not False or p.get('ready_for_staging') is not True or p['module_sha256']!=sha(module):raise ValueError('Unattested module')
+ elif p.get('placeholder') is not False or (revision!=17 and p.get('ready_for_staging') is not True) or p['module_sha256']!=sha(module):raise ValueError('Unattested module')
  resource_path=LAB/('native-resource-'+profile.get('resource_set','fl2')+'/report.json')
  if 'locale' in profile:
   resource=json.loads(resource_path.read_text());pin(resource)
   if resource['input_proof_sha256']!=sha(proof):raise ValueError('Locale parser proof mismatch')
  require_capture_release(revision,p)
+ if revision==17:
+  for name,digest in p['artifact_sha256'].items():
+   if sha(module.parent/name)!=digest:raise ValueError('Six-look artifact changed: '+name)
+  for name,marker in (('qemu.log',b'NATIVE_FL_SIX_LOOKS_PASSED'),('six-boot.log',b'NATIVE_FL_SIX_BOOT_PASSED')):
+   raw=(module.parent/name).read_bytes()
+   if marker not in raw or b'FAIL ' in raw:raise ValueError('Six-look fixture not passed: '+name)
  for n,d in p.get('dependency_proof_sha256',{}).items():
   if sha(LAB/n)!=d:raise ValueError('Module dependency changed: '+n)
   pin(json.loads((LAB/n).read_text()))

@@ -1,5 +1,9 @@
 # A7M3 默认开发和发布流程
 
+**当前已安装并验收：v0.01 六风格整合版（2026-11-15）。** 三个文件写入并完整回读通过；模块 `5fb33e6955b81e02144463e6fb7e09aaa042b3e4df536fd9523854a91d2fa6d5`，124,980 字节。简中 `741921ec85bd0eea18571479bdd5d0681f78a9d99bacff30305e8721792e40d6`，英文 `92843d50a15f6d94e95b51eaec0fba7a5a646366f7b954bac05f3c81b923e1f4`。两个设置槽及两个工作记录完整保留。用户保存后已迁移为 schema 6。已执行包 `.lab/native-fl-releases/update-v001-six-looks-3bxdg1m7`，证据 `write-1794736027226316000/verified.json`。禁止重复执行，也不能再按 r16 前像直接重刷。下文 r16 是上一已验收基线，不是当前磁盘内容。
+
+用户已确认六个入口、FL4/5/6 拍照回放、独立参数保存重启正常。只读证据 `.lab/six-look-resident-read/1794736279562870000/six-look-status.json`：resident-ready、无错误、schema 6 / generation 61，最后保存 FL4，当前 FL 有未保存修改；用户确认这是测试后主动切换和修改。内核 armed、diagnostic=0、failed=0；最后重启后 completed=0，不据此声称重启后已拍摄。读取使用 `research/six_look_resident_read.py`、上述包的 `17` 绑定、`.lab/native-inspect-six-looks` 和同一内核 `.lab/capture-kernel/1794730878828623000`。公开版统一 v0.01，源码同步 main，不单独发布 r。完整附件使用 `tools/package_six_release.py`，需真实验收记录并在干净提交上打包。
+
 用户要求日常功能改动完成后直接走单模块烧录。对已配置的 ILCE-7M3 4.04，优先在 `a7fl.so` 内实现功能，沿用已验证的加载器、菜单入口、语言资源和配置格式。
 
 1. 用 `research/native_module.py --with-bootstrap` 构建并验证候选模块。使用本机已有的原厂固件和私有 LUT 输入。
