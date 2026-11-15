@@ -1,0 +1,112 @@
+#include <stdint.h>
+#include <stddef.h>
+#include <errno.h>
+#ifdef TEST_GRAIN
+#define A7_GRAIN 1
+#define A7_GRAIN_FIXTURE 1
+#ifdef TEST_FULL
+#define A7_GRAIN_FULL 1
+#endif
+#include <stdbool.h>
+#endif
+#define A7_LEASE_FIXTURE 1
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+typedef struct {unsigned value,break_lock;} raw_spinlock_t;
+static unsigned report[368],checks,held_lock,lock_busy,atomic_context,opens,closes;
+static unsigned char *const unit=(void *)0x42095ab8;
+static unsigned ext[12];
+static void check(int ok);
+void *memset(void *p,int c,size_t n){unsigned char *q=p;while(n--)*q++=(unsigned char)c;return p;}
+static void *memcpy(void *d,const void *s,size_t n){unsigned char *a=d;const unsigned char *b=s;while(n--)*a++=*b++;return d;}
+static int memcmp(const void *a,const void *b,size_t n){const unsigned char *x=a,*y=b;while(n--){if(*x!=*y)return *x-*y;x++;y++;}return 0;}
+static int probe_kernel_read(void *d,const void *s,unsigned n){memcpy(d,s,n);return 0;}
+static unsigned long kallsyms_lookup_name(const char *s){(void)s;return 0;}
+static int raw_spin_trylock(raw_spinlock_t *p){(void)p;check(!held_lock);if(lock_busy)return 0;held_lock=1;return 1;}
+static void raw_spin_unlock(raw_spinlock_t *p){(void)p;check(held_lock);held_lock=0;}
+#define raw_spin_trylock_irqsave(p,f) ((f)=0,raw_spin_trylock(p))
+#define raw_spin_unlock_irqrestore(p,f) ((void)(f),raw_spin_unlock(p))
+#define raw_spin_lock_irqsave(p,f) do{check(!held_lock);held_lock=1;(f)=0;}while(0)
+static int in_interrupt(void){return 0;}
+static int irqs_disabled(void){return 0;}
+static int in_atomic(void){return atomic_context;}
+int arch_phys_to_cachetype2(unsigned long p,unsigned long s){check(p==0x1a000000&&s==0x3000000);return 0x12;}
+#include "kernel_probe/capture_lease_record.h"
+#ifdef TEST_GRAIN
+typedef long long loff_t;typedef long ssize_t;
+struct file{int unused;};struct kobject{int unused;};
+struct bin_attribute{struct{const char *name;unsigned mode;}attr;size_t size;ssize_t (*read)(struct file *,struct kobject *,struct bin_attribute *,char *,loff_t,size_t);};
+static struct{struct{struct kobject kobj;}mkobj;}module;
+#define THIS_MODULE (&module)
+static unsigned long jiffies;static unsigned barriers,corrupt_at;
+static int sysfs_create_bin_file(struct kobject *k,struct bin_attribute *b){(void)k;(void)b;return 0;}
+static void sysfs_remove_bin_file(struct kobject *k,struct bin_attribute *b){(void)k;(void)b;}
+unsigned long arch_phys_to_va(unsigned long p){check(!held_lock&&p==0x1a000000);return 0x7a000000;}
+int arch_va_to_cachetype(unsigned long v){check(v==0x7a000000);return 0x12;}
+static void mb(void){check(!held_lock);barriers++;jiffies++;if(barriers==corrupt_at)*(volatile unsigned char *)(0x7a000000+1936*12160+2952*2+1)^=1;}
+#include "kernel_probe/capture_grain_record.h"
+#endif
+static int wrapped_open(unsigned h,unsigned mode,void *out,unsigned short *n){
+    int (*fn)(unsigned,unsigned,void *,unsigned short *)=(void *)0x4100889c;
+    check(held_lock&&mode==4);opens++;return fn(h,mode,out,n);
+}
+static int wrapped_close(unsigned h){int (*fn)(unsigned)=(void *)0x41008a28;check(held_lock);closes++;return fn(h);}
+static void print(const char *s){volatile unsigned *u=(void *)0x09000000;while(*s){while(u[6]&32){}u[0]=*s++;}}
+static void number(unsigned n){char s[12];unsigned i=11;s[i]=0;do{s[--i]='0'+n%10;n/=10;}while(n);print(s+i);}
+static void stop(void){register unsigned r0 __asm__("r0")=0x18,r1 __asm__("r1")=0x20026;__asm__ volatile("svc 0x123456":"+r"(r0),"+r"(r1)::"memory");for(;;){}}
+static void check(int ok){checks++;if(!ok){print("FAIL check=");number(checks);print("\n");stop();}}
+static void reset(void){
+    unsigned i;for(i=0;i<368;i++)report[i]=0;for(i=0;i<0x150;i++)unit[i]=0;for(i=0;i<12;i++)ext[i]=0;
+    report[21]=(3<<10)|7;report[22]=(unsigned)unit;
+    report[40+0x90/4]=0x0fa01770;report[40+0x94/4]=0x0fa017c0;report[40+0x98/4]=80;
+    report[40+0xbc/4]=1;report[40+0xc0/4]=0x1a000000;report[40+0xc4/4]=0x3000000;
+    unit[0x13]=3;*(unsigned short *)(unit+0x14)=1;*(unsigned short *)(unit+0x16)=1;
+    *(unsigned *)(unit+0x18)=(unsigned)ext;ext[1]=0x1a000000;ext[3]=0x3000000;
+    held_lock=lock_busy=atomic_context=opens=closes=0;
+#ifdef TEST_GRAIN
+    barriers=corrupt_at=0;
+#endif
+    native_open=wrapped_open;native_close=wrapped_close;
+}
+void guest_main(void){
+    (void)source_publish;(void)source_remove;(void)take_early_record;
+#ifdef TEST_GRAIN
+    unsigned i,changed=0;unsigned char *pixels=(void *)0x7a000000;
+    for(i=0;i<12160*4000;i++)pixels[i]=(unsigned char)(i*37+53);
+    check(!grain_publish()&&report[352]==1);
+#endif
+    reset();check(!take_lease_test());check(report[310]==1&&opens==1&&closes==1&&!held_lock);
+    check(!unit[0x11]&&*(unsigned short *)(unit+0x14)==1);
+#ifdef TEST_GRAIN
+    check(report[344]==3&&report[345]==0&&report[346]>0&&report[350]==0);
+#ifdef TEST_FULL
+    check(report[349]==6000*4000);
+#else
+    check(report[349]==256*128);
+#endif
+    for(i=0;i<12160*4000;i++)if(pixels[i]!=(unsigned char)(i*37+53)){
+        unsigned y=i/12160,x=(i%12160)/2;
+#ifdef TEST_FULL
+        check((i&1)&&y<4000&&x>=80&&x<6080);changed++;
+#else
+        check((i&1)&&y>=1936&&y<2064&&x>=2952&&x<3208);changed++;
+#endif
+    }
+#ifdef TEST_FULL
+    check(changed>1000000&&memcmp(grain.actual,grain.wanted,TB)==0);
+    reset();corrupt_at=2;check(take_lease_test()==-EIO&&report[350]==2&&!unit[0x11]&&closes==1);
+#else
+    check(changed==report[346]);
+    reset();corrupt_at=2;check(take_lease_test()==-EIO&&report[350]==1&&!unit[0x11]&&closes==1);
+#endif
+    grain_remove();
+#endif
+    reset();lock_busy=1;check(take_lease_test()==-EBUSY&&!opens&&!closes&&!held_lock);
+    reset();atomic_context=1;check(take_lease_test()==-EWOULDBLOCK&&!opens&&!closes);
+    reset();unit[0x11]=1;check(take_lease_test()==-ESTALE&&!opens&&!closes&&!held_lock);
+    reset();unit[0x12]=1;check(take_lease_test()==-ESTALE&&!opens&&!closes&&!held_lock);
+    reset();unit[0x13]=4;check(take_lease_test()==-ESTALE&&!opens&&!closes&&!held_lock);
+    reset();report[184]=1;check(take_lease_test()==-EBUSY&&!opens&&!closes);
+    reset();report[40+0xc0/4]=0;check(take_lease_test()==-EINVAL&&!opens&&!closes);
+    reset();ext[3]=0x1000;check(take_lease_test()==-EIO&&opens==1&&closes==1&&!held_lock&&!unit[0x11]);
+    print("LEASE_CALLBACK_PASSED checks=");number(checks);print("\n");stop();
+}

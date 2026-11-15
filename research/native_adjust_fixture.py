@@ -36,11 +36,13 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--usr',required=True,type=Path)
     ap.add_argument('--film-curve-menu',action='store_true')
+    ap.add_argument('--capture-grain-menu',action='store_true')
     args=ap.parse_args()
+    if args.capture_grain_menu:args.film_curve_menu=True
     elf=ELF(args.usr/'lib/CautionConfig.so')
     view=ELF(args.usr/'lib/viewUnified2.so')
     if hashlib.sha256(elf.data).hexdigest()!=SHA: ap.error('Unexpected CautionConfig SHA-256')
-    out=ROOT/('.lab/native-adjust-film' if args.film_curve_menu else '.lab/native-adjust');out.mkdir(parents=True,exist_ok=True)
+    out=ROOT/('.lab/native-adjust-grain' if args.capture_grain_menu else '.lab/native-adjust-film' if args.film_curve_menu else '.lab/native-adjust');out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
     asm='.syntax unified\n';sections=[];pieces=[]
     for va,size,name in PIECES:
@@ -82,6 +84,7 @@ def main():
     if not gcc or not qemu: ap.error('ARM GCC and QEMU are required')
     subprocess.run([gcc,'-mcpu=cortex-a9','-mthumb','-mno-unaligned-access','-Os','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-nostdlib','-T','guest.ld',
                     *(['-DA7_FL_FILM_CONTROLS'] if args.film_curve_menu else []),
+                    *(['-DA7_FL_CAPTURE_GRAIN'] if args.capture_grain_menu else []),
                     str(ROOT/'ui/start.S'),str(ROOT/'research/native_adjust.c'),str(ROOT/'research/native_adjust_harness.c'),'native.S','-lgcc','-o','adjust.elf'],cwd=out,check=True)
     run=subprocess.run([qemu,'-M','realview-pbx-a9','-smp','1','-m','64','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={out}/adjust.elf,cpu-num=0'],capture_output=True,text=True,timeout=20,check=True)
     (out/'adjust.log').write_text(run.stdout+run.stderr);print(run.stdout,end='')
@@ -90,6 +93,8 @@ def main():
     report={'caution_sha256':SHA,'view_sha256':hashlib.sha256(view.data).hexdigest(),'extracted_components':pieces,'source_sha256':sources,'scope':'Original node construction, properties, selection, grayout, clone/destruction and actual PAS_SelectListTab page/row traversal. Two-page 6/4 structure plus old-flat negative control; signed backend/nonnegative UI enum mapping. Rendering/backend mocked; no ISP, USB or camera execution.','flash_ready':False,'log':run.stdout.splitlines()}
     if args.film_curve_menu:
         report['scope']='Original page/row traversal and native node selection for the 6/6/3 curve menu, with isolated scalar IDs and Save; fixture labels/backend only'
+    if args.capture_grain_menu:
+        report['scope']='Original page/row traversal and native node selection for 6/6/4 grain menu; existing curve IDs and Save preserved; fixture backend, no real capture or persistence'
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 
 

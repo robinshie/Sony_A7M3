@@ -34,6 +34,8 @@ def main():
     cli.add_argument('--live', action='store_true')
     cli.add_argument('--full-size', action='store_true',
                      help='Host only: 576, 960 and 6000 px widths using the approved 9/9 scale')
+    cli.add_argument('--grain-only',action='store_true')
+    cli.add_argument('--reference-grain',action='store_true',help='Use the original combined-loop implementation for comparison')
     args = cli.parse_args()
     if args.full_size and args.live:
         cli.error('The full-size benchmark cannot run on the camera')
@@ -42,7 +44,10 @@ def main():
     sources = ['research/film_frame_benchmark.c', 'payloads/a7-film-frame.c',
                'payloads/a7-film-frame.h', 'research/film_frame_benchmark.py']
     common = ['-O2', '-Wall', '-Wextra', '-Werror', '-Wno-misleading-indentation',
-              '-I', str(ROOT / 'payloads'), *(str(ROOT / p) for p in sources[:2])]
+              '-I', str(ROOT / 'payloads'),
+              *(['-DA7_FILM_BENCH_GRAIN'] if args.grain_only else []),
+              *(['-DA7_FILM_REFERENCE_GRAIN'] if args.reference_grain else []),
+              *(str(ROOT / p) for p in sources[:2])]
     subprocess.run(['clang', *common, '-DA7_FILM_BENCH_HOST',
                     *(['-DA7_FILM_BENCH_FULL'] if args.full_size else []),
                     '-fsanitize=address,undefined', '-o', str(out / 'host')], check=True)
@@ -56,7 +61,7 @@ def main():
     (out / 'host.bin').write_bytes(raw)
     digest = lambda b: hashlib.sha256(b).hexdigest()
     proof = dict(source_sha256={p: digest((ROOT / p).read_bytes()) for p in sources},
-                 full_size_host_only=args.full_size,
+                 full_size_host_only=args.full_size, grain_only=args.grain_only, reference_grain=args.reference_grain,
                  reference=reference, camera_run=False, flash_ready=False)
     if not args.full_size:
         subprocess.run(['arm-none-eabi-gcc', *common, '-mcpu=cortex-a9', '-marm',

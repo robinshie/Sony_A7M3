@@ -69,9 +69,72 @@ static int grain_field(unsigned x,unsigned y,uint32_t seed){
     int cn=(int)(c&255)+(int)((c>>8)&255)-255,fn=(int)(n&255)+(int)((n>>8)&255)-255;
     return 3*cn+fn;
 }
+/* Grain-only path: reuse reference-grid noise across adjacent scanlines.
+ * The caller has already validated frame, settings and workspace. Only Y
+ * changes; Cb/Cr and row padding stay byte-identical. */
+#ifndef A7_FILM_REFERENCE_GRAIN
+static void grain_only(struct a7_film_frame *f,const struct a7_film_frame_params *p,void *ws){
+    unsigned w=f->width,scaled=w>A7_FILM_REFERENCE_WIDTH;
+    unsigned step=scaled?(A7_FILM_REFERENCE_WIDTH<<16)/w:1u<<16;
+    unsigned pixel_step=packed(f)?2:1,offset=f->format==A7_FILM_UYVY;
+    /* A pair load/store reduces uncached bus transactions on the camera.
+     * Unaligned/planar inputs retain the byte path. may_alias makes the word
+     * access valid for the API's byte buffers with GCC and Clang. */
+    typedef uint32_t grain_word __attribute__((may_alias));
+    unsigned pair_io=packed(f)&&!(((uintptr_t)f->plane[0].data|f->plane[0].stride)&3);
+    int limited=f->range==A7_FILM_LIMITED,lo=limited?16:0,hi=limited?235:255;
+    int factor[256];
+    for(unsigned i=0;i<256;i++){
+        int v=limited?clamp(((int)i-16)*255/219,0,255):(int)i;
+        factor[i]=p->grain*(64+(v<128?v:255-v));
+    }
+    /* At scaled widths >= 578, 4*(576+1) bytes fit even the smallest
+     * validated workspace: width*(radius+6), radius >= 1. */
+    int16_t *top=ws,*bottom=scaled?top+A7_FILM_REFERENCE_WIDTH+1:top;
+    unsigned cached=UINT32_MAX;
+    for(unsigned y=0;y<f->height;y++){
+        uint8_t *pixel=f->plane[0].data+(size_t)y*f->plane[0].stride+offset;
+        unsigned gy=y*step,yi=gy>>16,gx=0;
+        int wy=(int)((gy>>8)&255);
+        if(scaled&&yi!=cached){
+            if(cached!=UINT32_MAX&&yi==cached+1){
+                int16_t *swap=top;top=bottom;bottom=swap;
+            }else for(unsigned x=0;x<=A7_FILM_REFERENCE_WIDTH;x++)
+                top[x]=(int16_t)grain_field(x,yi,p->seed);
+            for(unsigned x=0;x<=A7_FILM_REFERENCE_WIDTH;x++)
+                bottom[x]=(int16_t)grain_field(x,yi+1,p->seed);
+            cached=yi;
+        }
+        uint32_t pair=0,original_pair=0;
+        for(unsigned x=0;x<w;x++,pixel+=pixel_step,gx+=step){
+            unsigned shift=8*offset+16*(x&1);
+            if(pair_io&&!(x&1))original_pair=pair=*(grain_word *)(pixel-offset);
+            unsigned value=pair_io?(pair>>shift)&255:*pixel;
+            int field;
+            if(scaled){
+                unsigned xi=gx>>16;int wx=(int)((gx>>8)&255);
+                int a=top[xi]*(256-wx)+top[xi+1]*wx;
+                int b=bottom[xi]*(256-wx)+bottom[xi+1]*wx;
+                field=(a*(256-wy)+b*wy)/65536;
+            }else field=grain_field(x,y,p->seed);
+            int delta=field*factor[value]/65536;
+            if(limited)delta=delta*219/255;
+            if(delta){
+                unsigned next=(unsigned)clamp((int)value+delta,lo,hi);
+                if(pair_io)pair=(pair&~(255u<<shift))|(next<<shift);
+                else *pixel=(uint8_t)next;
+            }
+            if(pair_io&&(x&1)&&pair!=original_pair)*(grain_word *)(pixel-offset-2)=pair;
+        }
+    }
+}
+#endif
 int a7_film_frame_apply(struct a7_film_frame *f,const struct a7_film_frame_params *p,void *ws,size_t wn){
     if(a7_film_frame_validate(f,p,ws,wn))return A7_FILM_FRAME_ARGUMENT;
     if(!p->grain&&!p->halation)return 0; /* including out-of-range studio codes */
+#ifndef A7_FILM_REFERENCE_GRAIN
+    if(!p->halation){grain_only(f,p,ws);return 0;}
+#endif
     unsigned w=f->width,h=f->height,r=p->radius,rows=2*r+1,area=rows*rows;
     /* One reciprocal per frame replaces a software divide per pixel on A9.
      * floor(n/area) is recovered exactly with at most one correction. */
@@ -223,5 +286,21 @@ int a7_film_frame_dispatch_preference(struct a7_film_frame_stage *s,uintptr_t to
     if(!p)return A7_FILM_FRAME_ARGUMENT;
     struct a7_fl_preference snapshot=*p;
     return dispatch(s,token,path,&snapshot,preference);
+}
+static int capture_grain(const void *p,const struct a7_film_frame *f,struct a7_film_frame_params *out){
+    int rc=a7_film_frame_params_from_preference(p,f->width,f->sequence,out);
+    if(!rc){out->halation=0;out->radius=1;}
+    return rc;
+}
+int a7_film_capture_grain_dispatch(struct a7_film_frame_stage *s,uintptr_t token,unsigned path,
+                                   const struct a7_fl_preference *p){
+    if(path==A7_FILM_PREVIEW)return A7_FILM_FRAME_SKIP;
+    if(path!=A7_FILM_CAPTURE||!p||p->schema!=4||!p->generation||!a7_fl_preset_valid(p->enabled))
+        return A7_FILM_FRAME_ARGUMENT;
+    struct a7_fl_preference snapshot=*p;
+    unsigned bank=p->enabled?(unsigned)p->enabled-1:0;
+    if(snapshot.film[bank][0]<0||snapshot.film[bank][0]>9)return A7_FILM_FRAME_ARGUMENT;
+    if(!snapshot.enabled||!snapshot.film[bank][0])return A7_FILM_FRAME_SKIP;
+    return dispatch(s,token,path,&snapshot,capture_grain);
 }
 #endif

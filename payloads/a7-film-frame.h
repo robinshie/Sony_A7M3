@@ -71,5 +71,12 @@ int a7_film_frame_params_from_preference(const struct a7_fl_preference *,unsigne
  * concurrent preview and capture. Do not share DMA buffers between leases. */
 int a7_film_frame_dispatch_preference(struct a7_film_frame_stage *,uintptr_t token,unsigned path,
                                      const struct a7_fl_preference *);
+/* Capture-only grain route. Preview returns SKIP before acquiring anything.
+ * The upstream producer must supply an exclusive, decoded, pre-encode frame;
+ * this API does not accept JPEG bytes, modify RAW, or hook a Sony endpoint.
+ * Settings are copied at submission; halation is not applied on this route. */
+int a7_film_capture_grain_dispatch(struct a7_film_frame_stage *,uintptr_t token,unsigned path,
+                                   const struct a7_fl_preference *);
+
 #endif
 #endif

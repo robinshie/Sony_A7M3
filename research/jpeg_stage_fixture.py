@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run the original JPEG and display handoff helpers in QEMU RAM only.
+"""Run original JPEG, SoftFocus and display handoff helpers in QEMU RAM only.
 
 The stage, descriptor wrapper, packer, submit/wait and sharing are native.
-Lower allocation, OS transport and publication are replaced by test fixtures.
+Lower allocation, SoftFocus processing, OS transport and publication are fixtures.
 This does not execute an encoder, modify pixels, or communicate with a camera.
 """
 import argparse
@@ -18,6 +18,9 @@ RANGES = {
     'alloc_set_std_yc': (0x35cfc8, 0x35d060),
     'alloc_share': (0x3a5868, 0x3a58f0),
     'display_select': (0x4e88a0, 0x4e89f4),
+    'softfocus_stage': (0x34f5ec, 0x34f824),
+    'capture_swap': (0x326ef4, 0x327030),
+    'softfocus_errors': (0x86923c, 0x869248),
 }
 STUBS = {
     0x76633e: 'get_context', 0x775b00: 'mark_stage', 0x77812c: 'scope_init',
@@ -34,6 +37,11 @@ STUBS = {
     0x7c591a: 'display_geometry', 0x4e1848: 'display_release',
     0x4e15f4: 'display_prepare', 0x4e690c: 'display_access_done',
     0x65be62: 'display_log', 0x7c7d9c: 'display_exception',
+    0x3277bc: 'soft_input', 0x327718: 'soft_other',
+    0x54cb2c: 'soft_alloc', 0x3e67fc: 'soft_params',
+    0x353f48: 'soft_trace', 0x3a42dc: 'soft_event',
+    0x54ccd4: 'soft_execute', 0x353c24: 'soft_config_trace',
+    0x54cbf8: 'soft_free',
 }
 
 
@@ -41,6 +49,8 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('--avcam', type=Path, required=True)
     cli.add_argument('--out', type=Path, default=ROOT / '.lab/jpeg-stage-fixture')
+    cli.add_argument('--kernel-callback', action='store_true',
+                     help='Exercise UDF.W exception redirect and the kernel Thumb bridge')
     a = cli.parse_args()
     data = a.avcam.read_bytes()
     if sha(data) != SHA:
@@ -51,7 +61,10 @@ def main():
     asm = '.syntax unified\n'
     sections = []
     for name, (lo, hi) in RANGES.items():
-        (out / (name + '.bin')).write_bytes(data[lo:hi])
+        block = bytearray(data[lo:hi])
+        if a.kernel_callback and name == 'jpeg_stage':
+            block[0x34019c-lo:0x3401a0-lo] = bytes.fromhex('f0f773aa')
+        (out / (name + '.bin')).write_bytes(block)
         asm += f'.section .{name},"ax"\n.incbin "{name}.bin"\n'
         sections.append((BASE + lo, name))
     # Model a channel whose static initialization has already happened.
@@ -80,11 +93,48 @@ def main():
 .global _start
 _start:
     cpsid if
+''' + ('''
+    cps #0x1b
+    ldr sp,=0x40ff0000
+    cps #0x13
+    ldr r0,=vectors
+    mcr p15,0,r0,c12,c0,0
+    isb
+''' if a.kernel_callback else '') + '''
     ldr sp,=0x41000000
     bl guest_main
 1:  wfi
     b 1b
 .section .note.GNU-stack,"",%progbits
+''')
+    if a.kernel_callback:
+        with (out / 'start.S').open('a') as f:
+            f.write('''
+.section .text.vectors,"ax"
+.arm
+.balign 32
+vectors:
+    b .
+    b undef_entry
+    b .
+    b .
+    b .
+    b .
+    b .
+    b .
+undef_entry:
+    push {r0-r12,lr}
+    mrs r1,spsr
+    sub sp,sp,#8
+    str r1,[sp]
+    sub r0,lr,#2
+    bl a7_fixture_undef
+    str r0,[sp,#60]
+    ldr r1,[sp]
+    msr spsr_cxsf,r1
+    add sp,sp,#8
+    pop {r0-r12,lr}
+    movs pc,lr
 ''')
     ld = ('ENTRY(_start)\nSECTIONS { . = 0x40200000;\n'
           '.text : { *(.text.start) *(.text*) } .rodata : { *(.rodata*) }\n'
@@ -93,9 +143,13 @@ _start:
     (out / 'guest.ld').write_text(ld + '}\n')
     sources = ('research/jpeg_stage_fixture.py', 'research/jpeg_stage_harness.c',
                'research/gamma_avcam.py')
+    extra = []
+    if a.kernel_callback:
+        sources += ('research/kernel_probe/capture_bridge.S',)
+        extra = ['-DA7_KERNEL_CALLBACK_FIXTURE', str(ROOT / sources[-1])]
     subprocess.run(['arm-none-eabi-gcc', '-mcpu=cortex-a15', '-mthumb', '-mno-unaligned-access', '-O2',
                     '-Wall', '-Wextra', '-Werror', '-ffreestanding', '-fno-builtin', '-nostdlib',
-                    '-T', 'guest.ld', 'start.S', 'stage.S', str(ROOT / sources[1]),
+                    '-T', 'guest.ld', 'start.S', 'stage.S', str(ROOT / sources[1]), *extra,
                     '-lgcc', '-o', 'stage.elf'], cwd=out, check=True)
     run = subprocess.run(['qemu-system-arm', '-M', 'virt', '-cpu', 'cortex-a15', '-m', '1024',
                           '-nodefaults', '-audio', 'none', '-nic', 'none', '-display', 'none',
@@ -112,7 +166,7 @@ _start:
                          for name, (lo, hi) in RANGES.items()},
                  source_sha256={p: sha((ROOT / p).read_bytes()) for p in sources},
                  log=log.decode().splitlines(), qemu_log_sha256=sha(log),
-                 scope='Original stage, StdYc allocation wrapper, request packer and DMM sharing wrapper; lower allocation, transport, and publisher substituted',
+                 scope='Original JPEG/SoftFocus stages, capture handle swap, StdYc allocation wrapper, request packer, DMM sharing and display selector; lower allocation, pixel processing, transport, and publisher substituted',
                  input_handle_context_offset='0x62f6', derived_handle_request_offset='0x1c',
                  jpeg_allocated_unit_type='0xe0b00',
                  share_wrapper_executes_in_qemu=True,
@@ -120,9 +174,17 @@ _start:
                  display_descriptor_handle_offset='0x08',
                  display_selector_scope='Original scalar SA display selector; source mapping, geometry helper and buffer lifetime operations substituted',
                  actual_display_path_executes_in_qemu=False,
+                 softfocus_stage_executes_in_qemu=True,
+                 capture_handle_swap_executes_in_qemu=True,
+                 processed_handle_reaches_jpeg_descriptor_in_fixture=True,
+                 softfocus_processing_allocation_transport_substituted=True,
+                 actual_softfocus_or_grain_pixels_processed=False,
+                 original_softfocus_cleanup_error_still_swaps=True,
                  frame_format_verified=False, writable_ownership_verified=False,
                  live_view_verified=False, sensor_or_encoder_run=False,
                  camera_written=False, flash_ready=False)
+    proof['kernel_callback_bridge_tested'] = a.kernel_callback
+    proof['kernel_exception_handler_substituted'] = a.kernel_callback
     (out / 'proof.json').write_text(json.dumps(proof, indent=2) + '\n')
     print(out / 'proof.json')
 

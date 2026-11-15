@@ -76,6 +76,10 @@ static void run(void) {
         unsigned radius=3;
 #endif
         struct a7_film_frame_params p={(int)s->grain,(int)s->halation,radius,1987};
+#ifdef A7_FILM_BENCH_GRAIN
+        s->grain=effect*3;s->halation=0;
+        p.grain=(int)s->grain;p.halation=0;
+#endif
         uint32_t sec0,ns0,sec1,ns1;
         fill(w,h);s->before=checksum(w*h*2);
         if(now(&sec0,&ns0)){result.stopped=2;return;}

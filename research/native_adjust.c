@@ -55,6 +55,13 @@ uint32_t native_adjust_number_resid(int value) {
     if(value < -15 || value > 15) return 0;
     return value ? (uint32_t)(0x0204e7ad+value) : 0x0204e39c;
 }
+#ifdef A7_FL_CAPTURE_GRAIN
+int native_adjust_grain_spec(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],int strength){
+    if(!specs||strength<0||strength>9)return 0;
+    specs[NATIVE_ADJUST_GRAIN_FIELD]=(NativeAdjustSpec){NATIVE_ADJUST_GRAIN_TITLE,0,0,9,strength};
+    return 1;
+}
+#endif
 #ifdef A7_FL_FILM_CONTROLS
 int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const int8_t points[5]){
     if(!specs||!points)return 0;

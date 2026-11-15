@@ -11,6 +11,9 @@
 #endif
 #endif
 #include "native_adjust.h"
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+#include "a7-fl-grain-backend.h"
+#endif
 #include "a7-fl-module-data.h"
 #ifdef A7_FL_FILM_CONTROLS
 #if !defined(A7_FL_CAPTURE_CONTROLS) || !defined(A7_FL_LEICA_LOOK) || !defined(A7_FL_LOOK_BANKS) || !defined(A7_FL_SAVE_DIALOG)
@@ -101,9 +104,26 @@ static int film_crc(struct a7_fl_preference *p){
     } else if(film_generate(0,p,0,table))return A7_FL_TABLE;
     p->candidate_crc=a7_fl_crc(table,1280);return 0;
 }
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+static int grain_sync(const struct a7_fl_preference *p){
+    return a7_fl_grain_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0);
+}
+#endif
 static int film_change(const struct a7_fl_preference *next){
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+    int grain_rc=grain_sync(next);
+    if(grain_rc){
+        if(grain_sync(&module.control.preference))module.status.fault=1;
+        return grain_rc;
+    }
+#endif
     int rc=a7_fl_curve_transition(&film_work,&film_io,&module.control.preference,next);
-    if(rc){module.status.fault=1;return rc;}
+    if(rc){
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+        (void)grain_sync(&module.control.preference);
+#endif
+        module.status.fault=1;return rc;
+    }
     module.control.preference=*next;
     module.runtime.state=!!next->enabled;
     module.control.dirty=1;return 0;
@@ -158,6 +178,9 @@ static int capture_check(int mode) {
 }
 #endif
 static int commit_checked(void) {
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+    int grain_rc=grain_sync(&module.control.preference);if(grain_rc)return grain_rc;
+#endif
 #ifdef A7_FL_FILM_CONTROLS
     int rc=a7_fl_curve_verify(&film_io,&module.control.preference);
     if(rc){module.status.fault=1;return rc;}
@@ -257,7 +280,7 @@ static int synchronize(void) {
 #ifdef A7_FL_FILM_CONTROLS
         for(unsigned f=8;f<NATIVE_ADJUST_FIELDS;f++)
             if(!native_adjust_write(&module.trees[j],native_adjust_field_id(f),
-                module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][f-6],accept_applied,0))return 0;
+                module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][native_adjust_film_index(f)],accept_applied,0))return 0;
 #endif
     }
     return 1;
@@ -268,7 +291,7 @@ static int model_read(void *unused,int id,int *value) {
     unsigned f=native_adjust_field_index(id);
 #ifdef A7_FL_FILM_CONTROLS
     if(f>=8&&f<NATIVE_ADJUST_FIELDS)
-        return native_adjust_encode(&module.trees[0],id,module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][f-6],value);
+        return native_adjust_encode(&module.trees[0],id,module.control.preference.film[module.control.preference.enabled?module.control.preference.enabled-1:0][native_adjust_film_index(f)],value);
 #endif
     if(f>=8)return 0;
     /* Native SettingMenu reserves -1 as a missing-value sentinel. The UI uses
@@ -292,8 +315,8 @@ static int model_write(void *unused,int id,int value) {
         if(next.parameters[f]==decoded){leave(0);return 1;}
         next.parameters[f]=decoded;
     } else if(f>=8&&f<NATIVE_ADJUST_FIELDS&&next.enabled>0){
-        if(next.film[next.enabled-1][f-6]==decoded){leave(0);return 1;}
-        next.film[next.enabled-1][f-6]=(int8_t)decoded;
+        if(next.film[next.enabled-1][native_adjust_film_index(f)]==decoded){leave(0);return 1;}
+        next.film[next.enabled-1][native_adjust_film_index(f)]=(int8_t)decoded;
     } else {leave(A7_FL_CONTROL_UNSUPPORTED);return 0;}
     int rc=film_crc(&next);
     if(!rc)rc=film_change(&next);
@@ -430,6 +453,9 @@ static int initialize_color(void) {
         rc=a7_fl_curve_recover(&film_work,&film_io,&preference);
     }
     if(rc)return rc;
+#ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+    rc=grain_sync(&preference);if(rc)return rc;
+#endif
     film_saved=present;
     module.control.preference=module.control.committed=preference;
     module.runtime.state=!!preference.enabled;
@@ -533,6 +559,10 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
 #ifdef A7_FL_FILM_CONTROLS
     if(!native_adjust_curve_specs(specs,preference.film[preference.enabled?preference.enabled-1:0]+2)){rollback();return leave(A7_FL_MODULE_NODES);}
     editable|=0x1f00u;
+#ifdef A7_FL_CAPTURE_GRAIN
+    if(!native_adjust_grain_spec(specs,preference.film[preference.enabled?preference.enabled-1:0][0])){rollback();return leave(A7_FL_MODULE_NODES);}
+    editable|=1u<<NATIVE_ADJUST_GRAIN_FIELD;
+#endif
 #endif
     for(unsigned j=0;j<module.platform.parent_count;j++) {
         if(!native_adjust_build(&module.trees[j],module.platform.caution_base,0x0204fd9e,0x0204fd9f,0x0204fd9f,specs,editable)) {

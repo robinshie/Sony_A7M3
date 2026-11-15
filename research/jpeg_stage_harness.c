@@ -8,11 +8,14 @@ enum scenario { OK, NO_SLOT, NO_CHANNEL, BAD_RESOURCE, SEND_ERROR, ACK_ERROR, AC
 enum event { MARK, SCOPE, STAGE, SLOT, ALLOC, DESCRIBE, HOLD, PARAM, COPY, BYTE, INIT, OPEN,
              RESOURCE, TOKEN, TAG, CHANNEL, SEND, RECEIVE, CLOSE, LOG, PUBLISH, DROP, CLEANUP,
              VALID, SHARE, DISP_INIT, DISP_ENTRY, DISP_GEOMETRY, DISP_RELEASE,
-             DISP_PREPARE, DISP_LOG, DISP_DONE };
+             DISP_PREPARE, DISP_LOG, DISP_DONE,
+             SOFT_INPUT, SOFT_OTHER, SOFT_ALLOC, SOFT_PARAM, SOFT_TRACE, SOFT_EVENT,
+             SOFT_EXEC, SOFT_CONFIG_TRACE, SOFT_FREE };
 static _Alignas(4) uint8_t ctx[0x6da0];
 static void *scope, *channel;
 static unsigned scenario, at, checks, receives, tokens;
 static unsigned source, derived;
+static unsigned soft_mode, source_type = SOURCE_TYPE;
 static const uint8_t *expected;
 static _Alignas(4) uint8_t share_source[40], share_dest[40];
 static _Alignas(4) uint8_t display[0x400], disp_yc[48], disp_meta[16], disp_timing[16];
@@ -67,13 +70,38 @@ static void write32(uint8_t *p, uint32_t v)
 }
 
 void *get_context(void) { return ctx; }
-void mark_stage(void *c, unsigned n) { step(MARK); check(c == ctx && n == 0x12a, "stage mark"); }
+#ifdef A7_KERNEL_CALLBACK_FIXTURE
+extern char a7_jpeg_bridge[], a7_undef_test_site[];
+extern unsigned a7_undef_test(void);
+static unsigned callback_hits, exception_hits, self_test_hits;
+unsigned a7_fixture_undef(unsigned pc, unsigned cpsr)
+{
+    check((cpsr & 0x3f) == 0x33, "exception is privileged Thumb");
+    check(*(unsigned *)pc == 0xaa73f7f0, "complete UDF.W opcode");
+    if (pc == (unsigned)a7_undef_test_site) { ++self_test_hits; return pc + 4; }
+    check(pc == BASE + 0x34019c, "exception at JPEG-only marker call");
+    ++exception_hits;
+    return (unsigned)a7_jpeg_bridge & ~1u;
+}
+void a7_jpeg_record(unsigned context, unsigned stage)
+{
+    check(context == (unsigned)ctx && stage == 0x12a, "callback arguments");
+    check(at == 0 && !soft_mode, "callback precedes JPEG stage events only");
+    check(read16(ctx + 0x62f6) == source, "callback source handle");
+    ++callback_hits;
+    /* A real C callback may destroy these caller-saved registers and flags. */
+    __asm__ volatile("movs r0,#0\nmovs r1,#0\nmovs r2,#0\nmovs r3,#0\nmov ip,r0"
+                     ::: "r0","r1","r2","r3","r12","cc");
+}
+#endif
+void mark_stage(void *c, unsigned n) { step(MARK); check(c == ctx && n == (soft_mode ? 0xe1u : 0x12au), "stage mark"); }
 void scope_init(void *p) { step(SCOPE); scope = p; }
 void enter_stage(void *c, unsigned n, unsigned zero)
-{ step(STAGE); check(c == ctx && n == 8 && zero == 0, "stage entry"); }
+{ step(STAGE); check(c == ctx && n == (soft_mode ? 0x17u : 8u) && zero == 0, "stage entry"); }
 unsigned optional_trace(void) { return 0; }
 unsigned get_slot(void *c, unsigned kind)
-{ step(SLOT); check(c == ctx && kind == 14, "resource slot"); return scenario == NO_SLOT ? 0xffffu : DEST; }
+{ step(SLOT); check(c == ctx && kind == (soft_mode ? 0x17u : 14u), "resource slot");
+  return scenario == (soft_mode ? 3u : NO_SLOT) ? 0xffffu : DEST; }
 
 unsigned alloc_descriptor(void *p, unsigned type, unsigned flag, uint8_t *report)
 {
@@ -90,7 +118,7 @@ void describe_input(unsigned word0, unsigned word1, unsigned type, unsigned hand
 {
     step(DESCRIBE);
     check(word0 == 0x04102030 && word1 == 0x71890123, "allocated descriptor metadata");
-    check(type == SOURCE_TYPE && handle == source && zero == 0, "source comes from context");
+    check(type == source_type && handle == source && zero == 0, "source comes from context");
     check(field == ctx + 0x6752 && opts == OPTIONS && a == 0, "descriptor inputs");
 }
 
@@ -153,6 +181,7 @@ void channel_close(void *p) { step(CLOSE); check(p == channel, "channel cleanup"
 void native_log(unsigned fmt)
 {
     step(LOG);
+    if (soft_mode) return; /* Original literal pools retained; no log strings read. */
     check(fmt == BASE + 0x94e308 || fmt == BASE + 0x94e2b3 ||
           fmt == BASE + 0x94d10f || fmt == BASE + 0x94d137 ||
           fmt == BASE + 0x94d170 || fmt == BASE + 0x960230 ||
@@ -327,6 +356,103 @@ static unsigned test_display(void)
     return scenario;
 }
 
+/* Original SoftFocus stage and original context switch, with its processing
+ * service replaced. This proves handle flow, NOT native pixel access. */
+enum { SOFT_SOURCE=0x1379, SOFT_DEST=0x2468, SOFT_WORK=0x3579,
+       SOFT_CONFIG=0x468a, SOFT_TYPE=0x52f };
+unsigned soft_input(void *c, unsigned kind)
+{ step(SOFT_INPUT); check(c==ctx && kind==1,"soft input query"); return scenario==1 ? 0xffff : SOFT_SOURCE; }
+unsigned soft_other(void *c)
+{ step(SOFT_OTHER); check(c==ctx,"soft second query"); return scenario==2 ? 0xffff : SOFT_DEST; }
+int soft_alloc(uint8_t *selector,uint16_t *handle)
+{ step(SOFT_ALLOC); *selector=0x31; *handle=SOFT_CONFIG; return scenario==4 ? 6 : 0; }
+int soft_params(unsigned handle,void *p)
+{ step(SOFT_PARAM); check(handle==SOFT_CONFIG && p==ctx+0x20,"soft config binding"); return scenario==5 ? 2 : 0; }
+void soft_trace(unsigned event,unsigned handle,void *geometry,unsigned flag,unsigned zero)
+{
+    step(SOFT_TRACE);
+    check((event==0x3b && handle==SOFT_SOURCE)||(event==0x3c && handle==SOFT_DEST),"soft source/destination trace");
+    check(geometry==ctx+0x6752 && flag==7 && zero==0,"soft trace geometry");
+}
+void soft_event(unsigned category,unsigned event,unsigned zero0,unsigned zero1)
+{ step(SOFT_EVENT); check(category==4 && (event==0x4011||event==0x4012) && !zero0&&!zero1,"soft processing events"); }
+int soft_execute(unsigned selector,unsigned config,const uint8_t *input,uint32_t *out,uint8_t *done)
+{
+    step(SOFT_EXEC);
+    check(selector==0x31 && config==SOFT_CONFIG,"soft dispatch identity");
+    check(read16(input)==SOFT_SOURCE && read16(input+2)==SOFT_DEST && read16(input+4)==SOFT_WORK,"soft three resource handles");
+    check(read32(input+8)==6000 && read32(input+12)==4000 && read32(input+16)==6016,"soft geometry arguments");
+    for(unsigned i=0;i<4;i++)out[i]=0;
+    *done=scenario==7 ? 0 : 1;
+    return scenario==6 ? 1 : 0;
+}
+void soft_config_trace(unsigned event,unsigned config,unsigned flag)
+{ step(SOFT_CONFIG_TRACE); check(event==0x3d && config==SOFT_CONFIG && flag==7,"soft config trace"); }
+int soft_free(unsigned selector,unsigned config,const uint8_t *input)
+{
+    step(SOFT_FREE);
+    check(selector==0x31 && config==SOFT_CONFIG && read16(input)==SOFT_SOURCE &&
+          read16(input+2)==SOFT_DEST && read16(input+4)==SOFT_WORK,"soft resource cleanup");
+    return scenario==8 ? 6 : 0;
+}
+
+static unsigned test_softfocus(void)
+{
+    #define SOFT_HEAD MARK,SCOPE,SOFT_INPUT
+    #define SOFT_PREP SOFT_HEAD,SOFT_OTHER,SLOT,SOFT_ALLOC,SOFT_PARAM,SOFT_TRACE,SOFT_EVENT,SOFT_EXEC
+    #define SOFT_DONE SOFT_PREP,SOFT_EVENT,SOFT_TRACE,SOFT_CONFIG_TRACE
+    static const uint8_t order[][30]={
+        {SOFT_DONE,SOFT_FREE,STAGE,CLEANUP,255},
+        {SOFT_HEAD,CLEANUP,255},
+        {SOFT_HEAD,SOFT_OTHER,CLEANUP,255},
+        {SOFT_HEAD,SOFT_OTHER,SLOT,CLEANUP,255},
+        {SOFT_HEAD,SOFT_OTHER,SLOT,SOFT_ALLOC,LOG,CLEANUP,255},
+        {SOFT_HEAD,SOFT_OTHER,SLOT,SOFT_ALLOC,SOFT_PARAM,LOG,CLEANUP,255},
+        {SOFT_PREP,LOG,CLEANUP,255},
+        {SOFT_DONE,LOG,LOG,LOG,LOG,LOG,CLEANUP,255},
+        {SOFT_DONE,SOFT_FREE,LOG,STAGE,CLEANUP,255},
+    };
+    static const uint8_t jpeg_order[]={
+        MARK,SCOPE,STAGE,SLOT,ALLOC,DESCRIBE,HOLD,PARAM,COPY,COPY,BYTE,INIT,OPEN,
+        RESOURCE,TOKEN,TOKEN,TAG,CHANNEL,SEND,RECEIVE,RECEIVE,CLOSE,PUBLISH,DROP,CLEANUP,255
+    };
+    unsigned cases=0;
+    for(unsigned test=0;test<9;test++) {
+        scenario=test; soft_mode=1;
+        for(unsigned n=0;n<sizeof ctx;n++)ctx[n]=0;
+        write32(ctx+0x34,OPTIONS);write32(ctx+0x200,0x15);
+        write16(ctx+0x62f6,SOFT_SOURCE);write16(ctx+0x62f8,SOFT_DEST);
+        write16(ctx+0x6316,SOFT_WORK);write16(ctx+0x6304,DEST);
+        write32(ctx+0x6704,SOURCE_TYPE);write32(ctx+0x6708,SOFT_TYPE);
+        write32(ctx+0x6710,DEST_TYPE);write16(ctx+0x6752,6016);
+        write16(ctx+0x6756,6000);write16(ctx+0x6758,4000);
+        write32(ctx+0x675e,0xe3e2e1e0);write32(ctx+0x6d74,0x88);
+        ctx[0x6d98]=0x5b;ctx[0x6d99]=7;
+        expected=order[test];at=0;
+        unsigned (*stage)(void)=(unsigned (*)(void))(BASE+0x34f5ed);
+        const unsigned codes[]={0,2,2,2,2,5,5,5,0};
+        check(stage()==codes[test],"soft stage result");
+        check(expected[at]==255,"full soft stage sequence");
+        const unsigned swapped=test==0||test==8;
+        check(read16(ctx+0x62f6)==(swapped?SOFT_DEST:SOFT_SOURCE) &&
+              read16(ctx+0x62f8)==(swapped?SOFT_SOURCE:SOFT_DEST),"only completed processing swaps image handles");
+        check(read32(ctx+0x6704)==(swapped?SOFT_TYPE:SOURCE_TYPE) &&
+              read32(ctx+0x6708)==(swapped?SOURCE_TYPE:SOFT_TYPE),"resource types follow swapped handles");
+        ++cases;
+        if(swapped) {
+            /* Execute original JPEG stage immediately using the same context.
+             * describe_input asserts the new source and type reach the request. */
+            soft_mode=0;scenario=OK;source=SOFT_DEST;source_type=SOFT_TYPE;derived=0x59a3;
+            at=receives=tokens=0;expected=jpeg_order;
+            stage=(unsigned (*)(void))(BASE+0x34018d);
+            check(stage()==0,"post-processing JPEG handoff");
+            check(expected[at]==255,"JPEG uses completed output");++cases;
+        }
+    }
+    soft_mode=0;source_type=SOURCE_TYPE;
+    return cases;
+}
+
 void guest_main(void)
 {
     #define HEAD MARK,SCOPE,STAGE,SLOT
@@ -341,6 +467,9 @@ void guest_main(void)
     };
     unsigned cases = 0;
     checks = 0;
+#ifdef A7_KERNEL_CALLBACK_FIXTURE
+    check(a7_undef_test() == 0x7a73 && self_test_hits == 1, "private Thumb trap self-test");
+#endif
     for (unsigned i = 0; i < 3; ++i) {
         source = 0x2147 + 0x5a40 * i;
         derived = 0x59a3 + 0x3410 * i;
@@ -367,6 +496,11 @@ void guest_main(void)
     }
     cases += test_share();
     cases += test_display();
+    cases += test_softfocus();
+#ifdef A7_KERNEL_CALLBACK_FIXTURE
+    check(callback_hits >= 27 && callback_hits == exception_hits, "one callback per JPEG stage");
+    print("KERNEL_CALLBACK_HITS "); number(callback_hits); print("\n");
+#endif
     print("JPEG_STAGE_FIXTURE_CASES "); number(cases); print(" CHECKS "); number(checks);
     print("\nJPEG_STAGE_FIXTURE_PASSED\n"); stop();
 }

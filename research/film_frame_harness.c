@@ -261,6 +261,35 @@ static void dispatch_paths(void){
     for(size_t i=0;i<sizeof reference;i++)check(preview.pixels[i]==reference[i],"Off keeps preview intact");
     cases+=2;
 }
+static void capture_only(void){
+    struct a7_fl_preference p={0};p.schema=4;p.generation=4;
+    uint32_t scratch[64];uint8_t expected_pixels[16*8*2];
+    for(unsigned bank=0;bank<3;bank++){p.film[bank][0]=(int8_t)(bank*3+3);p.film[bank][1]=9;}
+    for(unsigned mode=1;mode<=3;mode++){
+        struct stream source={.path=A7_FILM_CAPTURE,.token=811,.sequence=57,.settings=&p};
+        struct a7_film_frame_stage stage={{stream_acquire,stream_cpu,stream_device,stream_release,&source},scratch,sizeof scratch,0,0,{0,0},0,0};
+        p.enabled=(int)mode;stream_fill(source.pixels,sizeof source.pixels);
+        stream_fill(expected_pixels,sizeof expected_pixels);
+        struct a7_film_frame_params params;
+        check(!a7_film_frame_params_from_preference(&p,16,source.sequence,&params),"capture snapshot params");
+        params.halation=0;params.radius=1;
+        struct a7_film_frame f={16,8,A7_FILM_UYVY,A7_FILM_FULL,A7_FILM_CAPTURE,
+            {{expected_pixels,sizeof expected_pixels,32},{0,0,0}},source.token,source.sequence};
+        check(!a7_film_frame_apply(&f,&params,work,sizeof work),"expected grain-only capture");
+        for(unsigned i=0;i<3;i++)check(a7_film_capture_grain_dispatch(&stage,source.token,A7_FILM_PREVIEW,&p)==A7_FILM_FRAME_SKIP&&!source.phase,
+                                      "preview never acquired or touched");
+        check(!a7_film_capture_grain_dispatch(&stage,source.token,A7_FILM_CAPTURE,&p)&&source.phase==4&&source.disposition==1,
+              "capture fenced and released once");
+        for(unsigned i=0;i<sizeof expected_pixels;i++)check(source.pixels[i]==expected_pixels[i],"only snapshotted grain; no halation");
+        check(!stage.processed[0]&&stage.processed[1]==1,"capture counts isolated");cases++;
+    }
+    p.enabled=0;
+    check(a7_film_capture_grain_dispatch(0,0,A7_FILM_CAPTURE,&p)==A7_FILM_FRAME_SKIP,"Off does not acquire image");
+    p.enabled=1;p.film[0][0]=0;
+    check(a7_film_capture_grain_dispatch(0,0,A7_FILM_CAPTURE,&p)==A7_FILM_FRAME_SKIP,"zero grain bypasses processing");
+    p.film[0][0]=10;
+    check(a7_film_capture_grain_dispatch(0,0,A7_FILM_CAPTURE,&p)==A7_FILM_FRAME_ARGUMENT,"bad grain rejected");cases++;
+}
 static void settings(void){
     struct a7_fl_preference pref={0};pref.schema=4;pref.generation=1;
     for(unsigned bank=0;bank<3;bank++){pref.film[bank][0]=(int8_t)(bank+2);pref.film[bank][1]=(int8_t)(bank+5);}
@@ -294,7 +323,7 @@ int main(void){
              (struct a7_film_frame_params){9,9,A7_FILM_FRAME_MAX_RADIUS,1987});
     guards();lifecycle();scales();
 #ifdef A7_FL_FILM_CONTROLS
-    settings();dispatch_paths();
+    settings();dispatch_paths();capture_only();
 #endif
     put("FILM_FRAME_PASSED cases=");number(cases);put(" checks=");number(checks);put(" checksum=");number(checksum);put("\n");stop(0);return 0;
 }

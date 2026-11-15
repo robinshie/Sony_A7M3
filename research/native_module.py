@@ -45,7 +45,13 @@ def main():
     ap.add_argument('--look-banks',action='store_true',help='Separate FL/FL2 settings and dedicated FL2 label (schema 2)')
     ap.add_argument("--leica-look",action="store_true",help="Add independent FL3 warm film preset (schema 3)")
     ap.add_argument('--film-curves',action='store_true',help='Build the FL3 five-point curve candidate for offline validation')
+    ap.add_argument('--capture-grain-menu',action='store_true',help='Offline grain menu and independent saved banks; not a flashable grain backend')
+    ap.add_argument('--capture-grain-kernel',type=Path,help='Verified dual-bank repeated-shot kernel bundle to embed')
+    ap.add_argument('--capture-grain-bridge-proof',type=Path)
     args=ap.parse_args()
+    if bool(args.capture_grain_kernel)!=bool(args.capture_grain_bridge_proof):ap.error('Kernel and bridge proof must be supplied together')
+    if args.capture_grain_kernel and not args.capture_grain_menu:ap.error('Kernel requires --capture-grain-menu')
+    if args.capture_grain_menu and not args.film_curves:ap.error('--capture-grain-menu requires --film-curves')
     if args.leica_look and not args.look_banks:ap.error("--leica-look requires --look-banks")
     if args.look_banks and not args.dual_look:ap.error('--look-banks requires --dual-look')
     if args.dual_look and not args.preview_cycle:ap.error('--dual-look requires the r9 --preview-cycle pipeline')
@@ -71,6 +77,8 @@ def main():
         if not (args.leica_look and args.with_bootstrap and args.save_dialog):
             ap.error('--film-curves requires the complete FL3 build')
         OUT=OUT.with_name('native-module-fl3-curves')
+    if args.capture_grain_menu:OUT=OUT.with_name('native-module-grain-menu')
+    if args.capture_grain_kernel:OUT=OUT.with_name('native-module-grain-capture')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -127,6 +135,43 @@ def main():
         for name,entry in locale['files'].items():
             if sha((ROOT/'.lab/native-fl-curve-strings'/name).read_bytes())!=entry['after_sha256']:
                 raise ValueError('Curve locale artifact identity differs')
+    if args.capture_grain_menu:
+        for key in ('native-fl-grain-strings/proof.json','native-resource-grain/report.json'):
+            path=ROOT/'.lab'/key;data=json.loads(path.read_text())
+            for source_path,digest in data['source_sha256'].items():
+                if sha((ROOT/source_path).read_bytes())!=digest:raise ValueError('Stale grain resource proof: '+source_path)
+            dependency_proofs[key]=sha(path.read_bytes())
+        if data['input_proof_sha256']!=dependency_proofs['native-fl-grain-strings/proof.json']:raise ValueError('Grain resource evidence mismatch')
+    grain_kernel_proof=None
+    if args.capture_grain_kernel:
+        grain_dir=args.capture_grain_kernel.resolve()
+        grain_kernel_proof=json.loads((grain_dir/'proof.json').read_text())
+        if grain_kernel_proof.get('route')!='banks' or grain_kernel_proof.get('module_name')!='a7capbanks':raise ValueError('Wrong grain kernel route')
+        raw=(grain_dir/'a7capbanks.ko').read_bytes()
+        if sha(raw)!=grain_kernel_proof['module_sha256']:raise ValueError('Kernel artifact changed')
+        for kernel_source_path,digest in grain_kernel_proof['source_sha256'].items():
+            if sha((ROOT/kernel_source_path).read_bytes())!=digest:raise ValueError('Stale kernel source: '+kernel_source_path)
+        collected=[r for r in grain_kernel_proof['live'] if r['action']=='collect' and r['verified']]
+        if not collected:raise ValueError('Grain real-shot collection missing')
+        r=collected[-1];v=r['values']
+        if v[355]<2 or v[357] or v[18] or not v[310] or v[345] or v[349]!=24000000 or v[350]:raise ValueError('Repeated real-shot grain did not pass')
+        if sha((grain_dir/r['report_file']).read_bytes())!=json.loads((grain_dir/'grain-sample.json').read_text())['trace_sha256']:raise ValueError('Sample not bound to final collection')
+        sample=json.loads((grain_dir/'grain-sample.json').read_text())
+        if not sample.get('source_pixel_write_verified') or sample.get('failed_frames') or sample.get('completed_frames',0)<2:raise ValueError('Grain source readback incomplete')
+        if sha((grain_dir/'grain-sample.bin').read_bytes())!=sample['binary_sha256']:raise ValueError('Grain sample changed')
+        bridge=json.loads(args.capture_grain_bridge_proof.read_text())
+        if not bridge.get('passed') or not bridge.get('camera_run') or bridge.get('kernel_sha256')!=sha(raw):raise ValueError('Live config bridge missing')
+        for bridge_source_path,digest in bridge['source_sha256'].items():
+            if sha((ROOT/bridge_source_path).read_bytes())!=digest:raise ValueError('Stale live bridge source')
+        host=json.loads((ROOT/'.lab/grain-backend/proof.json').read_text())
+        if not host['passed'] or any(sha((ROOT/n).read_bytes())!=h for n,h in host['source_sha256'].items()):raise ValueError('Stale bridge failure tests')
+        for path in (grain_dir/'proof.json',args.capture_grain_bridge_proof.resolve(),ROOT/'.lab/grain-backend/proof.json'):
+            dependency_proofs[str(path.relative_to(ROOT/'.lab'))]=sha(path.read_bytes())
+        if sha((ROOT/'research/capture_grain_fetch.py').read_bytes())!=sample['source_sha256']:raise ValueError('Stale grain sample verifier')
+        (OUT/'grain-sample-proof.json').write_bytes((grain_dir/'grain-sample.json').read_bytes())
+        (OUT/'grain.ko').write_bytes(raw)
+        (OUT/'a7-fl-grain-kernel.h').write_text('#define A7_GRAIN_KERNEL_NAME "a7capbanks"\nstatic const unsigned a7_grain_kernel_source_id[]={'+','.join(map(str,grain_kernel_proof['source_id']))+'};\n')
+        (OUT/'grain-blob.S').write_text('.section .rodata\n.balign 4\n.global a7_grain_kernel_start,a7_grain_kernel_end\na7_grain_kernel_start:\n.incbin "grain.ko"\na7_grain_kernel_end:\n.section .note.GNU-stack,"",%progbits\n')
     if args.preview_refresh:
         script='research/native_preview_cycle_test.py' if args.preview_cycle else 'research/native_preview_test.py'
         run([sys.executable,str(ROOT/script),'--usr',str(args.usr)])
@@ -267,6 +312,8 @@ call_kernel_writer:
     if args.look_banks:flags+=['-DA7_FL_LOOK_BANKS']
     if args.leica_look:flags+=['-DA7_FL_LEICA_LOOK']
     if args.film_curves:flags+=['-DA7_FL_FILM_CONTROLS','-Wno-missing-field-initializers']
+    if args.capture_grain_menu:flags+=['-DA7_FL_CAPTURE_GRAIN']
+    if args.capture_grain_kernel:flags+=['-DA7_FL_CAPTURE_GRAIN_BACKEND']
     if args.spatial_settings_only:flags+=['-DA7_FL_SPATIAL_SETTINGS_ONLY']
     if capture_look:flags+=['-DA7_FL_CAPTURE_LOOK']
     if args.capture_controls:flags+=['-DA7_FL_CAPTURE_CONTROLS']
@@ -276,18 +323,21 @@ call_kernel_writer:
          str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources],'-lgcc','-o','module-test.elf'],cwd=OUT)
     # The module integration fixture models opening/answering the dialog;
     # native dialog lifecycle instructions are exercised by its own fixture.
+    if args.capture_grain_kernel:sources+=['payloads/a7-fl-grain-backend.c']
     if args.save_dialog:sources+=['payloads/a7-fl-dialog.c']
     if args.preview_refresh:sources+=['payloads/a7-fl-preview-cycle.c' if args.preview_cycle else 'payloads/a7-fl-preview.c']
     objects=[]
     for i,path in enumerate(sources):
         name=f'part-{i}.o';objects.append(name)
         run(['arm-none-eabi-gcc',*flags,'-fPIC','-c',str(ROOT/path),'-o',name],cwd=OUT)
+    if args.capture_grain_kernel:
+        run(['arm-none-eabi-gcc',*flags,'-fPIC','-c','grain-blob.S','-o','grain-blob.o'],cwd=OUT);objects.append('grain-blob.o')
     run(['arm-none-eabi-gcc',*flags,'-nostdlib','-shared','-Wl,--no-undefined,-Bsymbolic-functions,-z,noexecstack',*objects,'-lgcc','-o','liba7-fl-module.so'],cwd=OUT)
     result=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     log=result.stdout+result.stderr;(OUT/'qemu.log').write_bytes(log);print(log.decode(),end='')
     if (b'NATIVE_FL_CURVE_MAIN_PASSED' if args.film_curves else b'NATIVE_FL_MODULE_PASSED') not in log or b'FAIL ' in log:raise ValueError('Integration fixture failed')
     run(['arm-none-eabi-gcc',*flags,'-DA7_FL_TEST_SAVED_BOOT',*(['-DA7_FL_TEST_LEICA_BOOT'] if args.film_curves else []),'-nostdlib','-T','guest.ld','start.S','runtime.S','nodes.S',
-         str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p not in ('payloads/a7-fl-dialog.c','payloads/a7-fl-preview.c','payloads/a7-fl-preview-cycle.c')],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
+         str(ROOT/'research/native_module_harness.c'),*[str(ROOT/p) for p in sources if p not in ('payloads/a7-fl-grain-backend.c','payloads/a7-fl-dialog.c','payloads/a7-fl-preview.c','payloads/a7-fl-preview-cycle.c')],'-lgcc','-o','module-boot-test.elf'],cwd=OUT)
     boot_run=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-smp','1','-nodefaults','-audio','none','-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native','-device',f'loader,file={OUT}/module-boot-test.elf,cpu-num=0'],capture_output=True,timeout=30)
     boot_log=boot_run.stdout+boot_run.stderr;(OUT/'boot.log').write_bytes(boot_log);print(boot_log.decode(),end='')
     if (b'NATIVE_FL_CURVE_BOOT_PASSED' if args.film_curves else b'NATIVE_FL_MODULE_BOOT_PASSED') not in boot_log or b'FAIL ' in boot_log:raise ValueError('Cold boot integration fixture failed')
@@ -379,6 +429,14 @@ call_kernel_writer:
     if capture_look:
         proof['capture_look']=dict(capture_look,arm_transaction_verified=True)
         proof['hardware_validation_required']+=['sRGB and Adobe RGB JPEG A/B; AV-CAM application']
+    if args.capture_grain_menu:
+        if b'NATIVE_FL_GRAIN_BANKS_PASSED' not in log or b'NATIVE_FL_GRAIN_BOOT_PASSED' not in boot_log:raise ValueError('Grain menu persistence evidence missing')
+        proof.update(capture_grain_menu=True,ready_for_staging=False,feature_scope='Grain menu, independent saved banks and simulated cold boot only; actual capture backend not linked')
+    if args.capture_grain_kernel:
+        if b'NATIVE_FL_GRAIN_CAPTURE_DISPATCH_PASSED' not in log or b'NATIVE_FL_GRAIN_CAPTURE_BOOT_PASSED' not in boot_log:raise ValueError('Capture settings lifecycle not verified')
+        proof.update(capture_grain_kernel=True,ready_for_staging=True,kernel_sha256=grain_kernel_proof['module_sha256'],feature_scope='Capture-only JPEG L grain with menu strengths and independent FL banks; no halation or live-view grain')
+        for n in ('payloads/a7-fl-grain-backend.h','research/capture_grain_fetch.py'):proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
+        for n in ('grain.ko','a7-fl-grain-kernel.h','grain-blob.S','grain-sample-proof.json'):proof['artifact_sha256'][n]=sha((OUT/n).read_bytes())
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 if __name__=='__main__':main()

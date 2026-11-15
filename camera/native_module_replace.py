@@ -27,10 +27,25 @@ REVISIONS={1:dict(old_sha=OLD,old_size=42208,temporary='.a7fl-r1.new',backup='.a
            1202:dict(old_sha='d3c4bb0a71e4355d3bf394a14543abc850f76eccb0ec72e0c64f31f97f41f9ef',old_size=392896,temporary='.a7fl3-en.new',backup='.a7fl3-en.orig',journal='A7FL3EN.LOG',locale='string_english.uxc',resource_set='fl3')}
 REVISIONS.update({13: {'old_sha': 'b83d38c9867d50b3345b72813879b73b6659e375c36625a6f68e90d64bb493f7', 'old_size': 79840, 'temporary': '.a7fl-r13.new', 'backup': '.a7fl-b83d38c9.orig', 'journal': 'A7FLUP13.LOG'}, 1301: {'old_sha': '97de64a708e20121c717d0e362b93215783461ec8d7e5213194f94b487ede245', 'old_size': 350220, 'temporary': '.a7curve-zh.new', 'backup': '.a7curve-zh.orig', 'journal': 'A7CURVEZH.LOG', 'locale': 'string_simplifiedchinese.uxc', 'resource_set': 'fl3-curves'}, 1302: {'old_sha': '83b77a48936f83163d3f9ec20d8dad0c7fbc1681e53096038e599681213c45ed', 'old_size': 392924, 'temporary': '.a7curve-en.new', 'backup': '.a7curve-en.orig', 'journal': 'A7CURVEEN.LOG', 'locale': 'string_english.uxc', 'resource_set': 'fl3-curves'}})
 REVISIONS[14]=dict(old_sha='79772dfce51d90663de65fda7d54ed48bfcbe8c9fd46df7797ca9dcf5be53bbd',old_size=89692,temporary='.a7fl-r14.new',backup='.a7fl-79772dfc.orig',journal='A7FLUP14.LOG')
+REVISIONS[15]=dict(old_sha='28a7c2178d701324363d8824a9bc1648f5df44c2d75f260565e51e2c96ccdd38',old_size=89812,temporary='.a7fl-r15.new',backup='.a7fl-28a7c217.orig',journal='A7FLUP15.LOG')
+REVISIONS[1501]=dict(old_sha='c6930e3feccae9b74436e3cbdc92abac92ff15a0ad725793756ab9ab65135966',old_size=350304,temporary='.a7grain-zh.new',backup='.a7grain-zh.orig',journal='A7GRAINZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='grain')
+REVISIONS[1502]=dict(old_sha='a35f7ffa0732f798c151e2ee7cb6bc9aa6bd7fd2ece842e197ec6a28e7801eb8',old_size=393024,temporary='.a7grain-en.new',backup='.a7grain-en.orig',journal='A7GRAINEN.LOG',locale='string_english.uxc',resource_set='grain')
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
+ if revision==15:
+  require_capture_release(14,proof)
+  require(proof.get('capture_grain_menu') is True and proof.get('capture_grain_kernel') is True and
+          len(proof.get('kernel_sha256',''))==64,'Grain release requires real capture backend and menu integration.')
+  deps=proof.get('dependency_proof_sha256',{})
+  require('native-resource-grain/report.json' in deps and 'grain-backend/proof.json' in deps and
+          any(k.startswith('capture-kernel/') and k.endswith('/proof.json') for k in deps) and
+          any(k.startswith('grain-backend-live/') and k.endswith('/proof.json') for k in deps),
+          'Grain release lacks real-shot or bridge evidence.')
+  require(all(k in proof.get('artifact_sha256',{}) for k in ('grain.ko','grain-blob.S','a7-fl-grain-kernel.h','grain-sample-proof.json')),
+          'Embedded grain kernel artifacts are missing.')
+  return
  if revision in (13,14):
   if revision==14:require(proof.get("all_look_curves") is True,"All three look curves require integration evidence.")
   require(proof.get('preference_schema')==4 and proof.get('leica_look') is True and
@@ -146,8 +161,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14):
-  resource_set='fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15):
+  resource_set='fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

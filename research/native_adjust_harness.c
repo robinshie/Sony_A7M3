@@ -72,10 +72,14 @@ void guest_main(void) {
 #ifdef A7_FL_FILM_CONTROLS
     static const int8_t saved_points[]={9,-6,3,0,-9};
     check(native_adjust_curve_specs(specs,saved_points),"set five curve specs from saved bank");
-    check(native_adjust_build(&tree,0,0x7f000001,0,0x7f000002,specs,0x1fff),"build film menu");
+#ifdef A7_FL_CAPTURE_GRAIN
+    check(native_adjust_grain_spec(specs,4),"restore grain strength spec");
+    check(!native_adjust_grain_spec(specs,-1)&&!native_adjust_grain_spec(specs,10),"reject invalid grain strength");
+#endif
+    check(native_adjust_build(&tree,0,0x7f000001,0,0x7f000002,specs,(1u<<NATIVE_ADJUST_FIELDS)-1),"build film menu");
     check(native_adjust_add_look(&tree,0x7f000003)&&native_adjust_add_look(&tree,0x7f000004),"add FL2 and FL3");
     check(native_adjust_add_save(&tree,0x0204eaab),"add film Save");
-    check(tree.root.count==3&&tree.pages[0].count==6&&tree.pages[1].count==6&&tree.pages[2].count==3,"film page sizes");
+    check(tree.root.count==3&&tree.pages[0].count==6&&tree.pages[1].count==6&&tree.pages[2].count==NATIVE_ADJUST_FIELDS+2-12,"film page sizes");
     backend_ok=1;
     check(native_adjust_write(&tree,0x7000,3,backend,&tree)&&last_field==NA_MODE,"select FL3");
     for(unsigned f=8;f<13;f++) {
@@ -92,11 +96,30 @@ void guest_main(void) {
     check(!native_adjust_write(&tree,NATIVE_ADJUST_SAVE_ID,0,backend,&tree),"Save cannot hit a curve field");
     check(tree.save.parent==&tree.pages[2]&&get(&tree.save,0xe)==NATIVE_ADJUST_SAVE_ID,"Save after all curves");
     for(int p=0;p<3;p++){
-        int rows=p==2?3:6;
+        int rows=p==2?NATIVE_ADJUST_FIELDS+2-12:6;
         check(((Select)0x682e59)(&tree.root,p+1)&&((Select)0x682e59)(&tree.pages[p],rows),"select last row on each page");
         widget_check(&tree.root,3,rows,p+1,rows-1);
     }
-    put("NATIVE_ADJUST_TESTS_PASSED: three film pages and all five curve fields\n");finish();
+#ifdef A7_FL_CAPTURE_GRAIN
+    {
+        unsigned f=NATIVE_ADJUST_GRAIN_FIELD;int id=native_adjust_field_id(f),value=-1;
+        NativeAdjustNode *n=field_node(&tree.root,f+1),*leaf=0;
+        check(id==0x700f&&get(n,0xe)==id&&get(n,0)==NATIVE_ADJUST_GRAIN_TITLE,"separate grain ID and title");
+        check(native_adjust_film_index(f)==0,"grain maps to existing film bank slot zero");
+        for(unsigned c=8;c<13;c++)check(native_adjust_film_index(c)==c-6,"curve bank positions unchanged");
+        check(((GetSelected)0x682951)(n,&leaf)&&get(leaf,0x10)==4,"grain cursor restored");
+        for(int strength=0;strength<=9;strength++){
+            check(native_adjust_write(&tree,id,strength,backend,&tree)&&last_field==f&&last_value==strength,"grain backend dispatch");
+            check(native_adjust_read(&tree,id,&value)&&value==strength,"grain numeric readback");
+        }
+        check(!native_adjust_write(&tree,id,-1,backend,&tree)&&!native_adjust_write(&tree,id,10,backend,&tree),"grain bounds");
+        backend_ok=0;check(!native_adjust_write(&tree,id,2,backend,&tree)&&native_adjust_read(&tree,id,&value)&&value==9,"failed backend preserves grain value");
+    }
+    put("NATIVE_ADJUST_TESTS_PASSED: 6/6/4 menu, all grain strengths, curve IDs and Save preserved\n");
+#else
+    put("NATIVE_ADJUST_TESTS_PASSED: three film pages and all five curve fields\n");
+#endif
+    finish();
 #endif
     check(native_adjust_build(&tree,0,0x7f000001,0,0x7f000002,specs,0x3f),"build original graph");
     check(used==0,"unique graph requires no clone/allocation");

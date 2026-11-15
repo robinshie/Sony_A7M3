@@ -30,8 +30,9 @@ def main():
     p.add_argument("--fl2",action="store_true")
     p.add_argument("--fl3",action="store_true")
     p.add_argument('--fl3-curves',action='store_true')
+    p.add_argument('--capture-grain',action='store_true')
     args=p.parse_args()
-    if sum((args.fl2,args.fl3,args.fl3_curves))>1:p.error("Select one resource extension")
+    if sum((args.fl2,args.fl3,args.fl3_curves,args.capture_grain))>1:p.error("Select one resource extension")
     elf=ELF(args.usr/'lib/libObj.so')
     if sha(elf.data)!=OBJ_SHA:p.error('Unexpected libObj.so SHA-256')
     proof=json.loads((args.after/'proof.json').read_text())
@@ -46,10 +47,13 @@ def main():
     if args.fl3_curves:
         from native_fl_curve_strings import KEYS, LABELS
         expected=[(key,*labels) for key,labels in zip(KEYS,LABELS)]
-    first=7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
+    if args.capture_grain:
+        from native_fl_grain_strings import LABELS
+        expected=[('capture_grain',*LABELS)]
+    first=7599 if args.capture_grain else 7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
     if proof['resources']!={name:0x0204e000+first+i for i,(name,_,_) in enumerate(expected)}:
         p.error('Unexpected resource assignment')
-    out=ROOT/('.lab/native-resource-fl3-curves' if args.fl3_curves else '.lab/native-resource-fl3' if args.fl3 else '.lab/native-resource-fl2' if args.fl2 else '.lab/native-resource');out.mkdir(parents=True,exist_ok=True)
+    out=ROOT/('.lab/native-resource-grain' if args.capture_grain else '.lab/native-resource-fl3-curves' if args.fl3_curves else '.lab/native-resource-fl3' if args.fl3 else '.lab/native-resource-fl2' if args.fl2 else '.lab/native-resource');out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
     asm='.syntax unified\n';sections=[];parts=[]
     for va,size,name in PIECES:
@@ -89,7 +93,7 @@ def main():
     if 'NATIVE_RESOURCE_TESTS_PASSED' not in run.stdout or 'FAIL' in run.stdout:raise ValueError('Native UXC parser rejected expanded resource')
     report={'libobj_sha256':OBJ_SHA,'native_components':parts,'locales':metadata,
             'input_proof_sha256':sha((args.after/'proof.json').read_bytes()),
-            'source_sha256':{('research/'+n if args.fl2 or args.fl3 or args.fl3_curves else n):sha((ROOT/'research'/n).read_bytes()) for n in ('native_resource_fixture.py','native_resource_harness.c')},
+            'source_sha256':{('research/'+n if args.fl2 or args.fl3 or args.fl3_curves or args.capture_grain else n):sha((ROOT/'research'/n).read_bytes()) for n in ('native_resource_fixture.py','native_resource_harness.c')},
             'scope':'Original Sony v7 header validation, count/index/data-base extraction, mixed short/long record lookup and record ID/type; all prior entries compared, every new UTF-8 label exact. No OS file loader/cache/font/LCD/camera validation.',
             'flash_ready':False,'log':run.stdout.splitlines()}
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
