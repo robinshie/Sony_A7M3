@@ -44,6 +44,8 @@ static const char temporary[]=".a7fl-r15.new",backup[]=".a7fl-28a7c217.orig",log
 static const char temporary[]=".a7fl-r16.new",backup[]=".a7fl-a44876fb.orig",logname[]="A7FLUP16.LOG";
 #elif NMR_REVISION == 17
 static const char temporary[]=".a7six.new",backup[]=".a7fl-9fcaf13e.orig",logname[]="A7SIXUP.LOG";
+#elif NMR_REVISION == 18
+static const char temporary[]=".a7size.new",backup[]=".a7fl-5fb33e69.orig",logname[]="A7SIZEUP.LOG";
 #elif NMR_REVISION == 1701
 static const char temporary[]=".a7six-zh.new",backup[]=".a7six-zh.orig",logname[]="A7SIXZH.LOG";
 #elif NMR_REVISION == 1702

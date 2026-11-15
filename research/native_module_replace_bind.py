@@ -29,7 +29,7 @@ def bind(old,module,proof,view,out,revision=1):
   resource=json.loads(resource_path.read_text());pin(resource)
   if resource['input_proof_sha256']!=sha(proof):raise ValueError('Locale parser proof mismatch')
  require_capture_release(revision,p)
- if revision==17:
+ if revision in (17,18):
   for name,digest in p['artifact_sha256'].items():
    if sha(module.parent/name)!=digest:raise ValueError('Six-look artifact changed: '+name)
   for name,marker in (('qemu.log',b'NATIVE_FL_SIX_LOOKS_PASSED'),('six-boot.log',b'NATIVE_FL_SIX_BOOT_PASSED')):
@@ -71,7 +71,7 @@ __attribute__((constructor)) static void entry(void){
   obj=out/(name+'.o');subprocess.run(['arm-none-eabi-gcc',*FLAGS,f'-DNMR_WRITE={mode}','-c',str(out/'entry.c'),'-o',str(obj)],cwd=out,check=True)
   target=out/(name+'.so');subprocess.run(['arm-none-eabi-ld','-shared','--no-undefined','-z','noexecstack',*objects,str(obj),'-o',str(target)],check=True)
   payloads[name]={'sha256':sha(target),'size':target.stat().st_size}
- sources={**core['source_sha256'],**{n:sha(ROOT/n) for n in ['research/native_module_replace_bind.py','camera/native_module_replace.py']}}
+ sources={**core['source_sha256'],**{n:sha(ROOT/n) for n in ['research/native_module_replace_bind.py','camera/native_module_replace.py',*(['camera/native_auto_release.py'] if revision==18 else [])]}}
  manifest={'version':revision,'kind':f'native-module-replace-r{revision}','bundle_sha256':binding.hex(),'old':{'sha256':profile['old_sha'],'size':sizes[0]},'new':{'sha256':sha(module),'size':sizes[1]},'view':{'sha256':VIEW,'size':sizes[2]},'module_proof_sha256':sha(proof),'core_proof_sha256':sha(core_path),'action_proof_sha256':sha(action_path),'model_identity_boundary':'Authenticated same-session host check before either payload; native callback does not read model','payloads':payloads,'entry_sha256':sha(out/'entry.c'),'data_sha256':sha(out/'data.S'),'source_sha256':sources,'scope':'Atomic pinned file replacement: '+('/usr/share/app/'+profile['locale'] if 'locale' in profile else '/usr/lib/a7fl.so')+'; no loader, LUT or WBI writes'}
  if 'locale' in profile:manifest['resource_proof_sha256']=sha(resource_path)
  (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n');return manifest

@@ -38,11 +38,16 @@ REVISIONS[1601]=dict(old_sha='bf0e7522ca16885d18630a0fae44a7d57b07dc3f0c5fa12e44
 REVISIONS[1602]=dict(old_sha='2ceb2896e97781a72a001a95fdccbf9b84eab96cdf9048af54b8083e1dc0577d',old_size=393076,temporary='.a7vig-en.new',backup='.a7vig-en.orig',journal='A7VIGEN.LOG',locale='string_english.uxc',resource_set='vignette')
 VIEW_SHA='a1c4d8e88f54f71786ff53bc15a59c32a2969a6ffc934ef77728123d8af172a7'
 REVISIONS[17]=dict(old_sha='9fcaf13e5bcc5914d5721d797f16c3b059dc6f9b0cb99c94eda7632176306fe8',old_size=120468,temporary='.a7six.new',backup='.a7fl-9fcaf13e.orig',journal='A7SIXUP.LOG')
+REVISIONS[18]=dict(old_sha='5fb33e6955b81e02144463e6fb7e09aaa042b3e4df536fd9523854a91d2fa6d5',old_size=124980,temporary='.a7size.new',backup='.a7fl-5fb33e69.orig',journal='A7SIZEUP.LOG')
 REVISIONS[1701]=dict(old_sha='99c3292522faeb0bcd6e8ede63cc2da41baf54ff572901273007fbc2eef9d611',old_size=350388,temporary='.a7six-zh.new',backup='.a7six-zh.orig',journal='A7SIXZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='classic')
 REVISIONS[1702]=dict(old_sha='4e797657592371db1eb1912e73e9c928ac7dbbe93df0d711b26ce5c86f6f47d0',old_size=393104,temporary='.a7six-en.new',backup='.a7six-en.orig',journal='A7SIXEN.LOG',locale='string_english.uxc',resource_set='classic')
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
+ if revision==18:
+  from camera.native_auto_release import require_auto_release
+  require_auto_release(proof)
+  return
  if revision in (16,17):
   if revision==17:
    require(proof.get('look_count')==6 and proof.get('camera_integration') is False and
@@ -232,8 +237,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15,151,16,17):
-  resource_set='fl-classic' if m['version']==17 else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151,16,17,18):
+  resource_set='fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

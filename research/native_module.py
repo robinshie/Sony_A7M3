@@ -57,7 +57,10 @@ def main():
     ap.add_argument('--capture-vignette-bridge-proof',type=Path)
     ap.add_argument('--capture-vignette-basis',type=Path)
     ap.add_argument('--six-looks',action='store_true',help='Build FL4–FL6 with schema 6 for offline verification')
+    ap.add_argument('--auto-size',action='store_true',help='Use the L/M/S geometry backend with its exact-kernel JPEG evidence')
     args=ap.parse_args()
+    if args.auto_size and not (args.six_looks and args.capture_vignette_kernel):
+        ap.error('--auto-size requires the six-look build and its verified spatial kernel')
     vignette_mode=bool(args.capture_vignette_kernel)
     if vignette_mode:
         if args.capture_film_kernel or args.capture_grain_kernel or not args.capture_vignette_bridge_proof:ap.error('Vignette build requires its own kernel and verified bridge')
@@ -114,6 +117,7 @@ def main():
     if args.capture_vignette_menu:OUT=OUT.with_name('native-module-vignette-menu')
     if vignette_mode:OUT=OUT.with_name('native-module-vignette-capture')
     if args.six_looks:OUT=OUT.with_name('native-module-six-looks')
+    if args.auto_size:OUT=OUT.with_name('native-module-six-auto-size')
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'proof.json').unlink(missing_ok=True)
     locale_proof=json.loads((ROOT/'.lab/native-fl-strings/proof.json').read_text())
     for locale,labels in [('simplifiedchinese',('保存','完成','未完成')),('english',('Save','Complete','Not Complete'))]:
@@ -187,7 +191,10 @@ def main():
     grain_kernel_proof=None
     film_ready=False
     if vignette_mode:
-        from capture_vignette_bind import bind
+        if args.auto_size:
+            from capture_auto_bind import bind
+        else:
+            from capture_vignette_bind import bind
         grain_kernel_proof,film_deps,film_ready=bind(args.capture_vignette_kernel.resolve(),args.capture_vignette_bridge_proof.resolve(),args.capture_vignette_basis.resolve() if args.capture_vignette_basis else None,OUT)
         dependency_proofs.update(film_deps)
     elif film_mode:
@@ -528,6 +535,11 @@ call_kernel_writer:
                      feature_scope='Six independent Creative Looks; offline verified only, requires dedicated device deployment and acceptance.')
         n='payloads/a7-fl-classic-looks.h';proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
         for p in ('module-six-boot-test.elf','six-boot.log'):proof['artifact_sha256'][p]=sha((OUT/p).read_bytes())
+    if args.auto_size:
+        proof.update(capture_auto_size=True,ready_for_staging=film_ready,
+                     feature_scope='Six Creative Looks with dynamic source ROI, stride and dimensions for capture-only grain, signed halation and vignette; full-frame 3:2 JPEG L/M/S. Cold-boot acceptance required.')
+        for n in ('research/capture_auto_bind.py','research/capture_auto_fetch.py'):
+            proof['source_sha256'][n]=sha((ROOT/n).read_bytes())
     (OUT/'proof.json').write_text(json.dumps(proof,indent=2)+'\n')
 
 if __name__=='__main__':main()

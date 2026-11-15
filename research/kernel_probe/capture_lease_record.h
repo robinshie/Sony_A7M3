@@ -6,6 +6,9 @@
 #include "capture_early_record.h"
 #undef source_publish
 #include "dmm-close-pins.h"
+#ifdef A7_AUTO_SIZE
+#include "capture_auto_geometry.h"
+#endif
 extern int arch_phys_to_cachetype2(unsigned long,unsigned long);
 static int (*native_open)(unsigned,unsigned,void *,unsigned short *);
 static int (*native_close)(unsigned);
@@ -49,10 +52,20 @@ static int take_lease_test(void)
     if((physical!=0x1a000000&&physical!=0x24000000)||
        report[257]!=physical||report[258]||report[259]!=0x3000000)return -EINVAL;
 #endif
+#ifdef A7_AUTO_SIZE
+    {
+        struct a7_capture_geometry geometry;
+        if(auto_geometry(&geometry))return -EINVAL;
+    }
+    if(((handle&0x3ff)+((handle>>15)<<10))>=0x580 ||
+       (report[40+0xbc/4]&255)!=1 || report[40+0xc0/4]!=physical ||
+       report[40+0xc4/4]!=0x3000000)return -EINVAL;
+#else
     /* Exact observed image, source handle and idle stage guard. No pixel access. */
     if(((handle&0x3ff)+((handle>>15)<<10))>=0x580 || report[40+0x90/4]!=0x0fa01770 || report[40+0x94/4]!=0x0fa017c0 ||
        report[40+0x98/4]!=80 || (report[40+0xbc/4]&255)!=1 ||
        report[40+0xc0/4]!=physical || report[40+0xc4/4]!=0x3000000)return -EINVAL;
+#endif
     for(acquired=184;acquired<208;acquired++)if(report[acquired])return -EBUSY;
     if(in_interrupt() || irqs_disabled() || in_atomic())return -EWOULDBLOCK;
     report[305]=arch_phys_to_cachetype2(physical,0x3000000);

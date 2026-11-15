@@ -34,9 +34,9 @@ class Factory:
   st,data=self.read(path,maximum);check(st==(0,0),'existing mock contents');return data
  def read(self,path,maximum=1048576):
   values={bundle.target:self.e.disk,host.VIEW:view,bundle.backup:self.e.backup,bundle.journal:self.e.log,bundle.temporary:None}
-  if m['version'] in (11,12,13,14,15,151,16,17):
+  if m['version'] in (11,12,13,14,15,151,16,17,18):
    for name in ('string_simplifiedchinese.uxc','string_english.uxc'):
-    value=(ROOT/('.lab/native-fl-classic-strings' if m['version']==17 else '.lab/native-fl-vignette-strings' if m['version']==16 else '.lab/native-fl-halation-strings' if m['version']==151 else '.lab/native-fl-grain-strings' if m['version']==15 else '.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
+    value=(ROOT/('.lab/native-fl-classic-strings' if m['version'] in (17,18) else '.lab/native-fl-vignette-strings' if m['version']==16 else '.lab/native-fl-halation-strings' if m['version']==151 else '.lab/native-fl-grain-strings' if m['version']==15 else '.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
     if self.e.bad_locale==name:value=value[:-1]+bytes([value[-1]^1])
     values['/usr/share/app/'+name]=value
   check(path in values,'bounded file read path');v=values[path]
@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(dir=B) as temp:
  check((root/'good/write-intent.json').exists() and (root/'good/device-journal.json').exists(),'intent and exact journal retained')
  for name,field,value in [('model','model',b'OTHER'+bytes(11)),('wbi','wbi_zero',False),('preflight-fail','fail_preflight',True),('existing-journal','log',b'old')]:
   env=Env();setattr(env,field,value);reject(env,name,True);check(env.writes==0,'guard sends no writer: '+name)
- if m['version'] in (151,16,17):
+ if m['version'] in (151,16,17,18):
   for name in ('string_simplifiedchinese.uxc','string_english.uxc'):
    env=Env();env.bad_locale=name;reject(env,'wrong-'+name,True)
    check(env.writes==0 and env.preflights==0,'new module requires matching installed locale: '+name)

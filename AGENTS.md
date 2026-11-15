@@ -1,6 +1,10 @@
 # A7M3 默认开发和发布流程
 
-**当前已安装并验收：v0.01 六风格整合版（2026-11-15）。** 三个文件写入并完整回读通过；模块 `5fb33e6955b81e02144463e6fb7e09aaa042b3e4df536fd9523854a91d2fa6d5`，124,980 字节。简中 `741921ec85bd0eea18571479bdd5d0681f78a9d99bacff30305e8721792e40d6`，英文 `92843d50a15f6d94e95b51eaec0fba7a5a646366f7b954bac05f3c81b923e1f4`。两个设置槽及两个工作记录完整保留。用户保存后已迁移为 schema 6。已执行包 `.lab/native-fl-releases/update-v001-six-looks-3bxdg1m7`，证据 `write-1794736027226316000/verified.json`。禁止重复执行，也不能再按 r16 前像直接重刷。下文 r16 是上一已验收基线，不是当前磁盘内容。
+**当前已安装并验收：v0.01 六风格 JPEG L/M/S 适配版（2026-11-15）。** 当前磁盘模块 SHA-256 `e5a530c3fe3790b829d3ee0cca7ff2628bf6a7a24f952c4f3cf46bcad8316feb`，126,480 字节。仅替换 a7fl.so；旧 5fb33e69 模块备份、完整新模块回读一致，四份配置字节不变，加载器、两种语言资源和 WBI 保持原值，/usr 已恢复只读。已执行 `.lab/native-fl-releases/update-v001-auto-size-xd7cs4kh`，证据 `write-1794742237131275000/verified.json`。禁止重复执行，也不能再按旧六风格前像重刷。
+
+新内核 `.lab/capture-kernel/1794741362254373000`，`a7capauto` / SHA-256 `707362fc67da61b834757849fa056a2bb4c6d80a09f9469743e0a02e19f7bc0f`。同一二进制临时实拍 L/M/S 完成 3、失败 0，颗粒 9、光晕 +9、暗角 −9；自身源像素及 JPEG 对照通过。用户已确认冷启动六个 FL 和 M/S 拍摄回放正常。只读核对 resident-ready、无故障，内核 armed、diagnostic=0，当前开机累计处理完成 5 次、失败 0 次；最后源帧为 S 布局（3008×4000，stride 12000，offset 160）。保存与运行值一致：schema 6 / generation 66、FL、颗粒 3、光晕 +3、暗角 −3、dirty=0。验收证据 `.lab/auto-size-resident-read/1794742632436575000/acceptance-final.json`。回读工具 `research/auto_size_resident_read.py`：使用此包 `18` 绑定、`.lab/native-inspect-auto-size` 检查器及上述内核；只读，不重新加载。公开发布沿用同一个 GitHub v0.01 和同名 ZIP，发布包从完整回读的模块与冷启动验收记录生成。具体流程见 [尺寸适配](docs/jpeg-size-adaptation.md)。下方六风格为上一已验收基线。
+
+**上一已验收基线：v0.01 六风格整合版（2026-11-15）。** 三个文件写入并完整回读通过；模块 `5fb33e6955b81e02144463e6fb7e09aaa042b3e4df536fd9523854a91d2fa6d5`，124,980 字节。简中 `741921ec85bd0eea18571479bdd5d0681f78a9d99bacff30305e8721792e40d6`，英文 `92843d50a15f6d94e95b51eaec0fba7a5a646366f7b954bac05f3c81b923e1f4`。两个设置槽及两个工作记录完整保留。用户保存后已迁移为 schema 6。已执行包 `.lab/native-fl-releases/update-v001-six-looks-3bxdg1m7`，证据 `write-1794736027226316000/verified.json`。禁止重复执行，也不能再按 r16 前像直接重刷。下文 r16 是上一已验收基线，不是当前磁盘内容。
 
 用户已确认六个入口、FL4/5/6 拍照回放、独立参数保存重启正常。只读证据 `.lab/six-look-resident-read/1794736279562870000/six-look-status.json`：resident-ready、无错误、schema 6 / generation 61，最后保存 FL4，当前 FL 有未保存修改；用户确认这是测试后主动切换和修改。内核 armed、diagnostic=0、failed=0；最后重启后 completed=0，不据此声称重启后已拍摄。读取使用 `research/six_look_resident_read.py`、上述包的 `17` 绑定、`.lab/native-inspect-six-looks` 和同一内核 `.lab/capture-kernel/1794730878828623000`。公开版统一 v0.01，源码同步 main，不单独发布 r。完整附件使用 `tools/package_six_release.py`，需真实验收记录并在干净提交上打包。
 
@@ -12,7 +16,7 @@
 
 具体命令见 [机内菜单模块](docs/native-creative-look.md#构建与验证顺序)。涉及加载器、语言资源或配置格式的改动单独验证。生成的更新包、固件、相机备份和照片保存在忽略提交的 `.lab/` 中。
 
-当前本机验收基线为 **r16 正负暗角**（2026-11-15）。模块 `9fcaf13e5bcc5914d5721d797f16c3b059dc6f9b0cb99c94eda7632176306fe8`，120,468 字节；简中 `99c3292522faeb0bcd6e8ede63cc2da41baf54ff572901273007fbc2eef9d611`，英文 `4e797657592371db1eb1912e73e9c928ac7dbbe93df0d711b26ce5c86f6f47d0`。用户确认冷启动入口、三个 FL、正负暗角效果正常，+9 重启保留，随后主动改回 −9 并保存。只读核对 resident-ready、无错误、内核 diagnostic=0，处理成功 2 张、失败 0 张；generation 55 / schema 5 的 FL3 颗粒 0、光晕 0、暗角 −9 与运行状态一致，上一槽 generation 54 保留 +9。保留用户当前设置，不擅自改回默认值。验收仅覆盖全画幅 3:2 JPEG L 拍后暗角，不声称实时、RAW 或其它几何已验证。最终证据 `.lab/vignette-resident-read/1794733214834355000/acceptance-final.json`。
+历史验收基线为 **r16 正负暗角**（2026-11-15）。模块 `9fcaf13e5bcc5914d5721d797f16c3b059dc6f9b0cb99c94eda7632176306fe8`，120,468 字节；简中 `99c3292522faeb0bcd6e8ede63cc2da41baf54ff572901273007fbc2eef9d611`，英文 `4e797657592371db1eb1912e73e9c928ac7dbbe93df0d711b26ce5c86f6f47d0`。用户确认冷启动入口、三个 FL、正负暗角效果正常，+9 重启保留，随后主动改回 −9 并保存。只读核对 resident-ready、无错误、内核 diagnostic=0，处理成功 2 张、失败 0 张；generation 55 / schema 5 的 FL3 颗粒 0、光晕 0、暗角 −9 与运行状态一致，上一槽 generation 54 保留 +9。保留用户当前设置，不擅自改回默认值。验收仅覆盖全画幅 3:2 JPEG L 拍后暗角，不声称实时、RAW 或其它几何已验证。最终证据 `.lab/vignette-resident-read/1794733214834355000/acceptance-final.json`。
 
 包 `.lab/native-fl-releases/update-r16-vignette-21etjldm/` 已执行，写入证据 `write-1794732914378618000/verified.json`；三个文件完整回读一致，安装过程用户配置未变。禁止再次执行此包或按旧 r15 前像直接重刷。后续只读使用 `research/vignette_resident_read.py`、检查器 `.lab/native-inspect-vignette-r16` 和同内核 `.lab/capture-kernel/1794730878828623000`。详见 [暗角记录](docs/vignette.md)。
 

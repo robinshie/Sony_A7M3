@@ -16,35 +16,49 @@ def build(a):
     av, kernel = a.avcam.read_bytes(), a.kernel.read_bytes()
     if sha(av)!=PINS['avcam'] or sha(kernel)!=PINS['kernel'] or sha(a.liro.read_bytes())!=LIRO_PIN:
         raise ValueError('Requires pinned original firmware')
-    vignette = a.route == 'vignette'
-    film = a.route in ('film','vignette')
-    halo = a.route in ('halation','film','vignette')
-    banks = a.route in ('banks','halation','film','vignette')
-    repeat = a.route in ('repeat','banks','halation','film','vignette')
+    layout = a.route == 'layout'
+    geometry = a.route in ('geometry','layout')
+    auto_size = a.route == 'auto'
+    vignette = a.route in ('vignette','auto')
+    film = a.route in ('film','vignette','auto')
+    halo = a.route in ('halation','film','vignette','auto')
+    banks = a.route in ('banks','halation','film','vignette','auto')
+    repeat = a.route in ('repeat','banks','halation','film','vignette','auto')
     fast = a.route == 'fast'
-    full = a.route in ('full','fast','repeat','banks','halation','film','vignette')
-    grain = a.route in ('grain','full','fast','repeat','banks','halation','film','vignette')
-    lease = a.route in ('lease','grain','full','fast','repeat','banks','halation','film','vignette')
-    early = a.route in ('early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
-    frame = a.route in ('frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
-    vfx = a.route in ('vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
+    full = a.route in ('full','fast','repeat','banks','halation','film','vignette','auto')
+    grain = a.route in ('grain','full','fast','repeat','banks','halation','film','vignette','auto')
+    lease = a.route in ('lease','grain','full','fast','repeat','banks','halation','film','vignette','auto')
+    early = a.route in ('layout','geometry','early','lease','grain','full','fast','repeat','banks','halation','film','vignette','auto')
+    frame = a.route in ('layout','geometry','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette','auto')
+    vfx = a.route in ('layout','geometry','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette','auto')
     detail = a.route == 'detail'
-    multi = a.route in ('multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette')
-    fixture_path=ROOT/('.lab/capture-vignette-test/proof.json' if vignette else '.lab/capture-film-test/proof.json' if film else '.lab/capture-halation-test/proof.json' if halo else '.lab/capture-banks-test/proof.json' if banks else '.lab/capture-repeat-test/proof.json' if repeat else '.lab/capture-fast-test/proof.json' if fast else '.lab/capture-full-test/proof.json' if full else '.lab/capture-grain-test/proof.json' if grain else '.lab/capture-lease-test/proof.json' if lease else '.lab/capture-early-test/proof.json' if early else '.lab/capture-frame-test/proof.json' if frame else '.lab/capture-vfx-test/proof.json' if vfx else '.lab/capture-detail-test/proof.json' if detail else '.lab/capture-multi-test/proof.json' if multi else '.lab/jpeg-kernel-callback/proof.json')
+    multi = a.route in ('layout','geometry','multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette','auto')
+    fixture_path=ROOT/('.lab/capture-auto-test/proof.json' if auto_size else '.lab/capture-layout-test/proof.json' if layout else '.lab/capture-vignette-test/proof.json' if vignette else '.lab/capture-film-test/proof.json' if film else '.lab/capture-halation-test/proof.json' if halo else '.lab/capture-banks-test/proof.json' if banks else '.lab/capture-repeat-test/proof.json' if repeat else '.lab/capture-fast-test/proof.json' if fast else '.lab/capture-full-test/proof.json' if full else '.lab/capture-grain-test/proof.json' if grain else '.lab/capture-lease-test/proof.json' if lease else '.lab/capture-early-test/proof.json' if early else '.lab/capture-frame-test/proof.json' if frame else '.lab/capture-vfx-test/proof.json' if vfx else '.lab/capture-detail-test/proof.json' if detail else '.lab/capture-multi-test/proof.json' if multi else '.lab/jpeg-kernel-callback/proof.json')
     fixture = json.loads(fixture_path.read_text())
     if not fixture.get('bridge_and_exception_abi_tested' if multi else 'kernel_callback_bridge_tested') or any(
         sha((ROOT/n).read_bytes())!=v for n,v in fixture['source_sha256'].items()):
         raise ValueError('Run the current QEMU callback fixture first')
     if grain:
-        pixel_fixture=json.loads((ROOT/('.lab/capture-vignette-record/proof.json' if vignette else '.lab/capture-film-record/proof.json' if film else '.lab/capture-halation-record/proof.json' if halo else '.lab/capture-full-record/proof.json' if full else '.lab/capture-grain-record/proof.json')).read_text())
+        pixel_fixture=json.loads((ROOT/('.lab/capture-auto-record/proof.json' if auto_size else '.lab/capture-vignette-record/proof.json' if vignette else '.lab/capture-film-record/proof.json' if film else '.lab/capture-halation-record/proof.json' if halo else '.lab/capture-full-record/proof.json' if full else '.lab/capture-grain-record/proof.json')).read_text())
         if not pixel_fixture.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in pixel_fixture['source_sha256'].items()):
             raise ValueError('Run current bounded grain/lease/rollback fixture first')
     if repeat:
-        control_fixture=json.loads((ROOT/('.lab/capture-vignette-control/proof.json' if vignette else '.lab/capture-film-control/proof.json' if film else '.lab/capture-halation-control/proof.json' if halo else '.lab/capture-repeat-control/proof.json')).read_text())
+        control_fixture=json.loads((ROOT/('.lab/capture-auto-control/proof.json' if auto_size else '.lab/capture-vignette-control/proof.json' if vignette else '.lab/capture-film-control/proof.json' if film else '.lab/capture-halation-control/proof.json' if halo else '.lab/capture-repeat-control/proof.json')).read_text())
         if not control_fixture.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in control_fixture['source_sha256'].items()):
             raise ValueError('Run current repeat selection and dispatch fixture first')
+    if auto_size:
+        dimensions=json.loads((ROOT/'.lab/capture-auto-geometry/proof.json').read_text())
+        if not dimensions.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in dimensions['source_sha256'].items()):
+            raise ValueError('Run current real-metadata geometry/consumer audit first')
     out = ROOT/'.lab/capture-kernel'/str(time.time_ns()); out.mkdir(parents=True)
     chosen = SOURCES[:2]+(['research/kernel_probe/capture_early.c','research/kernel_probe/capture_frame.c','research/kernel_probe/capture_early_bridge.S','research/kernel_probe/capture_early_record.h'] if early else ['research/kernel_probe/capture_frame.c','research/kernel_probe/capture_frame_bridge.S','research/kernel_probe/a7source.c'] if frame else ['research/kernel_probe/capture_vfx.c','research/kernel_probe/capture_vfx_bridge.S'] if vfx else ['research/kernel_probe/capture_detail.c','research/kernel_probe/capture_detail_bridge.S','research/kernel_probe/capture_detail_record.h'] if detail else ['research/kernel_probe/capture_multi.c','research/kernel_probe/capture_multi_bridge.S'] if multi else SOURCES[2:])
+    if geometry:
+        chosen=[n for n in chosen if not n.endswith('/capture_early.c')]+['research/kernel_probe/capture_geometry.c','research/kernel_probe/capture_geometry_record.h']
+        geo_fixture=json.loads((ROOT/('.lab/capture-layout-record/proof.json' if layout else '.lab/capture-geometry-record/proof.json')).read_text())
+        if not geo_fixture.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in geo_fixture['source_sha256'].items()):
+            raise ValueError('Run current geometry recorder fixture first')
+    if layout:
+        chosen=[n for n in chosen if not n.endswith(('/capture_geometry.c','/capture_early_bridge.S'))]+['research/kernel_probe/capture_layout.c','research/kernel_probe/capture_layout_record.h','research/kernel_probe/capture_layout_bridge.S']
     if detail:
         sampler=json.loads((ROOT/'.lab/capture-detail-record/proof.json').read_text())
         if not sampler.get('passed') or any(sha((ROOT/n).read_bytes())!=v for n,v in sampler['source_sha256'].items()):
@@ -67,13 +81,23 @@ def build(a):
         chosen=[n for n in chosen if 'capture_halation' not in n]+['research/kernel_probe/capture_film.c','research/kernel_probe/capture_film_bridge.S','research/kernel_probe/capture_film_control.h','research/kernel_probe/capture_film_record.h']
     if vignette:
         chosen=[n for n in chosen if 'capture_film' not in n]+['research/kernel_probe/capture_vignette.c','research/kernel_probe/capture_vignette_bridge.S','research/kernel_probe/capture_vignette_control.h','research/kernel_probe/capture_vignette_record.h','research/kernel_probe/vignette_core.c','payloads/a7-film-vignette.c','payloads/a7-film-vignette.h']
+    if auto_size:
+        chosen=[n for n in chosen if not n.endswith(('/capture_vignette_bridge.S','/capture_vignette_record.h'))]+['research/kernel_probe/capture_auto.c','research/kernel_probe/capture_auto_bridge.S','research/kernel_probe/capture_auto_record.h','research/kernel_probe/capture_auto_geometry.h','payloads/a7-capture-geometry.h']
     sources = {n:sha((ROOT/n).read_bytes()) for n in chosen}
     identity = list(struct.unpack('<4I', hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).digest()[:16]))
-    name='a7capvig' if vignette else 'a7capfilm' if film else 'a7caphalo3' if halo else 'a7capbanks' if banks else 'a7caprepeat' if repeat else 'a7capfast' if fast else 'a7capfull' if full else 'a7capgrain' if grain else 'a7caplease' if lease else 'a7capearly' if early else 'a7capframe' if frame else 'a7capvfx' if vfx else 'a7capdetail' if detail else 'a7capmulti' if multi else 'a7capture'
+    name='a7capauto' if auto_size else 'a7caplayout' if layout else 'a7capgeom' if geometry else 'a7capvig' if vignette else 'a7capfilm' if film else 'a7caphalo3' if halo else 'a7capbanks' if banks else 'a7caprepeat' if repeat else 'a7capfast' if fast else 'a7capfull' if full else 'a7capgrain' if grain else 'a7caplease' if lease else 'a7capearly' if early else 'a7capframe' if frame else 'a7capvfx' if vfx else 'a7capdetail' if detail else 'a7capmulti' if multi else 'a7capture'
     units=('capture_halation.c','capture_halation_bridge.S','grain_core.c') if halo else ('capture_banks.c','capture_banks_bridge.S','grain_core.c') if banks else ('capture_repeat.c','capture_repeat_bridge.S','grain_core.c') if repeat else ('capture_fast.c','capture_fast_bridge.S','grain_core.c') if fast else ('capture_full.c','capture_full_bridge.S','grain_core.c') if full else ('capture_grain.c','capture_grain_bridge.S','grain_core.c') if grain else ('capture_lease.c','capture_lease_bridge.S') if lease else ('capture_early.c','capture_early_bridge.S') if early else ('capture_frame.c','capture_frame_bridge.S') if frame else ('capture_vfx.c','capture_vfx_bridge.S') if vfx else ('capture_detail.c','capture_detail_bridge.S') if detail else ('capture_multi.c','capture_multi_bridge.S') if multi else ('capture_probe.c','capture_bridge.S')
+    if geometry:units=('capture_geometry.c','capture_early_bridge.S')
+    if layout:units=('capture_layout.c','capture_layout_bridge.S')
     if film:units=('capture_film.c','capture_film_bridge.S','grain_core.c')
     if vignette:units=('capture_vignette.c','capture_vignette_bridge.S','grain_core.c','vignette_core.c')
+    if auto_size:units=('capture_auto.c','capture_auto_bridge.S','grain_core.c','vignette_core.c')
     (out/'Makefile').write_text(f'obj-m += {name}.o\n{name}-y := '+ ' '.join(Path(n).stem+'.o' for n in units)+'\n')
+    if auto_size:
+        for n in ('capture_vignette.c','capture_auto_record.h','capture_auto_geometry.h'):shutil.copyfile(ROOT/'research/kernel_probe'/n,out/n)
+        shutil.copyfile(ROOT/'payloads/a7-capture-geometry.h',out/'a7-capture-geometry.h')
+    if geometry:shutil.copyfile(ROOT/'research/kernel_probe/capture_geometry_record.h',out/'capture_geometry_record.h')
+    if layout:shutil.copyfile(ROOT/'research/kernel_probe/capture_layout_record.h',out/'capture_layout_record.h')
     if halo:
         for n in ('capture_halation_control.h','capture_halation_record.h'):shutil.copyfile(ROOT/'research/kernel_probe'/n,out/n)
     if film:
@@ -201,15 +225,15 @@ def run(out,action):
         if action=='arm' and (values[1]!=1 or values[11]!=1):raise ValueError('Probe not armed')
         if action=='collect' and values[5]!=1:raise ValueError('Probe was not disarmed')
         result.update(verified=True,values=values,module_pinned_until_reboot=bool(values[11]))
-        if proof.get('route') in ('early','lease','grain','full','fast','repeat','banks','halation','film','vignette'):
+        if proof.get('route') in ('layout','geometry','early','lease','grain','full','fast','repeat','banks','halation','film','vignette','auto'):
             result['early_source']=dict(state=values[17],status=values[18] if values[18]<0x80000000 else values[18]-0x100000000,handle=hex(values[21]),unit=hex(values[22]),dmm_root=hex(values[20]),open_count=(values[228]>>8)&255,rendezvous=(values[228]>>16)&255,generation=values[228]>>24,unit_state=values[229]&65535,extent_count=values[229]>>16,extent_words=[hex(x) for x in values[256:268]])
-        if proof.get('route') in ('lease','grain','full','fast','repeat','banks','halation','film','vignette'):
+        if proof.get('route') in ('lease','grain','full','fast','repeat','banks','halation','film','vignette','auto'):
             result['lease_test']=dict(attempted=bool(values[309]),passed=bool(values[310]),cache_type=values[305],open_status=values[306],close_status=values[307],count=values[308])
-        if proof.get('route') in ('grain','full','fast','repeat','banks','halation','film','vignette'):
+        if proof.get('route') in ('grain','full','fast','repeat','banks','halation','film','vignette','auto'):
             result['grain_patch']=dict(state=values[344],status=values[345],changed=values[346],ticks=values[348],rollback=values[350],private_selftest=values[352])
-            result['grain_patch']['processed_luma_pixels' if proof.get('route') in ('full','fast','repeat','banks','halation','film','vignette') else 'written_luma_bytes']=values[349]
+            result['grain_patch']['processed_luma_pixels' if proof.get('route') in ('full','fast','repeat','banks','halation','film','vignette','auto') else 'written_luma_bytes']=values[349]
             if values[349]:proof['image_pixels_written']=True
-        if proof.get('route') in ('repeat','banks','halation','film','vignette'):
+        if proof.get('route') in ('repeat','banks','halation','film','vignette','auto'):
             result['repeat']=dict(selection=values[353],seed=values[354],completed=values[355],skipped_off=values[356],failed=values[357])
         if proof.get('route')=='frame':
             result['source_sample']=dict(state=values[17],status=values[18] if values[18]<0x80000000 else values[18]-0x100000000,rows=values[19],va=hex(values[20]),base=hex(values[21]))
@@ -246,7 +270,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('action',choices=['build','selftest','arm','collect'])
     p.add_argument('--bundle',type=Path)
-    p.add_argument('--route',choices=['stage','multi','detail','vfx','frame','early','lease','grain','full','fast','repeat','banks','halation','film','vignette'],default='stage')
+    p.add_argument('--route',choices=['stage','multi','detail','vfx','frame','early','geometry','layout','lease','grain','full','fast','repeat','banks','halation','film','vignette','auto'],default='stage')
     p.add_argument('--vignette-diagnostic',action='store_true')
     for name in ('avcam','kernel','liro','kernel-source','dmm'):p.add_argument('--'+name,type=Path)
     a=p.parse_args()
