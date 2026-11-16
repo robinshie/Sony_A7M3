@@ -29,6 +29,11 @@ def verify(archive_path):
             if hashlib.sha256((app/name).read_bytes()).hexdigest() != checksum:
                 raise ValueError('Bundle checksum mismatch: '+name)
         executable = app/('A7M3-Tool.exe' if sys.platform == 'win32' else 'A7M3-Tool')
+        runtime = subprocess.run([str(executable),'--usb-runtime-check'],cwd=root,
+                                 capture_output=True,check=True,timeout=30)
+        runtime_status = json.loads(runtime.stdout)
+        assert runtime_status == dict(libusb_loaded=True,crypto_loaded=True,
+                                      protocol_imported=True,devices_enumerated=False)
         process = subprocess.Popen([str(executable),'--no-browser'], cwd=root,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         lines = queue.Queue()
@@ -52,6 +57,8 @@ def verify(archive_path):
                     return json.load(response)
             status = post('status',{})
             assert len(status['recipes']) == 12 and status['install_enabled'] is False
+            assert all(status['usb_dependencies'].values()),status['usb_dependencies']
+            assert post('first-install/status',{})['phase']=='idle'
             card = root/'test-card'; card.mkdir(); (card/'DCIM').mkdir()
             result = post('copy',{'path':str(card),'records':[status['recipes'][0]]})
             assert result['ok'] is True and len(result['files']) == 1

@@ -8,12 +8,12 @@
 <aside><p class="eyebrow">工作区</p><nav aria-label="工具页面">
 <button data-page="recipes" class="nav active" aria-current="page">01　配方与 SD 卡</button>
 <button data-page="package" class="nav">02　完整包校验</button>
-<button data-page="install" class="nav">03　安装与使用指南</button>
+<button data-page="install" class="nav">03　原厂首次安装</button>
 </nav><div class="aside-note"><span class="dot"></span>仅在本机运行<p>文件与配方不上传。<br>适用于 Windows / macOS / Linux。</p></div></aside>
 <main>
 <section id="recipes" class="page">
 <div class="heading"><div><p class="eyebrow">CREATIVE LOOK LIBRARY</p><h1>把喜欢的配色，带进相机。</h1><p class="subtitle">选配方 → 复制到 SD 卡 → 机内确认导入。需先装好项目的「创意外观」功能。</p></div></div>
-<div class="notice">本工具可管理配方、校验完整包；当前不具备固件刷写功能。纯原厂 4.04 请先看「安装与使用指南」。</div>
+<div class="notice">配方管理可正常使用。原厂首次安装后端为实验候选，尚未经原厂机验收；请看「原厂首次安装」。</div>
 <div class="card sd"><div><h2>01 / 选择 SD 卡</h2><p>相机大容量存储接电脑时，不要同时分配给 UTM。也可使用读卡器。</p></div>
 <div class="row"><label for="card-path" class="sr-only">SD 卡根目录</label><input id="card-path" list="card-options" placeholder="自动扫描，或填写 E:\ / /Volumes/Untitled"><datalist id="card-options"></datalist><button id="scan">扫描</button><button id="read-card">查看卡上配方</button></div><div id="card-list" class="card-list"></div></div>
 <div class="library-layout"><div class="card library"><div class="section-top"><h2>02 / 选择配方</h2><button id="add-files">添加 .a7look</button><input id="recipe-files" type="file" accept=".a7look" multiple hidden></div>
@@ -28,7 +28,18 @@
 <div class="card"><h2>本地 ZIP</h2><input id="package-file" type="file" accept=".zip"><label class="block">发布页提供的 SHA-256（可选）<input id="expected-hash" placeholder="64 位十六进制；填写后同时验证 ZIP 外部校验值"></label><button id="verify-package" class="primary">校验完整包</button><p class="muted">包内校验只能证明内部一致性；请从项目 Release 下载并比对发布页校验值。</p></div>
 <div id="package-result" class="card" hidden></div></section>
 <section id="install" class="page" hidden><p class="eyebrow">SETUP GUIDE</p><h1>先安装功能，再自由导入。</h1><p class="subtitle">区分机身固件安装与 SD 配方导入，避免把复制完成误认为刷机完成。</p>
-<div class="card"><h2>纯原厂 ILCE-7M3 4.04</h2><p id="install-reason"></p><p>当前完整包包含模块、菜单增量与源码，但不能通过官方更新器安装，也不能仅复制到 SD 卡生效。</p><button disabled>首次安装 · 后端未接通</button><p class="muted">还需完成：通用机身检测 → 逐机备份与原厂前像核对 → 加载器、菜单和模块安装 → 回读 → 纯原厂机冷启动验收。现有开发机的升级记录不能替代首次安装验证。</p></div>
+<div class="card"><h2>纯原厂 ILCE-7M3 4.04 · 实验候选</h2><p id="install-reason"></p>
+<p class="notice">只接受匹配的纯原厂机。已安装项目功能的相机会在前像检查时停止。当前相机与 Windows USB 实物链路尚未验收，可能出现无法启动；已有备份也不保证可恢复。请勿把这个实验候选作为稳定版分发。</p>
+<p>操作顺序：选专用候选包 → 读取并备份 → 核对结果 → 单独确认写入 → 断电验收。普通 v0.01 ZIP 不适用于此入口。</p>
+<label class="block">首次安装候选 ZIP<input id="install-file" type="file" accept=".zip"></label>
+<label class="block">候选包 SHA-256（必填）<input id="install-hash" placeholder="与候选包同时提供的 64 位校验值"></label>
+<label class="block"><input type="checkbox" id="install-ack"> 我了解这是真实写入实验候选，尚未经原厂机验收</label>
+<label class="block"><input type="checkbox" id="install-switch"> 允许将所连接相机从大容量存储切换到服务模式（Windows / Linux）</label>
+<p id="usb-deps" class="muted"></p><button id="install-prepare">读取机身并备份</button>
+<pre id="install-status" class="package-details">未连接相机。启动工具不会自动扫描或切换 USB。</pre>
+<label class="block">备份通过后输入「安装到原厂 4.04」<input id="install-confirm-text" placeholder="安装到原厂 4.04"></label>
+<div class="row"><button id="install-confirm" disabled>确认写入全部功能</button><button id="install-cancel" disabled>取消本次安装</button></div>
+<p class="muted">Windows 需要两个 USB 模式的兼容驱动。Mac 当前只支持已通过 UTM 交回 Mac 的服务模式设备。保存写入时不要退出工具；发生错误会停止，不自动重试。</p></div>
 <div class="card"><h2>机内已有「从 SD 卡导入」</h2><ol class="steps"><li>相机设为「大容量存储」，用 Micro-USB 接电脑；Mac 暂不分配给 UTM。</li><li>在「配方与 SD 卡」选卡根目录、选配方，点击「复制所选到 SD 卡」，等回读完成。</li><li>Windows 在资源管理器、Mac 在 Finder、Linux 在文件管理器中安全推出。等存取灯熄灭后拔 USB。</li><li>MENU → 拍摄设置 1 → 第 14 页 → 同级「从 SD 卡导入」。左右选文件，确认导入，等「完成」。</li><li>进入「创意外观」，选择新增风格；调整后保存 → 确认。拍 JPEG 并回放，重启检查保留。</li></ol><p class="muted">卡根目录最多列 32 份配方；机内最多 16 个自定义外观（满额实机尚未逐项验证）。重复 ID 不能直接覆盖；需要时从机内删除旧自定义项后重新导入。</p></div>
 <div class="card"><h2>找不到卡 / 连接失败</h2><p>先确认电脑能在文件管理器里打开 SD 卡。如果已把 USB 分配给 UTM，请先释放，再按需重新插线。只有 USB 设备名、没有存储卷时，本工具无法复制文件。</p><p>不要选择 PMHOME 或电脑系统盘。选择包含 DCIM 的存储卡根目录；扫描不到时可手动填路径。GUI 不会自动改 USB 驱动或接管虚拟机。</p></div></section>
 <section class="card activity"><div class="section-top"><h2>操作记录</h2><button id="export-log" class="quiet">导出记录</button></div><pre id="log" role="log" aria-live="polite">等待操作。</pre></section>

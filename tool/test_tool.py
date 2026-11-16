@@ -168,5 +168,12 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(error.exception.code,404)
         error.exception.close()
 
+    def test_first_install_requires_ack_before_any_device_job(self):
+        req=urllib.request.Request(self.server.origin+'/api/first-install/prepare',data=b'{}',method='POST',
+            headers={'Origin':self.server.origin,'X-A7-Token':self.server.token})
+        with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
+        error.exception.close()
+        self.assertEqual(self.server.installer.snapshot()['phase'],'idle')
+
 
 if __name__ == '__main__': unittest.main()

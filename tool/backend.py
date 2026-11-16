@@ -16,8 +16,8 @@ from custom_look_recipes import MAX_BYTES, encode, parse
 from look_recipes import FIELDS, LABELS, LOW, HIGH, LOOKS
 
 MAX_ZIP = 64 * 1024 * 1024
-INSTALL_REASON = ('原厂 4.04 首次安装尚未验收；现有部署脚本绑定开发机前像、加载器与私有备份。'
-                  '此工具未接入刷写后端，不能安装或更新机身固件。')
+INSTALL_REASON = ('已加入原厂 4.04 实验安装后端；须使用专用实验候选包，先备份检查，再单独确认写入。'
+                  '原厂机首次安装及 Windows 实物 USB 尚未验收。公开 v0.01 旧包不能用于此入口。')
 
 
 def digest(data):

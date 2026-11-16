@@ -16,12 +16,13 @@ ROOT = TOOL.parent
 
 def stage(dest):
     dest.mkdir(parents=True)
-    for name in ('app.py', 'backend.py', 'README.md', 'Start-Windows.cmd', 'Start-macOS.command', 'start-linux.sh'):
+    for name in ('app.py', 'backend.py', 'first_install.py', 'usb_transport.py', 'requirements-usb.txt', 'README.md', 'Start-Windows.cmd', 'Start-macOS.command', 'start-linux.sh'):
         shutil.copy2(TOOL/name, dest/name)
     shutil.copytree(TOOL/'web', dest/'web')
+    shutil.copytree(TOOL/'vendor', dest/'vendor',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     shutil.copy2(TOOL/'screenshot.jpg', dest/'screenshot.jpg')
     (dest/'lib').mkdir()
-    for name in ('custom_look_recipes.py', 'look_recipes.py'):
+    for name in ('custom_look_recipes.py', 'look_recipes.py','stock_install_bundle.py'):
         shutil.copy2(ROOT/'tools'/name, dest/'lib'/name)
     for group in ('defaults', 'film-collection'):
         (dest/'recipes'/group).mkdir(parents=True)
@@ -56,23 +57,40 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--native', action='store_true', help='Requires PyInstaller; builds only the current OS/architecture')
     p.add_argument('--out', type=Path, default=ROOT/'dist')
+    p.add_argument('--installer',type=Path,help='Include an explicitly validated experimental stock installer ZIP')
     args = p.parse_args()
+    installer = None
+    if args.installer:
+        from first_install import load_package
+        installer=args.installer.read_bytes()
+        load_package(installer,hashlib.sha256(installer).hexdigest())
+    def include_installer(folder):
+        if installer is None:return
+        target=folder/'installer';target.mkdir()
+        (target/'Sony_A7M3-Stock404-Experimental.zip').write_bytes(installer)
+        (target/'SHA256.txt').write_text(hashlib.sha256(installer).hexdigest()+'\n')
+        shutil.copy2(ROOT/'docs/stock-first-install.md',target/'开发与验证范围.md')
     with tempfile.TemporaryDirectory(prefix='a7m3-tool-') as temp:
         work = Path(temp)
         source = work/'Sony_A7M3-Tool'
         stage(source)
         if not args.native:
+            include_installer(source)
             zip_tree(source, args.out/'Sony_A7M3-Tool.zip')
             return
         subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
                         '--name', 'A7M3-Tool', '--distpath', str(work/'native'),
                         '--workpath', str(work/'build'), '--specpath', str(work),
                         '--paths', str(source/'lib'), '--add-data', str(source/'web')+':web',
+                        '--paths', str(source/'vendor'), '--collect-all','libusb_package',
+                        '--hidden-import','usb.backend.libusb1','--collect-submodules','Cryptodome.Hash',
                         '--add-data', str(source/'recipes')+':recipes', str(source/'app.py')], check=True)
         native = work/'native'/'A7M3-Tool'
         shutil.copy2(TOOL/'README.md', native/'README.md')
         shutil.copy2(TOOL/'screenshot.jpg', native/'screenshot.jpg')
         shutil.copy2(ROOT/'LICENSE', native/'LICENSE')
+        shutil.copy2(TOOL/'vendor/Sony-PMCA-RE-LICENSE.txt',native/'Sony-PMCA-RE-LICENSE.txt')
+        include_installer(native)
         if sys.platform == 'darwin':
             launcher = native/'Start-macOS.command'
             launcher.write_text('#!/bin/sh\ncd "$(dirname "$0")" || exit 1\nexec ./A7M3-Tool\n', encoding='utf-8')

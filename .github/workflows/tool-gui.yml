@@ -7,7 +7,7 @@ on:
         type: boolean
         default: false
   push:
-    paths: ['tool/**', 'tools/custom_look_recipes.py', 'tools/look_recipes.py', 'recipes/**', '.github/workflows/tool-gui.yml']
+    paths: ['tool/**', 'tools/custom_look_recipes.py', 'tools/look_recipes.py', 'tools/stock_install_bundle.py', 'recipes/**', '.github/workflows/tool-gui.yml']
 permissions:
   contents: read
 jobs:
@@ -25,7 +25,7 @@ jobs:
       - name: Test tool
         run: python -m unittest discover -s tool -p "test_*.py" -v
       - name: Install packaging dependency
-        run: python -m pip install "pyinstaller>=6.10,<7"
+        run: python -m pip install "pyinstaller>=6.10,<7" -r tool/requirements-usb.txt
       - name: Build source and native packages
         run: |
           python tool/build.py --out tool-output

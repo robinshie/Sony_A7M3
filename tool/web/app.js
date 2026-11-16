@@ -151,10 +151,43 @@ action(async () => {
   const status = await api('status');
   $('connection').textContent = '本地运行 · ' + status.platform;
   $('install-reason').textContent = status.install_reason;
+  $('usb-deps').textContent = 'USB 依赖：' + Object.entries(status.usb_dependencies).map(([k,v]) => k + (v ? ' ✓' : ' 未安装')).join(' / ');
   fields = status.fields;
   $('look-base').replaceChildren(...status.bases.map(base => { const o = node('option', base); o.value = base; return o; }));
   fields.forEach(f => { const label = node('label', f.label, 'param'); const input = document.createElement('input'); input.id = 'param-' + f.key; input.type='number'; input.min=f.low; input.max=f.high; input.step=1; input.required=true; label.append(input); $('parameters').append(label); });
   // Normalize key ordering once so dirty checks are stable across parser input order.
   recipes = status.recipes.map(r => ({...r, recipe:{format:r.recipe.format,id:r.recipe.id,name:r.recipe.name,base:r.recipe.base,parameters:Object.fromEntries(fields.map(f => [f.key,r.recipe.parameters[f.key]]))}}));
-  renderRecipes(); setCards(status.cards); log(`工具就绪，载入 ${recipes.length} 份配方。固件刷写未启用。`);
+  renderRecipes(); setCards(status.cards); log(`工具就绪，载入 ${recipes.length} 份配方。首次安装为独立的实验入口，未连接相机。`);
+});
+
+let installJob = null, installTimer = null;
+async function pollInstall() {
+  try {
+    const state = await api('first-install/status'); installJob = state.job;
+    $('install-status').textContent = JSON.stringify(state, null, 2);
+    $('install-confirm').disabled = state.phase !== 'ready';
+    $('install-cancel').disabled = state.phase !== 'ready';
+    $('install-prepare').disabled = ['checking','ready','writing'].includes(state.phase);
+    if (['checking','ready','writing'].includes(state.phase)) installTimer = setTimeout(pollInstall, 1000);
+    else if (state.phase === 'awaiting-cold-boot') log('全部写入和回读完成；还需断电后验证启动、菜单、导入与拍摄。');
+    else if (state.phase === 'error') log('安装停止：' + state.error + '。保留备份与记录，不自动重试。');
+  } catch (error) { log('安装状态读取失败：'+error.message+'；请保留连接，不重新提交写入。'); }
+}
+$('install-prepare').onclick = () => action(async () => {
+  const file = $('install-file').files[0];
+  if (!file || file.size > 16*1024*1024) throw new Error('请选择不超过 16 MiB 的专用首次安装候选 ZIP。');
+  if (!$('install-ack').checked) throw new Error('请先阅读并确认实验候选说明。');
+  if (!confirm('将连接相机、按勾选选项切换 USB，并读取备份。此步不会写入固件。继续？')) return;
+  const bytes = new Uint8Array(await file.arrayBuffer()), chunks=[];
+  for (let i=0;i<bytes.length;i+=32768) chunks.push(String.fromCharCode(...bytes.subarray(i,i+32768)));
+  await api('first-install/prepare',{base64:btoa(chunks.join('')),expected:$('install-hash').value.trim(),experimental_ack:true,allow_switch:$('install-switch').checked});
+  clearTimeout(installTimer);setTimeout(pollInstall,0);
+});
+$('install-confirm').onclick = () => action(async () => {
+  if (!confirm('即将真实写入相机的模块、菜单资源、加载器及启动快照处理。确认备份路径已显示并保持供电？')) return;
+  await api('first-install/confirm',{job:installJob,confirmation:$('install-confirm-text').value});
+  clearTimeout(installTimer);setTimeout(pollInstall,0);
+});
+$('install-cancel').onclick = () => action(async () => {
+  await api('first-install/cancel',{job:installJob});clearTimeout(installTimer);setTimeout(pollInstall,0);
 });

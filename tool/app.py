@@ -13,6 +13,8 @@ import webbrowser
 from backend import (HOME, MAX_ZIP, INSTALL_REASON, FIELDS, LABELS, LOW, HIGH, LOOKS,
                      bundled_recipes, discover_cards, read_card, recipe_record,
                      encode, filename, copy_plan, copy_recipes, inspect_package)
+from first_install import Installer
+from usb_transport import dependencies
 
 
 class AppServer(ThreadingHTTPServer):
@@ -21,6 +23,7 @@ class AppServer(ThreadingHTTPServer):
         self.token = secrets.token_urlsafe(32)
         self.origin = f'http://127.0.0.1:{self.server_port}'
         self.copy_lock = threading.Lock()
+        self.installer = Installer()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -77,6 +80,7 @@ class Handler(BaseHTTPRequestHandler):
                           'cards': discover_cards(), 'recipes': bundled_recipes(),
                           'fields': [dict(key=k, label=l, low=a, high=b) for k,l,a,b in zip(FIELDS,LABELS,LOW,HIGH)],
                           'bases': LOOKS, 'install_enabled': False, 'install_reason': INSTALL_REASON}
+                result['usb_dependencies'] = dependencies()
             elif route == '/api/card':
                 result = read_card(data['path'])
             elif route == '/api/recipe':
@@ -87,11 +91,26 @@ class Handler(BaseHTTPRequestHandler):
                 card, plan = copy_plan(data['path'], data['records'])
                 result = {'card': str(card), 'files': [{k:v for k,v in row.items() if k != 'data'} for row in plan]}
             elif route == '/api/copy':
+                if self.server.installer.active():
+                    raise ValueError('相机安装任务进行中，不能同时复制 SD 卡')
                 with self.server.copy_lock:
                     result = copy_recipes(data['path'], data['records'])
             elif route == '/api/package':
                 result = inspect_package(base64.b64decode(data['base64'], validate=True), data.get('expected', ''))
+            elif route == '/api/first-install/prepare':
+                if data.get('experimental_ack') is not True:
+                    raise ValueError('须先确认候选尚未经原厂机验收')
+                result = self.server.installer.start(base64.b64decode(data['base64'],validate=True),
+                                                     data['expected'].strip(),data.get('allow_switch') is True)
+            elif route == '/api/first-install/status':
+                result = self.server.installer.snapshot()
+            elif route == '/api/first-install/confirm':
+                if data.get('confirmation') != '安装到原厂 4.04':raise ValueError('确认文字不匹配')
+                result = self.server.installer.decide(data['job'],True)
+            elif route == '/api/first-install/cancel':
+                result = self.server.installer.decide(data['job'],False)
             elif route == '/api/quit':
+                if self.server.installer.active():raise ValueError('安装任务正在进行；等待结束或在备份确认页取消')
                 result = {'ok': True}
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
             else:
@@ -106,8 +125,13 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--usb-runtime-check', action='store_true', help='Load USB/crypto libraries without enumerating devices')
     parser.add_argument('--port', type=int, default=0)
     args = parser.parse_args()
+    if args.usb_runtime_check:
+        from usb_transport import runtime_check
+        print(json.dumps(runtime_check()))
+        return
     if sys.version_info < (3, 10):
         raise SystemExit('需要 Python 3.10 或更新版本。')
     with AppServer(('127.0.0.1', args.port)) as server:

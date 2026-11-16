@@ -1,5 +1,11 @@
 # A7M3 默认开发和发布流程
 
+**2026-11-16 首装实验 GUI 已接入真实后端，禁止连接当前相机。** 用户明确要求继续原厂 4.04 首装与 Windows USB，但先别动现有改装机；本轮未枚举/连接任何相机。`tool/first_install.py` 串联单一 USB 会话、逐机备份、单独确认、暂存、图标/配置/加载器激活、WBI 绑定和完整回读；`tool/usb_transport.py` 使用固定上游最小源码和 libusb，Windows 普通/服务两模式仍待实物测试。GUI 启动不枚举 USB，`--usb-runtime-check` 仅加载动态库及认证依赖，不枚举设备。
+
+最终候选 `.lab/stock-gui-package-final/Sony_A7M3-Stock404-Experimental.zip` SHA256 `fdf9b39de2de1fa03b3b4c19907f1ee606b233b8e7399e7910d5206ac79373b6`。绑定 `.lab/stock-first-install-final-20261116/arm-stage-v2` 与 `.lab/stock-activation-v3`；后者 ARM Linux 真实映射/VFS 测试 134 项通过，但挂载及故障由 shim 提供。GUI/USB 模拟 34 测试、差分 5 测试通过。前一段“尚未接通”是历史开发状态。新代码仍没有原厂 Sony 内核实机安装/冷启动、Windows 实物 USB 或完整断电恢复验收；不能据此覆盖 v0.01 稳定附件。真实写入候选不等于只读工具，必须保留实验标记与逐文件前像限制。当前改装机因已有模块/配置会被首装工具拒绝，不为测试将其恢复原厂。
+
+**2026-11-16 原厂 4.04 首装开发：只有现有改装机，用户没有原厂测试机。** 本轮未连接或写入相机，不把现有机恢复原厂。新增 `research/stock_first_install.py`、`research/stock_stage_build.py`、`tools/stock_install_bundle.py`，说明在 `docs/stock-first-install.md`。最终离线候选 `.lab/stock-first-install-final-20261116`：原厂至当前模块30474345及五个资源文件的差分、镜像安装/恢复、873个文件核对、独立debugfs回读和e2fsck通过。ARM文件事务核心160故障点/18980检查通过，当前模块重新构建散列不变，菜单/启动回归通过。候选不是完整实机安装器；原厂加载器/配置/图标的在线激活、WBI处理、Windows USB和原厂机冷启动仍未接通/验收。`stock-stage-only.so`只处理模块和语言，不能单独完成安装。旧试构建目录`.lab/stock-first-install-20261116`的暂存程序证明已因模块证明重建而过期，不使用。所有生成物留在.lab，当前公开v0.01未替换；不得把离线安装或可编译ARM载荷描述为实机首装已通过。
+
 **2026-11-16 即时列表与连续切换修正已获真机验收。** 用户确认导入后立即出现、连续切换正常。只读 `.lab/custom-look-incident/1794824744407403000/live-list-acceptance.json`：模块30474345正常加载，fault0/last_error0；独立库schema2/gen14/count3，FL2、FL3、FL4独立配方已保存；hidden_builtin=14，对应原FL2/3/4已移除。原六套A7FL双槽与本次安装前逐字节一致。当前运行base4、dirty1，保存active0，因此只确认配方内容与删除位图持久化，不宣称最后选中项已保存；无需为界面验收强制用户额外操作。此轮未写入相机，只读取记录；尚未提交或覆盖v0.01，公开包仍为0eab97e版。
 
 **2026-11-16 最新安装：导入即时列表与连续选择修正，待用户验收。** 原可删除候选 a6545d13 验收失败：用户报告导入后需重启才能看到，导入后无法选择其它。只读 `.lab/custom-look-incident/1794824196048816000` 确认运行无fault、dirty1；独立库schema2/gen12/count2/hidden6（原FL2、FL3已删除），存在导入FL2和FL3。不得把该候选作为已验收版发布。
