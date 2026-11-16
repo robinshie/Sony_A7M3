@@ -17,7 +17,7 @@ PIECES={6:[(0x1a7f8,8),(0x43798,0x64),(0x437fc,0x3c),(0x4391e,0x24),
 def sha(b):return hashlib.sha256(b).hexdigest()
 def run(args,**kw):return subprocess.run(args,check=True,**kw)
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--usr',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--usr',type=Path,required=True);p.add_argument('--custom',action='store_true');a=p.parse_args()
     e={i:ELF(a.usr/'lib'/n) for i,n in [(2,'viewUnified2.so'),(6,'viewUnified6.so'),(0,'libObj.so')]}
     if sha(e[2].data)!=VIEW_SHA:raise ValueError('Foreign view2')
     # These identities are recorded from the project's pinned 4.04 extraction.
@@ -27,11 +27,11 @@ def main():
     ranges={2:[(0x15bf38,12),(0x15d958,12),(0x15c8dc,12),(0x587be8,12),(0x580994,12),
                (0x2a8c80,24),(0x587ac6,16),(0x58060a,16),
                (0x213ec4,0x78),(0x21fc80,0xf8),(0x21e374,24),
-               (0x592990,12),(0x5944ac,0x260),(0x59320a,0x14),(0x5932a0,10)],
+               (0x592990,12),(0x5944ac,0x260),(0x59320a,0x14),(0x5932a0,10),(0x5943b4,0xf8),(0x5b4e90,0x62),(0x593b40,0x80),(0x54fad0,0x3f8)],
             6:[(0x437fc,0x3c),(0x4391e,0x24),(0x43798,0x64),(0x43a5c,0x32),
                (0x43b14,0x2e),(0x43a94,0x80),(0x42b6e,0x26),(0x1a7f8,8)],
             0:[(0x12fdcc,0xdc),(0x12fd08,24),(0x12e4a8,24),(0x155656,24),
-               (0x10d26a,24),(0x862868,14)]}
+               (0x10d210,24),(0x10d26a,24),(0x10dcc4,24),(0x862868,14),(0x5e2848,10),(0x5e2878,22)]}
     header='struct a7_dialog_pin {unsigned library,offset,size;const unsigned char *bytes;};\n';records=[]
     for lib,items in ranges.items():
         for offset,size in items:
@@ -67,6 +67,9 @@ def main():
     (O/'menu-vtable.bin').write_bytes(menu_vt)
     add(BASE[2]+0x87b5f8,'menu_vtable','.incbin "menu-vtable.bin"','aw')
     add(BASE[2]+0x8e5f44,'menu_got','.word 0x4087b5f8','aw')
+    add(BASE[0]+0x121d6dc,'label_text_slot','.word 0x4410dcc5','aw')
+    add(BASE[2]+0x8e5ae8,'label_direct_slot','.word 0x4410dcc5','aw')
+    add(BASE[2]+0x8e40f4,'label_variant_slot','.word 0x4410d211','aw')
     add(BASE[2]+0x7969cc,'row_icons','.space 20','a')
     stubs={
       6:{0x13f78:'base_ctor',0x13e84:'model_request',0x14314:'allocate',0x13c58:'unexpected',0x13dd8:'unexpected',
@@ -77,14 +80,14 @@ def main():
          0x21fc80:'stock_menu_draw',0x21e374:'stock_menu_terminate',0x592990:'cast_widget',
          0x15a3b8:'variant_noop',0x1581f8:'variant_noop',0x173304:'variant_copy',
          0x5932f8:'popup_closed',0x5943b4:'row_set',0x594304:'footer_noop',0x159ba8:'unexpected'},
-      0:{0x12e4a8:'get_widget',0x155656:'display',0x10d26a:'direct_text',0x862868:'redraw',0x12fd08:'close_view',
+      0:{0x10d210:'stock_label_variant',0x10dcc4:'stock_label_text',0x5e2848:'widget_next',0x5e2878:'widget_child',0x12e4a8:'get_widget',0x155656:'display',0x10d26a:'direct_text',0x862868:'redraw',0x12fd08:'close_view',
          0x104be4:'id_get',0x100a54:'allocate',0xffefc:'event_ctor',0x108c40:'param_ctor',
          0x101b94:'event_add',0xffce0:'push_event',0x101ff0:'unexpected',0x101ecc:'unexpected',
          0x107578:'unexpected',0x121cd8:'unexpected',0x1039c8:'unexpected',0x121bae:'unexpected',
          0x121b52:'unexpected',0x121b62:'unexpected',0x103460:'unexpected'}}
     for lib,entries in stubs.items():
         for va,target in entries.items():
-            thumb=((lib==2 and va not in (0x15a3b8,0x1581f8,0x159ba8)) or (lib==0 and va in (0x12e4a8,0x155656,0x10d26a,0x862868,0x12fd08,0x108c40,0x121cd8,0x121bae,0x121b52,0x121b62)))
+            thumb=((lib==2 and va not in (0x15a3b8,0x1581f8,0x159ba8)) or (lib==0 and va in (0x10d210,0x10dcc4,0x5e2848,0x5e2878,0x12e4a8,0x155656,0x10d26a,0x862868,0x12fd08,0x108c40,0x121cd8,0x121bae,0x121b52,0x121b62)))
             # Veneers accept BLX to the standard +4 ARM PLT entry too.
             body=(f'.thumb\nldr.w ip,1f\nbx ip\n.balign 4\n1: .word {target}' if thumb else
                   f'.arm\nnop\nldr pc,[pc,#-4]\n.word {target}')
@@ -120,8 +123,9 @@ _start:
     flags=['-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-Os','-Wall','-Wextra','-Werror',
            '-ffreestanding','-fno-builtin','-fno-unwind-tables','-fno-asynchronous-unwind-tables',
            '-I',str(R/'payloads'),'-I',str(O),'-DA7_FL_DIALOG_TEST']
+    if a.custom:flags+=['-DA7_FL_CUSTOM_LOOKS','-DA7_FL_SD_IMPORT']
     run(['arm-none-eabi-gcc',*flags,'-nostdlib','-T','test.ld','start.S','native.S',
-         str(R/'payloads/a7-fl-dialog.c'),str(R/'research/native_save_dialog_harness.c'),'-lgcc','-o','dialog-test.elf'],cwd=O)
+         str(R/'payloads/a7-fl-dialog.c'),str(R/'payloads/a7-fl-custom-text.c'),str(R/'research/native_save_dialog_harness.c'),'-lgcc','-o','dialog-test.elf'],cwd=O)
     t=run(['qemu-system-arm','-M','virt','-cpu','cortex-a15','-m','1024','-nodefaults','-audio','none',
            '-nic','none','-display','none','-monitor','none','-serial','stdio','-semihosting-config','enable=on,target=native',
            '-device',f'loader,file={O}/dialog-test.elf,cpu-num=0'],capture_output=True,timeout=20)

@@ -1,5 +1,37 @@
 # A7M3 默认开发和发布流程
 
+**2026-11-16 名称修正已验收。** 用户确认下拉和选定后均显示正确名称，重启正常；删除功能此前也已验收。只读证据 `.lab/custom-look-incident/1794822522384389000/name-acceptance.json`：当前模块 b3d387dfb2dbfa3d58adbcb5bcc8a07df4bb80339c74fbf2ed38bdeb47c31fe3 正常加载、fault0/last_error0，原六套双槽与安装前逐字节一致；独立库 generation7/count1，名称「人像颗粒 1」和全部配方参数保留。保存 active0、运行dirty1；用户已明确确认测试后又切换或未保存选中状态，属于预期操作，不将其当作恢复缺陷，也不宣称当前保存的选中项是自定义。只读过程中未修改设置。初版后验脚本误拒绝合法空旧槽，已修正；其 active7 特定测试条件本轮不满足，所以最终验收按用户实际状态另行记录，未绕过或伪造该条件。未提交或发布本轮改动。
+
+**2026-11-16 最新安装：选定值名称修正，待冷启动验收。** 用户确认上一版下拉名称正确，但选定后仍显示自定义占位名称。补接 viewUnified2 的 GEN_Label::setText 直接导入槽和 setVariantInfo 导入槽，严格核对指针前像，先执行原厂函数，仅对当前自定义资源编号恢复配方名称；下拉虚表回调和删除功能保留。离线 NATIVE_SELECTED_TEXT_DISPATCH_PASSED 覆盖选中值、格式化覆盖、切回内置项；下拉/导入/删除/保存/启动回归通过，49683项更新核心检查通过。尚未证明真机选定名称已修复。
+
+包 `.lab/native-fl-releases/update-v001-custom-selected-hfjp6yjd` 已执行，证据 `.lab/native-fl-releases/update-v001-custom-selected-hfjp6yjd/write-1794822281280608000/verified.json`、`catalog-preserved.json`；新模块 `b3d387dfb2dbfa3d58adbcb5bcc8a07df4bb80339c74fbf2ed38bdeb47c31fe3`（153740字节），完整回读一致、四份原设置和两份独立库不变、view/WBI/语言不变、/usr恢复只读。禁止重放。为留出空间，较早备份 `.a7fl-87e8f719.orig` 已完整归档校验至 `.lab/custom-old-backup-archive/1794822262331409000` 后才移出机身；当前前像a820f62c和上一个2e13c731回退副本保留。等待用户冷启动后选人像颗粒1、收起列表、切回FL再选回、保存重启验收。只读后验工具 `research/custom_selected_acceptance.py`，要求用户已选择新项并保存。
+
+**2026-11-16 最新安装：下拉文字设置回调修正版，待冷启动名称验收。** 上一版删除已获用户确认，且 `.lab/custom-delete-acceptance/1794821408695896000/acceptance.json` 只读核对：独立库 generation4/count0/active0，原六套 generation72 不变、运行正常；但用户仍报告下拉占位名，故不能宣称上一名称修复有效。本版对原厂 GEN_Label::setText 数据虚表槽进行精确前像核对并接入回调，先运行原厂设置，再仅对已存在自定义资源编号使用配方名称；覆盖下拉独立重设文字路径，保留原删除功能。离线 NATIVE_POPUP_TEXT_DISPATCH_PASSED、导入/删除/冷启动链路和 47796 项更新核心检查通过，尚不是实际显示验收。
+
+已执行包 `.lab/native-fl-releases/update-v001-custom-text-0xpff8wf`，证据 `.lab/native-fl-releases/update-v001-custom-text-0xpff8wf/write-1794821851625217000/verified.json` 与 `catalog-preserved.json`。模块 `a820f62cbea336e16b945f95278ed760a1b0190ca97e6576e23113ac2991cdf9`（153424 字节），完整回读一致，四份原设置及两独立库槽保持不变，语言/view/WBI 不变、/usr只读。禁止重放包。首次预检因 /usr 仅剩117KB停止，未发送替换载荷；已将旧崩溃候选 `.a7fl-fc25a8f9.orig` 完整归档到 `.lab/custom-failed-backup-archive/1794821829570873000`，散列校验后仅移除该机内副本，当前及最近备份保留。随后正常预检与写入通过。下一步冷启动，重新导入 SD 上 Portrait-grain-1.a7look 后检查下拉名称与滚动返回；不再要求重复删除验收。
+
+**当前磁盘为下拉名称修正及删除候选（2026-11-16），等待用户验收。** 包 `.lab/native-fl-releases/update-v001-custom-delete-n6h5xh_6` 已执行，`write-1794821118937025000/verified.json` 和 `catalog-preserved.json` 验证成功。当前模块 `2e13c731322960f5e46bd46f7112396ea5fa1ae78cff7e82d94819e5ea17c5c2`（153104字节），原六套、工作日志和独立配方库保持不变；独立库安装前备份在该包 `catalog-backup-*`。语言资源未改。禁止重放包或用87e8f719旧前像再次写入。
+
+此前正确选新文件后用户实际反馈：新增项可见，但下拉显示「自定义外观1」，主行名称无此问题。只读 `.lab/custom-look-incident/1794820635339859000` 确认 A7CU0 格式1/gen1/count1/active0，名称「人像颗粒 1」，原配置未变；当时运行dirty1，选中新项未保存。当前候选补写原厂分类菜单内嵌 popup 的6个 GEN_Label，不遍历未知控件。第4页加入原厂「删除」行，仅自定义项可用；确认弹框显示名称，取消不改；确认删除当前新增项，回到原内置参数。不删除SD文件。其余新增项内部列表编号压紧，配方字符串ID不变。独立双槽保存、删除后重启和重新导入回归已通过。用户已收到真机名称/取消/删除/重启测试步骤，尚未收到结果。后验工具 `research/custom_delete_acceptance.py` 只读验证空库新代数、旧六套字节参数、运行状态和新模块；只有用户完成删除和冷启动后使用。
+
+**最新诊断：用户报告“导入成功但无新增项”，尚未证明新增库保存成功。** 只读 `.lab/custom-look-debug/1794820472762381000/readback.json`：运行模块87e8f719，installed1/fault0；custom.ready1、count0、generation0、两独立槽不存在，sd_length0；真实读取缓冲是旧 `A7FL-PATCH/1\nFL6.grain=1\n`，不是新增格式。机内文件列表确有两项：`A:/FL6-grain-1.a7look`、`A:/Portrait-grain-1.a7look`，当前选中0。已请用户右键一次选第二项，确认文件名后再二次确认，仅单独“完成”算成功，然后检查新选项并接回UTM。本轮只读，未再刷写。不能把该反馈作为目录已导入或动态列表故障的证据。
+
+**2026-11-16 当前已安装菜单重启修正候选，等待用户试用。** 上一 fc25a8f9 版用户报告导入后进入创意外观整机黑屏重启，验收失败，不得作为稳定版发布。只读 `.lab/custom-look-incident/1794819929775880000` 确认原 A7FL 两槽字节不变，A7CU 两槽均不存在；重启后内核日志未保留故障栈，不能断言崩溃唯一原因。已修正动态文字把通用子控件强转为 PAS_LabelCustom/GEN_Label 的错误，改成已核对的分类菜单行内嵌 GEN_Label，不遍历任意子控件。
+
+修正包 `.lab/native-fl-releases/update-v001-custom-fix-76fa7b0p` 已执行；证据 `write-1794820078897767000/verified.json` 和 `catalog-preserved.json`。当前模块 `87e8f719baeeaf3e391c3607557037b4bdf28f984fa604707732a78230d90c8d`（149632字节）完整回读一致，原设置、工作记录和新库状态保持，/usr只读、view/WBI不变。只替换模块，语言仍为上一包2001/2002。禁止重复执行此包。先由用户验证打开创意外观不重启，再选 Portrait-grain-1.a7look 导入并看动态名称；尚未验收，不声称故障已在真机消失。
+
+**2026-11-16 当前已安装独立风格导入候选，等待真机冷启动验收。** 执行包 `.lab/native-fl-releases/update-v001-custom-looks-gw1l8spw`；写入证据 `write-1794819564533584000/verified.json`。模块 `fc25a8f9f430c01f1f8c6f130ebf1d603d815c8041401712bec6ec1697c447e2`（149344字节），三文件完整回读通过，原六套配置和工作记录字节不变，view/WBI未变、/usr恢复只读。禁止重跑此包；下方 f40e4a64 已是历史前像。新库独立 A7CU0/1.CFG，测试配方卡根目录 Portrait-grain-1.a7look（人像颗粒 1），仅新增独立项，不覆盖FL6。离线完整链路与冷启动测试通过；尚未得到本候选正常模式中文名称、拍摄及断电保存验收。只读后验工具 `research/custom_look_acceptance.py`。
+
+**2026-11-16 当前磁盘 SD 导入版已通过本轮真机菜单与断电验收。** 用户明确同意先安装候选再验证。已执行包 `.lab/native-fl-releases/update-v001-sd-import-zgow4zto`，写入证据 `write-1794816564912805000/verified.json`：三文件回读通过，四份配置字节不变，/usr 恢复只读，view/WBI 未变。禁止重跑该包或以旧 e5a530c3 前像再次写入。
+
+- 模块 SHA-256 `f40e4a64cabd1f8d2a0c56c9bfa292bf9d780322f07814772bea0670a838dba7`，134452 字节。
+- 简中 `1836c584333a0133107e15cda9d96e669d75c41fa4f13f2d71940e0e72154252`；英文 `7cb075ebf0ed4c2d9d262f5400c50b6882ca0a8952db86c582d5b8c2bbba313d`。
+- 「创意外观」新增第 4 页「从 SD 卡导入」，左右选择根目录 `.a7look` 文件，选择后确认，再沿用机内保存事务。仅覆盖配方中指定字段。当前测试文件 `FL6-grain-1.a7look`，仅 FL6 grain=1。
+- 安装前只读状态 generation70、mode6、dirty0、FL6 grain1，其他参数见 `.lab/auto-size-resident-read/1794816248518689000/auto-size-status.json`。这个值本来就是1，后续应同时核对保存代数是否增加，不能仅凭看到1就证明导入成功。
+- 离线证据 `.lab/native-module-sd-candidate/proof.json`，包含原厂 ARM 菜单/弹框、文件读取事务模拟、六风格回归和保存启动测试。不是正常拍摄模式验收。用户已确认文件可选、导入完成、取出电池后 FL6 颗粒为 1。只读验收 `.lab/sd-import-acceptance/1794816787209226000/acceptance.json`：保存与运行代数均72（安装前70），mode6、dirty0、fault0、last_error0；运行约135秒。六套96项参数与安装前完全一致，FL6颗粒原本已经1，因此不声称本轮测试发生0→1。三文件散列与候选一致。当前验收覆盖此测试文件的机内导入和断电保留，不代表所有错误场景均已做真机测试。
+
+下方的 v0.01 L/M/S 是上一已验收基线，已由本次候选替换磁盘文件，其历史验收证据保留。
+
 **当前已安装并验收：v0.01 六风格 JPEG L/M/S 适配版（2026-11-15）。** 当前磁盘模块 SHA-256 `e5a530c3fe3790b829d3ee0cca7ff2628bf6a7a24f952c4f3cf46bcad8316feb`，126,480 字节。仅替换 a7fl.so；旧 5fb33e69 模块备份、完整新模块回读一致，四份配置字节不变，加载器、两种语言资源和 WBI 保持原值，/usr 已恢复只读。已执行 `.lab/native-fl-releases/update-v001-auto-size-xd7cs4kh`，证据 `write-1794742237131275000/verified.json`。禁止重复执行，也不能再按旧六风格前像重刷。
 
 新内核 `.lab/capture-kernel/1794741362254373000`，`a7capauto` / SHA-256 `707362fc67da61b834757849fa056a2bb4c6d80a09f9469743e0a02e19f7bc0f`。同一二进制临时实拍 L/M/S 完成 3、失败 0，颗粒 9、光晕 +9、暗角 −9；自身源像素及 JPEG 对照通过。用户已确认冷启动六个 FL 和 M/S 拍摄回放正常。只读核对 resident-ready、无故障，内核 armed、diagnostic=0，当前开机累计处理完成 5 次、失败 0 次；最后源帧为 S 布局（3008×4000，stride 12000，offset 160）。保存与运行值一致：schema 6 / generation 66、FL、颗粒 3、光晕 +3、暗角 −3、dirty=0。验收证据 `.lab/auto-size-resident-read/1794742632436575000/acceptance-final.json`。回读工具 `research/auto_size_resident_read.py`：使用此包 `18` 绑定、`.lab/native-inspect-auto-size` 检查器及上述内核；只读，不重新加载。公开发布沿用同一个 GitHub v0.01 和同名 ZIP，发布包从完整回读的模块与冷启动验收记录生成。具体流程见 [尺寸适配](docs/jpeg-size-adaptation.md)。下方六风格为上一已验收基线。

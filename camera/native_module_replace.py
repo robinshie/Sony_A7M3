@@ -41,9 +41,42 @@ REVISIONS[17]=dict(old_sha='9fcaf13e5bcc5914d5721d797f16c3b059dc6f9b0cb99c94eda7
 REVISIONS[18]=dict(old_sha='5fb33e6955b81e02144463e6fb7e09aaa042b3e4df536fd9523854a91d2fa6d5',old_size=124980,temporary='.a7size.new',backup='.a7fl-5fb33e69.orig',journal='A7SIZEUP.LOG')
 REVISIONS[1701]=dict(old_sha='99c3292522faeb0bcd6e8ede63cc2da41baf54ff572901273007fbc2eef9d611',old_size=350388,temporary='.a7six-zh.new',backup='.a7six-zh.orig',journal='A7SIXZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='classic')
 REVISIONS[1702]=dict(old_sha='4e797657592371db1eb1912e73e9c928ac7dbbe93df0d711b26ce5c86f6f47d0',old_size=393104,temporary='.a7six-en.new',backup='.a7six-en.orig',journal='A7SIXEN.LOG',locale='string_english.uxc',resource_set='classic')
+REVISIONS[19]=dict(old_sha='e5a530c3fe3790b829d3ee0cca7ff2628bf6a7a24f952c4f3cf46bcad8316feb',old_size=126480,temporary='.a7sd.new',backup='.a7fl-e5a530c3.orig',journal='A7SDUP.LOG')
+REVISIONS[1901]=dict(old_sha='741921ec85bd0eea18571479bdd5d0681f78a9d99bacff30305e8721792e40d6',old_size=350484,temporary='.a7sd-zh.new',backup='.a7sd-zh.orig',journal='A7SDZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='sd')
+REVISIONS[1902]=dict(old_sha='92843d50a15f6d94e95b51eaec0fba7a5a646366f7b954bac05f3c81b923e1f4',old_size=393204,temporary='.a7sd-en.new',backup='.a7sd-en.orig',journal='A7SDEN.LOG',locale='string_english.uxc',resource_set='sd')
 MODULE='/usr/lib/a7fl.so';VIEW='/usr/lib/viewUnified2.so'
+REVISIONS[20]=dict(old_sha='f40e4a64cabd1f8d2a0c56c9bfa292bf9d780322f07814772bea0670a838dba7',old_size=134452,temporary='.a7custom.new',backup='.a7fl-f40e4a64.orig',journal='A7CUSTOM.LOG')
+REVISIONS[2001]=dict(old_sha='1836c584333a0133107e15cda9d96e669d75c41fa4f13f2d71940e0e72154252',old_size=350608,temporary='.a7custom-zh.new',backup='.a7custom-zh.orig',journal='A7CUSZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='custom')
+REVISIONS[2002]=dict(old_sha='7cb075ebf0ed4c2d9d262f5400c50b6882ca0a8952db86c582d5b8c2bbba313d',old_size=393328,temporary='.a7custom-en.new',backup='.a7custom-en.orig',journal='A7CUSEN.LOG',locale='string_english.uxc',resource_set='custom')
+REVISIONS[21]=dict(old_sha='fc25a8f9f430c01f1f8c6f130ebf1d603d815c8041401712bec6ec1697c447e2',old_size=149344,temporary='.a7custfix.new',backup='.a7fl-fc25a8f9.orig',journal='A7CUSFIX.LOG')
+REVISIONS[22]=dict(old_sha='87e8f719baeeaf3e391c3607557037b4bdf28f984fa604707732a78230d90c8d',old_size=149632,temporary='.a7custdel.new',backup='.a7fl-87e8f719.orig',journal='A7CUSDEL.LOG')
+REVISIONS[23]=dict(old_sha='2e13c731322960f5e46bd46f7112396ea5fa1ae78cff7e82d94819e5ea17c5c2',old_size=153104,temporary='.a7custtxt.new',backup='.a7fl-2e13c731.orig',journal='A7CUSTXT.LOG')
+REVISIONS[24]=dict(old_sha='a820f62cbea336e16b945f95278ed760a1b0190ca97e6576e23113ac2991cdf9',old_size=153424,temporary='.a7custsel.new',backup='.a7fl-a820f62c.orig',journal='A7CUSSEL.LOG')
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
+ if revision in (20,21,22,23,24):
+  require(proof.get('passed') is True and proof.get('normal_mode_verified') is False,'Expected independent-look candidate trial evidence.')
+  for name,digest in proof['fixture_sha256'].items():require(file_sha(ROOT/name)==digest,'Custom fixture changed: '+name)
+  directory=LAB/'native-module-custom-candidate'
+  for name,digest in proof['artifact_sha256'].items():require(file_sha(directory/name)==digest,'Custom artifact changed: '+name)
+  for name,marker in [('qemu.log',b'NATIVE_CUSTOM_FLOW_PASSED'),('qemu-boot.log',b'NATIVE_CUSTOM_BOOT_PASSED'),('dialog.log',b'SD_FILE_DIALOG_PASSED'),('posix.log',b'CUSTOM_POSIX_PASSED')]:
+   raw=(directory/name).read_bytes();require(marker in raw and b'FAIL' not in raw,'Custom integration failed: '+name)
+  if revision in (22,23,24):
+   require(b'NATIVE_CUSTOM_DELETE_PASSED' in (directory/'qemu.log').read_bytes() and b'NATIVE_DELETE_DIALOG_PASSED' in (directory/'dialog.log').read_bytes() and b'CUSTOM_DELETE_REBOOT_PASSED' in (directory/'session.log').read_bytes(),'Deletion integration evidence missing')
+  if revision in (23,24):require(b'NATIVE_POPUP_TEXT_DISPATCH_PASSED' in (directory/'dialog.log').read_bytes(),'Popup text dispatch evidence missing')
+  if revision==24:require(b'NATIVE_SELECTED_TEXT_DISPATCH_PASSED' in (directory/'dialog.log').read_bytes(),'Selected text dispatch evidence missing')
+  return
+ if revision==19:
+  require(proof.get('passed') is True and proof.get('normal_mode_verified') is False,'Expected SD candidate trial evidence.')
+  for name,digest in proof['fixture_sha256'].items():
+   require(file_sha(ROOT/name)==digest,'SD fixture changed: '+name)
+  directory=LAB/'native-module-sd-candidate'
+  for name,digest in proof['artifact_sha256'].items():
+   require(file_sha(directory/name)==digest,'SD candidate artifact changed: '+name)
+  for name,marker in [('qemu.log',b'NATIVE_SD_IMPORT_TRANSACTION_PASSED'),('dialog.log',b'SD_FILE_DIALOG_PASSED')]:
+   raw=(directory/name).read_bytes()
+   require(marker in raw and b'FAIL' not in raw,'SD integration did not pass.')
+  return
  if revision==18:
   from camera.native_auto_release import require_auto_release
   require_auto_release(proof)
@@ -237,8 +270,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15,151,16,17,18):
-  resource_set='fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24):
+  resource_set='fl-custom' if m['version'] in (20,21,22,23,24) else 'fl-sd' if m['version']==19 else 'fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

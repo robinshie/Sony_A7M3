@@ -41,7 +41,11 @@ static int initialize(NativeAdjustNode *node,NativeAdjustNode **aliases,int coun
         if(field<NATIVE_ADJUST_FIELDS) {
             rc=((Gray)(t->caution_base+0x682edb))(node,!(t->enabled_mask&(1u<<field)),0);
             if(rc)rc=((Select)(t->caution_base+0x682e59))(node,t->specs[field].maximum-t->current[field]+1);
-        } else if(process_id==0x7000)
+        }
+#ifdef A7_FL_CUSTOM_LOOKS
+        else if(process_id==0x7013)rc=((Gray)(t->caution_base+0x682edb))(node,t->current_mode<7,0);
+#endif
+        else if(process_id==0x7000)
             rc=((Select)(t->caution_base+0x682e59))(node,t->current_mode+1);
     }
     return rc;
@@ -188,6 +192,39 @@ int native_adjust_add_save(NativeAdjustTree *t,uint32_t title) {
                                             t->specs[f].maximum-t->current[f]+1)) return 0;
     return 1;
 }
+#ifdef A7_FL_SD_IMPORT
+int native_adjust_add_import_sibling(NativeAdjustTree *t,uint32_t title,int id) {
+    if(!t||!title||t->root.parent||t->root.count!=NATIVE_ADJUST_PAGES||
+       t->root.children!=t->page_ptrs||t->save.properties!=&t->save_properties)return 0;
+    NativeAdjustProperty *p=t->import_props;
+    prop(p+0,0,0,title);prop(p+1,6,0,0);prop(p+2,0xb,1,2);
+    prop(p+3,0xc,1,4);prop(p+4,0xe,1,(uint32_t)id);
+    t->import_properties=(NativeAdjustProperties){p,4};
+    construct(t,&t->import_row,0,0,&t->import_properties);
+    return initialize(&t->import_row,0,0,t->root.depth);
+}
+int native_adjust_add_import(NativeAdjustTree *t,uint32_t title,int id) {
+    if(!t || !title || t->root.parent || t->root.count!=NATIVE_ADJUST_PAGES ||
+       t->root.children!=t->page_ptrs || t->save.properties!=&t->save_properties) return 0;
+    NativeAdjustProperty *p=t->import_props;
+    prop(p+0,0,0,title);prop(p+1,6,0,0);prop(p+2,0xb,1,2);
+    prop(p+3,0xc,1,4);prop(p+4,0xe,1,(uint32_t)id);
+    t->import_properties=(NativeAdjustProperties){p,4};
+    construct(t,&t->import_row,0,0,&t->import_properties);
+    t->import_children[0]=&t->import_row;
+    construct(t,&t->import_page,t->import_children,1,&t->page_properties);
+    for(unsigned i=0;i<NATIVE_ADJUST_PAGES;i++)t->pages_with_import[i]=t->page_ptrs[i];
+    t->pages_with_import[NATIVE_ADJUST_PAGES]=&t->import_page;
+    t->root.children=t->pages_with_import;
+    t->root.count++;
+    if(!initialize(&t->root,0,0,t->root.depth))return 0;
+    Select select=(Select)(t->caution_base+0x682e59);
+    if(!select(&t->mode,t->current_mode+1))return 0;
+    for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++)
+        if(!select(&t->fields[f],t->specs[f].maximum-t->current[f]+1))return 0;
+    return 1;
+}
+#endif
 int native_adjust_save_title(NativeAdjustTree*t,uint32_t title) {
     if(!t||!title||t->save.properties!=&t->save_properties||
        t->save_properties.list!=t->save_props||t->save_properties.last!=4||
@@ -222,6 +259,9 @@ int native_adjust_write(NativeAdjustTree *t,int process_id,int value,
             return ((Select)(t->caution_base+0x682e59))(&t->mode,value+1);
         if(!apply(ctx,NA_MODE,value)) return 0;
         t->current_mode=value;
+#ifdef A7_FL_CUSTOM_LOOKS
+        if(t->delete_row.vtable)((Gray)(t->caution_base+0x682edb))(&t->delete_row,value<7,0);
+#endif
         return ((Select)(t->caution_base+0x682e59))(&t->mode,value+1);
     }
     unsigned f=native_adjust_field_index(process_id);
@@ -233,3 +273,37 @@ int native_adjust_write(NativeAdjustTree *t,int process_id,int value,
     t->current[f]=value;
     return ((Select)(t->caution_base+0x682e59))(&t->fields[f],t->specs[f].maximum-value+1);
 }
+
+#ifdef A7_FL_CUSTOM_LOOKS
+int native_adjust_custom_count(NativeAdjustTree*t,unsigned count,uint32_t first){
+ if(!t||count>16||t->mode.count<7||t->mode.count>NATIVE_ADJUST_MODES)return 0;
+ NativeAdjustNode *parent=t->mode.parent;
+ if(t->mode.count>(int)(7+count))t->mode.count=7+count;
+ if(t->current_mode>=t->mode.count)t->current_mode=0;
+ while(t->mode.count<(int)(7+count)){
+  unsigned index=(unsigned)t->mode.count;
+  for(unsigned k=0;k<6;k++)t->mode_value_props[index][k]=t->mode_value_props[1][k];
+  NativeAdjustProperty*p=t->mode_value_props[index];p[0].value=first+index-7;p[4].value=p[5].value=index;
+  t->mode_value_properties[index]=(NativeAdjustProperties){p,5};
+  construct(t,&t->mode_values[index],0,0,&t->mode_value_properties[index]);
+  t->mode_ptrs[index]=&t->mode_values[index];t->mode.count++;
+ }
+ int ok=initialize(&t->mode,0,0,t->mode.depth);t->mode.parent=parent;
+ return ok&&((Select)(t->caution_base+0x682e59))(&t->mode,t->current_mode+1);
+}
+#endif
+
+#ifdef A7_FL_CUSTOM_LOOKS
+int native_adjust_add_delete(NativeAdjustTree*t,uint32_t title,int id){
+ if(!t||t->root.count!=NATIVE_ADJUST_PAGES)return 0;
+ NativeAdjustProperty*p=t->delete_props;
+ prop(p,0,0,title);prop(p+1,6,0,0);prop(p+2,0xb,1,2);prop(p+3,0xc,1,4);prop(p+4,0xe,1,id);
+ t->delete_properties=(NativeAdjustProperties){p,4};
+ construct(t,&t->delete_row,0,0,&t->delete_properties);t->delete_children[0]=&t->delete_row;
+ construct(t,&t->delete_page,t->delete_children,1,&t->page_properties);
+ for(unsigned i=0;i<NATIVE_ADJUST_PAGES;i++)t->pages_with_delete[i]=t->page_ptrs[i];
+ t->pages_with_delete[NATIVE_ADJUST_PAGES]=&t->delete_page;
+ t->root.children=t->pages_with_delete;t->root.count++;
+ return initialize(&t->root,0,0,t->root.depth);
+}
+#endif

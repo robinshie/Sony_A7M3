@@ -2,9 +2,9 @@
 
 针对 Sony α7 III（**ILCE-7M3**）4.04 的中文菜单修改、QEMU 验证和本地 USB 更新工具。示例将「影像质量/影像尺寸」改为「我的相机/固件实验」。这个改动已在一台实机上完成烧录、断电重启、菜单目视确认和 USB 回读。
 
-**当前发布：[v0.01 六风格整合版 · JPEG L／M／S](https://github.com/robinshie/Sony_A7M3/releases/tag/v0.01)。** FL 到 FL6 各自保存参数和五点曲线；拍后颗粒、正负光晕和正负暗角自动识别 JPEG 尺寸。L／M／S 成片对照通过，真机冷启动后六个入口和 M／S 拍摄回放正常，保存参数与运行值一致。
+**当前发布：[v0.01 完整整合版 · SD 导入与独立风格](https://github.com/robinshie/Sony_A7M3/releases/tag/v0.01)。** 保留 FL～FL6、五点曲线及拍后颗粒／光晕／暗角的 JPEG L/M/S 支持；新增同级 SD 导入入口、独立自定义外观、确认删除，以及下拉和选定值的动态名称。导入、删除和重启名称已获开发机验收，原六套参数保持不变。
 
-**下载内容：** 一个 ZIP 包含整合模块、中英文菜单增量补丁、本地资源生成器、完整源码、说明及校验文件。已验收的升级路径从上一版六风格模块及 schema 6 设置出发；只更换模块，保留菜单资源和六套设置。详见 [包内说明与安装范围](docs/six-look-release.md)、[原厂功能比较](docs/edition-comparison.md)。
+**下载内容：** 同一个 ZIP 包含整合模块、中英文菜单增量补丁、离线生成器、完整源码、示例 `.a7look`、说明和校验文件。依赖匹配的项目加载器、菜单资源及部署前像，不是原厂固件一键直装包。详见 [本次使用与安装范围](docs/custom-look-release.md)、[原厂功能比较](docs/edition-comparison.md)。
 
 **验证边界：** 三种拍后效果已验证全画幅 3:2 JPEG L／M／S。RAW、实时取景、APS-C 和 16:9 不在本次验证范围。锐度、锐度范围、清晰度仍只确认调节和保存；五点曲线各控制的视觉效果仍待独立比较。详见 [L／M／S 实拍记录](docs/jpeg-size-adaptation.md)。
 
@@ -20,6 +20,7 @@
 | 查看「复古衣橱」原厂菜单与配方补丁（v3 名称与定位修复已烧录、重启验收通过） | [创意风格实验](docs/creative-style.md) |
 | 继续开发完整胶片算法、研究机内图像处理入口 | [算法开发 TODO](TODO.md) |
 | 生成 FL 近似实验版 3D LUT、预览照片、快速测试 | [FL 本地算法](docs/fl-look.md) |
+| 导出、编辑和预览六风格配方，生成导入候选 | [六风格配方](docs/look-recipes.md) |
 | 在真机加载/恢复由 Mac 开关的 FL 近似试用表 | [真机 FL 试用](docs/native-fl.md) |
 | 原生「创意外观」菜单、五项 LUT 调节和保存（机身操作与回读已验证） | [机内菜单模块](docs/native-creative-look.md) |
 | 复现扩展 Gamma 控制接口的原厂 ARM 测试 | [机内色彩接口研究](docs/color-interface.md) |

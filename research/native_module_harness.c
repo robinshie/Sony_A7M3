@@ -78,6 +78,15 @@ int a7_fl_dialog_open(uintptr_t base,void*manager,int(*commit)(void)) {
     if(dialog_open_fail)return -1;
     dialog_commit=commit;return 0;
 }
+#ifdef A7_FL_SD_IMPORT
+#include "a7-fl-sd-files.h"
+static int (*sd_select_callback)(unsigned);
+static const char *(*sd_name_callback)(unsigned);
+static unsigned sd_file_count;
+int a7_fl_dialog_files(uintptr_t base,void*manager,unsigned count,const char*(*name)(unsigned),int(*select_file)(unsigned),int(*commit)(void)) {
+ check(count&&name&&select_file,"file dialog callbacks");sd_select_callback=select_file;sd_name_callback=name;sd_file_count=count;return a7_fl_dialog_open(base,manager,commit);
+}
+#endif
 static int confirm_dialog(void){int(*commit)(void)=dialog_commit;dialog_commit=0;return commit?commit():-1;}
 #endif
 static void test(int ok,const char *message) {module_checks++;check(ok,message);}
@@ -159,6 +168,9 @@ int a7_fl_preview_request(uintptr_t base,const struct a7_fl_api *backup,
     test(base==0x40000000&&backup->read==api.read&&readable==memory_guard&&opaque==&identity_calls,"preview uses witnessed native platform");
     test(a7_fl_status()->installed,"no model request during early color boot");
     int enabled,values[5];test(get_value(0x7000,&enabled)==1,"current accepted mode readable");
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(enabled>=7)enabled=(int)a7_fl_status()->mode; /* UI slot and processing base are distinct. */
+#endif
     for(unsigned i=0;i<5;i++){test(get_value(0x7001+i,values+i)==1,"current accepted scalar readable");values[i]-=i==3?0:9;}
     A7FLColorParams p={values[0],values[1],values[2],values[3],values[4]};uint8_t expected[1280];
     const uint8_t *base_table=CANDIDATE;
@@ -195,7 +207,11 @@ int a7_fl_preview_request(uintptr_t base,const struct a7_fl_api *backup,
 }
 #endif
 static a7_menu_node *look_row(a7_menu_node *look,unsigned index) {
-    check(look&&look->count==NATIVE_ADJUST_PAGES&&index<=NATIVE_ADJUST_FIELDS+1,"look has native pages and bounded row");
+    check(look&&look->count==NATIVE_ADJUST_PAGES
+#if defined(A7_FL_SD_IMPORT)
+    +1
+#endif
+&&index<=NATIVE_ADJUST_FIELDS+1,"look has native pages and bounded row");
     return look->children[index/6]->children[index%6];
 }
 static int row_title(a7_menu_node *look,unsigned index) {
@@ -209,6 +225,57 @@ int mock_action_process(void *view,void *node) {
 void mock_action_flag(int value) {check(value==1,"native action bookkeeping");action_flags++;}
 static int stock_action(void *manager,int id) {(void)id;check(manager==manager_words,"stock action manager");stock_actions++;return 1;}
 static int stock_condition(void *manager,int id,int value) {(void)id;(void)value;check(manager==manager_words,"stock action condition");action_fallbacks++;return 1;}
+#ifdef A7_FL_SD_TEST
+extern void a7_fl_sd_test_api(const struct a7_sd_api*);
+static unsigned sd_position,sd_read_failure,sd_mutated,sd_closes;
+static unsigned char sd_device[16];
+static int sd_first(const char*p,unsigned flags,void*info){
+ check(p[0]=='A'&&flags==128,"external drive listing");*(const char**)info="FL6-grain-1.a7look";sd_device[10]='B';return 0;
+}
+static int sd_next(void*p){(void)p;return 2;}
+static const unsigned char *sd_drive(void*p){(void)p;return sd_device;}
+static uint32_t sd_mounted(void){return 1;}
+static void *sd_open(const char*p,const char*m){
+ check(p[0]=='B'&&m[0]=='r',"internal drive translation");sd_position=0;return sd_device;
+}
+static unsigned sd_read(void*b,unsigned size,unsigned count,void*f){
+ (void)f;check(size==1,"recipe byte reads");if(sd_read_failure)return 0;
+ const char *text=sd_mutated?"A7FL-PATCH/1\nFL6.grain=2\n":"A7FL-PATCH/1\nFL6.grain=1\n";
+ unsigned left=25-sd_position;if(count>left)count=left;
+ bytes(b,text+sd_position,count);sd_position+=count;return count;
+}
+static int sd_close(void*f){(void)f;sd_closes++;return 0;}
+static int sd_eof(void*f){(void)f;return sd_position==25;}
+static int sd_error(void*f){(void)f;return sd_read_failure?99:sd_position==25?8:0;}
+#ifndef A7_FL_CUSTOM_LOOKS
+static void test_sd_import(a7_menu_node *look){
+ struct a7_sd_api fs={sd_first,sd_next,sd_open,sd_read,sd_close,sd_eof,sd_error,sd_drive,sd_mounted};
+ a7_fl_sd_test_api(&fs);
+ struct a7_fl_preference before,after,expected;
+ check(a7_fl_preference_choose(&before,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0,"preimport record");
+ unsigned writes=slot_writes;
+ action_selected=look->children[NATIVE_ADJUST_PAGES]->children[0];
+ original_action(action_view);
+ check(dialog_commit&&sd_file_count==1&&sd_name_callback(0)[0]=='A'&&slot_writes==writes,"native import row opens file selection without writes");
+ check(!sd_select_callback(0)&&slot_writes==writes,"file selection only stages");
+ sd_mutated=1;check(confirm_dialog()!=0&&slot_writes==writes,"changed file rejected before save");sd_mutated=0;
+ original_action(action_view);sd_read_failure=1;
+ check(sd_select_callback(0)!=0&&slot_writes==writes,"read error cannot mutate settings");sd_read_failure=0;dialog_commit=0;
+ original_action(action_view);check(!sd_select_callback(0)&&!confirm_dialog(),"file selection confirmation saves via native transaction");
+ check(slot_writes==writes+1&&!a7_fl_status()->dirty&&!a7_fl_status()->fault,"one clean successful save");
+ check(a7_fl_preference_choose(&after,slot_bytes[0],128,slot_bytes[1],128,a7_pkg_original_sha,a7_pkg_build)>=0,"decode imported durable record");
+ expected=before;expected.film[5][0]=1;
+ /* Generation and recomputed CRC are bookkeeping; every setting is compared. */
+ expected.generation=after.generation;expected.candidate_crc=after.candidate_crc;
+ check(same(&expected,&after,sizeof after),"all unspecified parameters and selected look preserved");
+ check(after.generation==before.generation+1&&sd_closes>=4,"import advances generation and closes files");
+ put("NATIVE_SD_IMPORT_TRANSACTION_PASSED\n");
+}
+#endif
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+#include "native_custom_harness.h"
+#endif
 void guest_main(void) {
     /* Genuine kernel writer reads current thread_info based on this stack. */
     *(volatile uint32_t *)0x43ffe008=0x5f000000;
@@ -237,7 +304,11 @@ void guest_main(void) {
     test(!a7_fl_prepare(&platform)&&!a7_fl_install(0x40000000,process_element),"curve resident installs");
     const struct a7_fl_module_status *film=a7_fl_status();
     a7_menu_node *film_look=parent.children[3];
-    test(film->mode==0&&!slot_writes&&film_look->count==3,"curve menu starts Off without writes");
+    test(film->mode==0&&!slot_writes&&film_look->count==NATIVE_ADJUST_PAGES
+#if defined(A7_FL_SD_IMPORT)
+    +1
+#endif
+    ,"curve menu starts Off without writes");
     int enum_value=0,black=native_adjust_field_id(8);
     test(!set_value(black,18),"cannot edit curve while Off");
     test(set_value(0x7000,3)&&capture_matches(3),"activate FL3");
@@ -419,6 +490,12 @@ void guest_main(void) {
              "compact six-bank record retains each spatial effect");
     put("NATIVE_FL_SIX_LOOKS_PASSED\n");
 #endif
+#if defined(A7_FL_SD_TEST) && !defined(A7_FL_CUSTOM_LOOKS)
+    test_sd_import(film_look);
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    test_custom_flow(film_look);
+#endif
     put("NATIVE_FL_ALL_CURVE_BANKS_PASSED\n");
     test(!film->fault,"no resident fault after curve flow");
     put("NATIVE_FL_CURVE_MAIN_PASSED\n");finish();
@@ -444,6 +521,35 @@ void guest_main(void) {
     slot_exists[0]=1;
     bytes(torn,slot_bytes[0],128);torn[31]^=0x40;
     test(a7_fl_preference_decode(&decoded,torn,128,a7_pkg_original_sha,a7_pkg_build)<0,"reject corrupted six-bank slot");
+#ifdef A7_FL_TEST_CUSTOM_BOOT
+    (void)test_custom_flow;
+    struct a7_custom_look imported;struct a7_custom_catalog empty={0},catalog;
+    empty.next_slot=7;
+    test(!a7_custom_parse((const unsigned char*)custom_recipe,sizeof custom_recipe-1,&imported)&&
+         !a7_custom_append(&empty,&imported,&catalog),"build saved independent catalog");
+    catalog.active=7;
+    test(!a7_custom_encode(&catalog,custom_disk[0]),"persist selected independent catalog");
+    custom_sizes[0]=A7_CUSTOM_RECORD_BYTES;custom_exists[0]=1;
+    unsigned char preserved[128];bytes(preserved,slot_bytes[0],128);
+    test(!a7_fl_prepare(&platform)&&!a7_fl_initialize_color_prepared()&&!slot_writes&&!custom_writes&&
+         a7_fl_status()->mode==6&&a7_fl_status()->parameters[0]==4,"cold startup applies imported settings before any menu");
+    test(capture_matches(6)&&grain_selection==23&&halo_selection==-2&&vignette_selection==-6,
+         "cold startup applies real capture tables and spatial adapter");
+    platform.view_manager=process_element;
+    test(!a7_fl_configure_menu(&platform)&&!a7_fl_install(0x40000000,process_element),"attach dynamic menu after early color boot");
+    a7_menu_node *restored_custom=parent.children[3];int enum_mode=-1;
+    test(parent.count==8&&look_row(restored_custom,0)->count==8&&get_value(0x7000,&enum_mode)&&enum_mode==7,
+         "boot menu restores independent selected slot");
+    a7_menu_node *selected_custom=0;int selected_value=-1;
+    test(((int(*)(void*,a7_menu_node**))0x40682951)(look_row(restored_custom,0),&selected_custom)&&
+         ((int(*)(void*,int,int*))0x40683297)(selected_custom,0x10,&selected_value)&&selected_value==7,
+         "original native graph cursor points to imported choice");
+    test(custom_names(A7_FL_CUSTOM_TITLE_FIRST)&&same(preserved,slot_bytes[0],128)&&!custom_writes&&!slot_writes,
+         "boot keeps native name and all original settings unchanged");
+    test(set_value(0x7000,6)&&a7_fl_status()->parameters[0]==2&&grain_selection==22,
+         "original FL6 survives imported cold boot");
+    put("NATIVE_CUSTOM_BOOT_PASSED\n");finish();
+#endif
     test(!a7_fl_prepare(&platform)&&!a7_fl_initialize_color_prepared()&&!slot_writes&&
          a7_fl_status()->mode==6&&same(data_guarded+1,target,1280),"cold startup restores confirmed FL6 without a save");
     platform.view_manager=process_element;

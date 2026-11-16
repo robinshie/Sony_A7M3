@@ -40,6 +40,13 @@ static int menu_action(void *manager, int id) {
     if (!m || manager != m->manager) return 0;
     if (id == m->action_id && m->action)
         return m->action(m->opaque, id) == 1;
+#ifdef A7_FL_SD_IMPORT
+    if (id == m->import_action_id && m->import_action)
+        return m->import_action(m->opaque, id) == 1;
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(id==m->delete_action_id&&m->delete_action)return m->delete_action(m->opaque,id)==1;
+#endif
     return ((native_action)m->before[0x54 / 4])(manager, id);
 }
 
@@ -48,6 +55,19 @@ int a7_menu_bind_action(a7_menu_model *m, int id, a7_menu_action action) {
         id <= A7_MENU_PROCESS_LAST || id > 0x7fff || custom(id) ||
         *(uintptr_t **)m->manager != m->table + 2) return -1;
     if (!m->before[0x54 / 4]) return -2;
+#ifdef A7_FL_SD_IMPORT
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(m->action&&m->import_action&&m->action_id!=id&&m->import_action_id!=id){
+        if(m->delete_action&&m->delete_action_id!=id)return -1;
+        m->delete_action_id=id;m->delete_action=action;return 1;
+    }
+#endif
+    if (m->action && m->action_id != id) {
+        if (m->import_action && m->import_action_id != id) return -1;
+        m->import_action_id=id;m->import_action=action;
+        return 1;
+    }
+#endif
     m->action_id = id;
     m->action = action;
     m->table[2 + 0x54 / 4] = (uintptr_t)menu_action;
@@ -66,6 +86,9 @@ int a7_menu_bind_model(a7_menu_model *m, void *manager, uintptr_t *expected,
     m->manager = manager; m->before = expected;
     m->read = read; m->write = write; m->opaque = opaque;
     m->action = 0; m->action_id = -1;
+#ifdef A7_FL_SD_IMPORT
+    m->import_action = 0; m->import_action_id = -1;
+#endif
     m->table[2 + 3] = (uintptr_t)menu_get;
     m->table[2 + 17] = (uintptr_t)menu_set;
     bound = m;

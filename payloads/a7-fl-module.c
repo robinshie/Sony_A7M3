@@ -18,6 +18,18 @@
 #include "a7-fl-grain-backend.h"
 #endif
 #include "a7-fl-module-data.h"
+#ifdef A7_FL_CUSTOM_LOOKS
+#include "a7-fl-custom-session.h"
+#ifndef A7_FL_CUSTOM_TITLE_FIRST
+#error Custom names require verified placeholder resources
+#endif
+extern void a7_custom_posix_io(struct a7_custom_io*);
+static struct a7_custom_session custom;
+static a7_menu_attachment custom_imports[A7_FL_MODULE_PARENTS];
+static a7_menu_node *custom_pointers[A7_FL_MODULE_PARENTS][66];
+static unsigned custom_attached;
+static int custom_mode(void);
+#endif
 #ifdef A7_FL_FILM_CONTROLS
 #if !defined(A7_FL_CAPTURE_CONTROLS) || !defined(A7_FL_LEICA_LOOK) || !defined(A7_FL_LOOK_BANKS) || !defined(A7_FL_SAVE_DIALOG)
 #error Film curve needs the complete FL3 resident configuration
@@ -30,6 +42,22 @@
 #endif
 #ifdef A7_FL_SAVE_DIALOG
 #include "a7-fl-dialog.h"
+#endif
+#ifdef A7_FL_SD_IMPORT
+#include "a7-fl-sd-recipe.h"
+#include "a7-fl-sd-files.h"
+#ifndef A7_FL_SD_IMPORT_TITLE
+#error Bind the import menu title to a verified locale resource
+#endif
+#define A7_FL_SD_IMPORT_ID 0x7012
+static unsigned sd_generation,sd_selected,sd_length;
+static struct a7_sd_api sd_api;
+static struct a7_sd_list sd_files,sd_scratch;
+static unsigned char sd_bytes[A7_SD_BYTES],sd_expected[A7_SD_BYTES];
+static void *sd_handle;
+#ifdef A7_FL_SD_TEST
+void a7_fl_sd_test_api(const struct a7_sd_api *api){sd_api=*api;sd_handle=(void*)1;}
+#endif
 #endif
 #ifdef A7_FL_CAPTURE_LOOK
 #include "a7-fl-capture.h"
@@ -145,6 +173,31 @@ static int film_change(const struct a7_fl_preference *next){
     module.control.dirty=1;return 0;
 }
 #endif
+#ifdef A7_FL_CUSTOM_LOOKS
+static int custom_apply(void*unused,const struct a7_fl_preference*before,struct a7_fl_preference*next){
+ (void)unused;(void)before;
+ int rc=film_crc(next);return rc?rc:film_change(next);
+}
+static int custom_start(void){
+ struct a7_custom_io io;a7_custom_posix_io(&io);
+ struct a7_custom_engine engine={custom_apply,0};
+ int rc=a7_custom_session_open(&custom,&io,&engine,&module.control.preference);
+ if(rc<0)return rc;
+ module.control.committed=module.control.preference=custom.effective;
+ module.control.dirty=0;return 0;
+}
+static int custom_mode(void){return custom.ready&&custom.working.active?(int)custom.working.active:module.control.preference.enabled;}
+static const char *custom_name(uint32_t id){
+ if(!custom.ready||id<A7_FL_CUSTOM_TITLE_FIRST)return 0;
+ unsigned i=id-A7_FL_CUSTOM_TITLE_FIRST;
+ return i<custom.working.count?custom.working.looks[i].name:0;
+}
+static int custom_refresh_nodes(void){
+ for(unsigned j=0;j<module.platform.parent_count;j++)
+  if(!native_adjust_custom_count(&module.trees[j],custom.working.count,A7_FL_CUSTOM_TITLE_FIRST))return -1;
+ return 0;
+}
+#endif
 static void snapshot(int error) {
     module.status.last_error=error;module.status.parents=module.attached;
     module.status.mode=module.runtime.state==A7_FL_ON?module.control.preference.enabled:module.runtime.state;module.status.dirty=module.control.dirty;
@@ -194,6 +247,13 @@ static int capture_check(int mode) {
 }
 #endif
 static int commit_checked(void) {
+#ifdef A7_FL_CUSTOM_LOOKS
+ if(custom.ready&&(custom.working.active||custom.saved.active)){
+  if(a7_fl_curve_verify(&film_io,&module.control.preference))return A7_FL_VERIFY;
+  if(a7_custom_session_save(&custom))return A7_FL_CONTROL_PERSIST;
+  if(custom.working.active){module.control.committed=module.control.preference;module.control.dirty=0;return 0;}
+ }
+#endif
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
     int grain_rc=grain_sync(&module.control.preference);if(grain_rc)return grain_rc;
 #endif
@@ -207,7 +267,11 @@ static int commit_checked(void) {
     if(a7_fl_store_save(&module.store,&next))return A7_FL_CONTROL_PERSIST;
     film_saved=1;
     module.control.committed=module.control.preference=next;
-    module.control.dirty=0;return 0;
+    module.control.dirty=0;
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(custom.ready)custom.builtin=custom.effective=next;
+#endif
+    return 0;
 #else
     int rc=capture_check(module.control.preference.enabled);
     if(rc){module.status.fault=1;return rc;}
@@ -289,7 +353,13 @@ static int owns_menu_root(const void *ptr) {
 #endif
 static int synchronize(void) {
     for(unsigned j=0;j<module.platform.parent_count;j++) {
-        if(!native_adjust_write(&module.trees[j],0x7000,module.control.preference.enabled,accept_applied,0))return 0;
+        if(!native_adjust_write(&module.trees[j],0x7000,
+#ifdef A7_FL_CUSTOM_LOOKS
+            custom_mode(),
+#else
+            module.control.preference.enabled,
+#endif
+            accept_applied,0))return 0;
         for(unsigned f=0;f<8;f++)
             if((A7_FL_EDITABLE_MASK&(1u<<f))&&
                !native_adjust_write(&module.trees[j],0x7001+(int)f,module.control.preference.parameters[f],accept_applied,0))return 0;
@@ -303,7 +373,13 @@ static int synchronize(void) {
 }
 static int model_read(void *unused,int id,int *value) {
     (void)unused;if(!module.status.installed||module.status.fault||!value)return 0;
-    if(id==0x7000)return native_adjust_encode(&module.trees[0],id,module.control.preference.enabled,value);
+    if(id==0x7000)return native_adjust_encode(&module.trees[0],id,
+#ifdef A7_FL_CUSTOM_LOOKS
+      custom_mode(),
+#else
+      module.control.preference.enabled,
+#endif
+      value);
     unsigned f=native_adjust_field_index(id);
 #ifdef A7_FL_FILM_CONTROLS
     if(f>=8&&f<NATIVE_ADJUST_FIELDS)
@@ -319,13 +395,39 @@ static int model_write(void *unused,int id,int value) {
     if(!module.status.installed||module.status.fault) {leave(A7_FL_MODULE_PLATFORM);return 0;}
     int decoded;
     if(!native_adjust_decode(&module.trees[0],id,value,&decoded)) {leave(A7_FL_CONTROL_ARGUMENT);return 0;}
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(custom.ready&&((decoded>=7&&id==0x7000) || custom.working.active)){
+        unsigned field=native_adjust_field_index(id);int rc;
+        if(id==0x7000){
+            if(module.control.dirty)return leave(A7_FL_MODULE_EVENT)==0;
+            rc=a7_custom_session_select(&custom,decoded>=7?(unsigned)decoded:0);
+        }else{
+            unsigned index=field<8?field:8+native_adjust_film_index(field);
+            rc=a7_custom_session_edit(&custom,index,decoded);
+        }
+        if(rc)return leave(A7_FL_MODULE_EVENT)==0;
+        module.control.dirty=custom.dirty;
+        if(id!=0x7000||decoded>=7){
+            if(!synchronize())return leave(A7_FL_MODULE_NODES)==0;
+            save_feedback(0x0204eaab);return leave(refresh_preview())==0;
+        }
+    }
+#endif
     int old_mode=module.control.preference.enabled;
     uint32_t old_crc=module.control.preference.candidate_crc;
 #ifdef A7_FL_FILM_CONTROLS
     unsigned f=native_adjust_field_index(id);
     struct a7_fl_preference next=module.control.preference;
     if(id==0x7000){
-        if(next.enabled==decoded){leave(0);return 1;}
+        if(next.enabled==decoded){
+#ifdef A7_FL_CUSTOM_LOOKS
+            if(custom.ready&&custom.dirty){
+                if(!synchronize())return leave(A7_FL_MODULE_NODES)==0;
+                save_feedback(0x0204eaab);return leave(refresh_preview())==0;
+            }
+#endif
+            leave(0);return 1;
+        }
         a7_fl_preference_switch(&next,decoded);
     } else if(f<8&&(A7_FL_EDITABLE_MASK&(1u<<f))){
         if(next.parameters[f]==decoded){leave(0);return 1;}
@@ -381,6 +483,123 @@ static int save_commit(void) {
     save_feedback(rc?0x0204ef87:0x0204ef85); /* Not Complete / Complete */
     return leave(rc);
 }
+#ifdef A7_FL_SD_IMPORT
+static int sd_different(const unsigned char *a,const unsigned char *b,unsigned n){
+ while(n--){if(*a++!=*b++)return 1;}
+ return 0;
+}
+static int sd_bind(void){
+ if(sd_handle)return 0;
+ void *(*open)(const char*,int)=(void*)(module.platform.view_base+0x15d958);
+ void *(*symbol)(void*,const char*)=(void*)(module.platform.view_base+0x15c8dc);
+ void *h=open("/usr/lib/libInfraFsys.so",6);if(!h)return -1;
+ sd_api.first=(void*)symbol(h,"Fsys_FindFirst");
+ sd_api.next=(void*)symbol(h,"Fsys_FindNext");
+ sd_api.open=(void*)symbol(h,"pf2_fopen");
+ sd_api.read=(void*)symbol(h,"pf2_fread");
+ sd_api.close=(void*)symbol(h,"pf2_fclose");
+ sd_api.eof=(void*)symbol(h,"pf2_feof");
+ sd_api.error=(void*)symbol(h,"pf2_ferror");
+ sd_api.drive_info=(void*)symbol(h,"GetDriveInfoFromFindInfo");
+ sd_api.mounted=(void*)symbol(h,"Fsys_GetMountDrives");
+ if(!sd_api.first||!sd_api.next||!sd_api.open||!sd_api.read||!sd_api.close||
+    !sd_api.eof||!sd_api.error||!sd_api.drive_info||!sd_api.mounted){
+  ((int(*)(void*))(module.platform.view_base+0x15bf38))(h);return -1;
+ }
+ sd_handle=h;return 0;
+}
+static int read_sd_candidate(struct a7_fl_preference *next,unsigned *size) {
+ if(sd_selected>=sd_files.count ||
+    a7_sd_read_file(&sd_api,sd_files.paths[sd_selected],sd_files.internal[sd_selected],
+                    sd_bytes,size))return -1;
+#ifdef A7_FL_CUSTOM_LOOKS
+ struct a7_custom_look item;(void)next;
+ return a7_custom_parse(sd_bytes,*size,&item);
+#else
+ int changed=a7_fl_sd_recipe_apply(sd_bytes,*size,&module.control.preference,next);
+ if(changed>=0&&film_crc(next))return -1;
+ return changed;
+#endif
+}
+static const char *sd_filename(unsigned index){
+ return index<sd_files.count?sd_files.paths[index]:0;
+}
+static int sd_can_import(void) {
+    return module.status.installed && !module.status.fault && !module.control.dirty &&
+        module.platform.identity(module.platform.opaque)==1;
+}
+static int sd_confirm(void) {
+    if(!enter())return A7_FL_MODULE_BUSY;
+    struct a7_fl_preference next;unsigned size=0;
+    if(!sd_can_import() || module.control.committed.generation!=sd_generation ||
+       read_sd_candidate(&next,&size)<0 || size!=sd_length ||
+       sd_different(sd_bytes,sd_expected,size))
+        return leave(A7_FL_MODULE_EVENT);
+#ifdef A7_FL_CUSTOM_LOOKS
+    int rc=a7_custom_session_import(&custom,sd_bytes,size);
+    if(!rc)rc=custom_refresh_nodes();
+    if(rc)module.status.fault=custom.fault;
+#else
+    int rc=film_change(&next);
+    if(!rc && !synchronize())rc=A7_FL_MODULE_NODES;
+    if(!rc)rc=commit_checked();
+#endif
+    save_feedback(rc?0x0204ef87:0x0204ef85);
+    return leave(rc);
+}
+static int sd_select(unsigned index){
+ if(!enter())return A7_FL_MODULE_BUSY;
+ if(!sd_can_import()||index>=sd_files.count)return leave(A7_FL_MODULE_EVENT);
+ sd_selected=index;struct a7_fl_preference next;unsigned size=0;
+ if(read_sd_candidate(&next,&size)<0)return leave(A7_FL_MODULE_EVENT);
+ memcpy(sd_expected,sd_bytes,size);sd_length=size;
+ sd_generation=module.control.committed.generation;
+ return leave(0);
+}
+static int sd_action(void *unused,int id) {
+ (void)unused;
+ if(id!=A7_FL_SD_IMPORT_ID||!enter())return 0;
+ if(!sd_can_import()||sd_bind())return leave(A7_FL_MODULE_EVENT)==0;
+ sd_files.count=0;uint32_t mounted=sd_api.mounted();
+ for(unsigned drive=0;drive<26;drive++)if(mounted&(1u<<drive)){
+  if(a7_sd_list_files(&sd_api,(char)('A'+drive),&sd_scratch))
+   return leave(A7_FL_MODULE_EVENT)==0;
+  for(unsigned n=0;n<sd_scratch.count;n++){
+   if(sd_files.count>=A7_SD_FILES)return leave(A7_FL_MODULE_EVENT)==0;
+   unsigned k=sd_files.count++;
+   memcpy(sd_files.paths[k],sd_scratch.paths[n],sizeof sd_files.paths[k]);
+   sd_files.internal[k]=sd_scratch.internal[n];
+  }
+ }
+ if(!sd_files.count)return leave(A7_FL_MODULE_EVENT)==0;
+ return leave(a7_fl_dialog_files(module.platform.view_base,module.platform.view_manager,
+              sd_files.count,sd_filename,sd_select,sd_confirm))==0;
+}
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+static unsigned delete_slot;
+static int delete_confirm(void){
+ if(!enter())return A7_FL_MODULE_BUSY;
+ if(!custom.ready||custom.working.active!=delete_slot||module.status.fault)return leave(A7_FL_MODULE_EVENT);
+ int rc=a7_custom_session_delete(&custom,delete_slot);
+ if(!rc){
+  module.control.preference=module.control.committed=custom.effective;module.control.dirty=0;
+  rc=custom_refresh_nodes();
+  if(!rc&&!synchronize())rc=A7_FL_MODULE_NODES;
+  if(!rc)rc=refresh_preview();
+ }
+ if(rc&&custom.fault)module.status.fault=1;
+ return leave(rc);
+}
+static int delete_action(void*unused,int id){
+ (void)unused;if(id!=0x7013||!enter())return 0;
+ if(!custom.ready||!custom.working.active||module.status.fault)return leave(A7_FL_MODULE_EVENT)==0;
+ delete_slot=custom.working.active;unsigned index=delete_slot-7;
+ if(index>=custom.working.count)return leave(A7_FL_MODULE_EVENT)==0;
+ return leave(a7_fl_dialog_delete(module.platform.view_base,module.platform.view_manager,
+    custom.working.looks[index].name,delete_confirm))==0;
+}
+#endif
 static int model_action(void *unused,int id) {
     (void)unused;if(id!=0x7009)return 0;
 #ifdef A7_FL_SAVE_DIALOG
@@ -396,6 +615,9 @@ static int model_action(void *unused,int id) {
 }
 static int rollback(void) {
     int error=0;
+#ifdef A7_FL_CUSTOM_LOOKS
+    while(custom_attached){if(a7_menu_detach(&custom_imports[custom_attached-1])<0)return -1;custom_attached--;}
+#endif
     while(module.attached) {
         unsigned j=module.attached-1;a7_menu_node *parent=module.attachments[j].parent;
         if(a7_menu_detach(&module.attachments[module.attached-1])<0) {error=1;break;}
@@ -491,7 +713,12 @@ static int initialize_color(void) {
     film_saved=present;
     module.control.preference=module.control.committed=preference;
     module.runtime.state=!!preference.enabled;
-    module.status.runtime_ready=1;return 0;
+    module.status.runtime_ready=1;
+#ifdef A7_FL_CUSTOM_LOOKS
+    return custom_start();
+#else
+    return 0;
+#endif
 #else
     A7FLColorParams parameters={preference.parameters[0],preference.parameters[1],preference.parameters[2],preference.parameters[3],preference.parameters[4]};
     uint8_t candidate[1280];
@@ -627,17 +854,44 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
             if(!native_adjust_add_look(&module.trees[j],label)){rollback();return leave(A7_FL_MODULE_NODES);}
 #endif
         if(!native_adjust_add_save(&module.trees[j],0x0204eaab)){rollback();return leave(A7_FL_MODULE_NODES);}
+#ifdef A7_FL_SD_IMPORT
+#ifdef A7_FL_CUSTOM_LOOKS
+        if(!native_adjust_add_import_sibling(&module.trees[j],A7_FL_SD_IMPORT_TITLE,A7_FL_SD_IMPORT_ID)){
+#else
+        if(!native_adjust_add_import(&module.trees[j],A7_FL_SD_IMPORT_TITLE,A7_FL_SD_IMPORT_ID)){
+#endif
+            rollback();return leave(A7_FL_MODULE_NODES);
+        }
+#endif
     }
+#ifdef A7_FL_CUSTOM_LOOKS
+    for(unsigned j=0;j<module.platform.parent_count;j++)
+      if(!native_adjust_add_delete(&module.trees[j],0x0204e12b,0x7013)){rollback();return leave(A7_FL_MODULE_NODES);}
+    if(custom_refresh_nodes()){rollback();return leave(A7_FL_MODULE_NODES);}
+#endif
     if(!synchronize()){rollback();return leave(A7_FL_MODULE_NODES);}
     rc=a7_menu_bind_model(&module.model,module.platform.manager,module.platform.manager_vtable,model_read,model_write,0);
     if(rc!=1){rollback();return leave(A7_FL_MODULE_MODEL);}module.bound=1;
     if(a7_menu_bind_action(&module.model,0x7009,model_action)!=1){rollback();return leave(A7_FL_MODULE_MODEL);}
+#ifdef A7_FL_SD_IMPORT
+    if(a7_menu_bind_action(&module.model,A7_FL_SD_IMPORT_ID,sd_action)!=1){
+        rollback();return leave(A7_FL_MODULE_MODEL);
+    }
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(a7_menu_bind_action(&module.model,0x7013,delete_action)!=1){rollback();return leave(A7_FL_MODULE_MODEL);}
+#endif
     for(unsigned j=0;j<module.platform.parent_count;j++) {
         module.parent_selected[j]=module.platform.parents[j]->selected;
         a7_menu_node *anchor=module.platform.anchors[j]?module.platform.anchors[j]:module.platform.creative_style;
         rc=a7_menu_attach(&module.attachments[j],module.platform.parents[j],anchor,
                          (a7_menu_node *)&module.trees[j].root,module.pointers[j],65);
         if(rc!=1){rollback();return leave(A7_FL_MODULE_ATTACH);}module.attached++;
+#ifdef A7_FL_CUSTOM_LOOKS
+        rc=a7_menu_attach(&custom_imports[j],module.platform.parents[j],(a7_menu_node*)&module.trees[j].root,
+            (a7_menu_node*)&module.trees[j].import_row,custom_pointers[j],66);
+        if(rc!=1){rollback();return leave(A7_FL_MODULE_ATTACH);}custom_attached++;
+#endif
     }
     /* The verified install seam is before SettingMenu construction while idle.
      * Its later UserInitialize initializes pages: for a warm graph invoke the native
@@ -660,6 +914,11 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
         rollback();return leave(A7_FL_MODULE_MODEL);
     }
 #endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(a7_fl_dialog_names(module.platform.view_base,module.platform.view_manager,custom_name)){
+        module.status.fault=1;return leave(A7_FL_MODULE_NODES);
+    }
+#endif
     module.status.installed=1;return leave(0);
 }
 int a7_fl_confirm(void) {
@@ -676,6 +935,12 @@ int a7_fl_cancel(void) {
     uint32_t old_crc=module.control.preference.candidate_crc;
 #ifdef A7_FL_FILM_CONTROLS
     int rc=0;
+#ifdef A7_FL_CUSTOM_LOOKS
+    if(custom.ready&&custom.dirty){
+        rc=a7_custom_session_cancel(&custom);
+        if(!rc){module.control.preference=custom.effective;module.control.dirty=0;}
+    }else
+#endif
     if(module.control.dirty){
         rc=film_change(&module.control.committed);
         if(!rc)module.control.dirty=0;

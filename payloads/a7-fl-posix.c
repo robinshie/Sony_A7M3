@@ -85,6 +85,7 @@ done:
 void a7_fl_posix_io(struct a7_fl_store_io *io) {
     if(io){io->read=read_slot;io->replace=replace_slot;io->opaque=0;}
 }
+
 #ifdef A7_FL_FILM_CONTROLS
 void a7_fl_posix_worklog_io(struct a7_fl_store_io *io) {
     if(io){a7_fl_posix_io(io);io->opaque=(void *)work_paths;}

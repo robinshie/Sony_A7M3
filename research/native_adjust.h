@@ -30,7 +30,9 @@
 #define NATIVE_ADJUST_PAGES 2
 #endif
 #define NATIVE_ADJUST_VALUES 31
-#ifdef A7_FL_SIX_LOOKS
+#if defined(A7_FL_CUSTOM_LOOKS)
+#define NATIVE_ADJUST_MODES 23
+#elif defined(A7_FL_SIX_LOOKS)
 #define NATIVE_ADJUST_MODES 7
 #else
 #define NATIVE_ADJUST_MODES 4
@@ -90,6 +92,17 @@ typedef struct {
     /* Generic SettingMenu expects root -> pages -> fields -> value leaves. */
     NativeAdjustNode pages[NATIVE_ADJUST_PAGES];
     NativeAdjustNode *page_ptrs[NATIVE_ADJUST_PAGES];
+#ifdef A7_FL_SD_IMPORT
+    NativeAdjustNode import_page, import_row;
+    NativeAdjustNode *import_children[1], *pages_with_import[NATIVE_ADJUST_PAGES+1];
+    NativeAdjustProperty import_props[5];
+    NativeAdjustProperties import_properties;
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    NativeAdjustNode delete_page,delete_row;
+    NativeAdjustNode *delete_children[1],*pages_with_delete[NATIVE_ADJUST_PAGES+1];
+    NativeAdjustProperty delete_props[5];NativeAdjustProperties delete_properties;
+#endif
     NativeAdjustProperty page_props[1];
     NativeAdjustProperties page_properties;
 } NativeAdjustTree;
@@ -112,6 +125,10 @@ int native_adjust_build(NativeAdjustTree *, uintptr_t caution_base,
  * Rejects a second append or a tree already attached to a parent. */
 int native_adjust_add_look(NativeAdjustTree *, uint32_t title_resid);
 int native_adjust_add_save(NativeAdjustTree *, uint32_t title_resid);
+#ifdef A7_FL_SD_IMPORT
+int native_adjust_add_import_sibling(NativeAdjustTree *,uint32_t title,int id);
+int native_adjust_add_import(NativeAdjustTree *, uint32_t title_resid, int process_id);
+#endif
 /* Shared property storage is also used by native clones. Existing locale
  * resources provide Save, Complete and Not Complete without changing files. */
 int native_adjust_save_title(NativeAdjustTree *, uint32_t title_resid);
@@ -154,5 +171,9 @@ int native_adjust_vignette_spec(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],int
 #endif
 /* Fill the five new specs from the confirmed FL3 preference, before build. */
 int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const int8_t points[5]);
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+int native_adjust_add_delete(NativeAdjustTree*,uint32_t,int);
+int native_adjust_custom_count(NativeAdjustTree*,unsigned,uint32_t);
 #endif
 #endif

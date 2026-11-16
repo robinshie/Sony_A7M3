@@ -11,6 +11,10 @@
 #include <unistd.h>
 #include "../payloads/a7-fl-posix.h"
 static char directory[256];static int fail_sync;
+#ifdef A7_RECIPE_TEST
+int a7_fl_import_slot(const struct a7_fl_store_io *,const struct a7_fl_store_io *,
+                      const uint8_t [4][128],unsigned,const uint8_t [128]);
+#endif
 #ifdef A7_FL_FILM_CONTROLS
 static unsigned dir_syncs,fail_dir_sync;
 #endif
@@ -71,6 +75,37 @@ int main(void){
     fail_dir_sync=1;assert(work.replace(work.opaque,1,0,0,0,b)<0&&dir_syncs==3);
     path(p0,"/setting/A7FW0.CFG");path(p1,"/setting/A7FW1.CFG");
     assert(!unlink(p0));assert(!unlink(p1));
+#ifdef A7_RECIPE_TEST
+    uint8_t before[4][128],after[128],bad[4][128];
+    fail_dir_sync=0;
+    for(unsigned i=0;i<4;i++)memset(before[i],i+1,128);
+    memset(after,9,128);
+    for(unsigned i=0;i<2;i++){
+        assert(!io.replace(io.opaque,i,0,0,0,before[i]));
+        assert(!work.replace(work.opaque,i,0,0,0,before[i+2]));
+    }
+    assert(a7_fl_import_slot(&io,&work,before,2,after)==-1);
+    for(unsigned i=0;i<4;i++){
+        memcpy(bad,before,sizeof bad);bad[i][127]^=1;
+        assert(a7_fl_import_slot(&io,&work,bad,1,after)==-2);
+        assert(!io.read(io.opaque,1,readback,129,&n)&&n==128&&!memcmp(readback,before[1],128));
+    }
+    assert(!a7_fl_import_slot(&io,&work,before,1,after));
+    assert(!io.read(io.opaque,1,readback,129,&n)&&n==128&&!memcmp(readback,after,128));
+    assert(a7_fl_import_slot(&io,&work,before,1,after)==-2);
+    memcpy(before[1],after,128);
+    fail_sync=1;
+    assert(a7_fl_import_slot(&io,&work,before,1,b)==-3);
+    fail_sync=0;
+    assert(!io.read(io.opaque,0,readback,129,&n)&&n==128&&!memcmp(readback,before[0],128));
+    for(unsigned i=0;i<2;i++){
+        assert(!work.read(work.opaque,i,readback,129,&n)&&n==128&&!memcmp(readback,before[i+2],128));
+    }
+    assert(!unlink(p0));assert(!unlink(p1));
+    path(p0,"/setting/A7FL0.CFG");path(p1,"/setting/A7FL1.CFG");
+    assert(!unlink(p0));assert(!unlink(p1));
+    puts("RECIPE_IMPORT_PASSED all four preimages, inactive-slot update, replay and sync failure");
+#endif
 #endif
     assert(!rmdir(directory));
     puts("NATIVE_POSIX_PASSED actual file create/read/replace/fsync, exact preimages, symlink/directory/oversize rejection");

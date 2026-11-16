@@ -46,6 +46,26 @@ static const char temporary[]=".a7fl-r16.new",backup[]=".a7fl-a44876fb.orig",log
 static const char temporary[]=".a7six.new",backup[]=".a7fl-9fcaf13e.orig",logname[]="A7SIXUP.LOG";
 #elif NMR_REVISION == 18
 static const char temporary[]=".a7size.new",backup[]=".a7fl-5fb33e69.orig",logname[]="A7SIZEUP.LOG";
+#elif NMR_REVISION == 24
+static const char temporary[]=".a7custsel.new",backup[]=".a7fl-a820f62c.orig",logname[]="A7CUSSEL.LOG";
+#elif NMR_REVISION == 23
+static const char temporary[]=".a7custtxt.new",backup[]=".a7fl-2e13c731.orig",logname[]="A7CUSTXT.LOG";
+#elif NMR_REVISION == 22
+static const char temporary[]=".a7custdel.new",backup[]=".a7fl-87e8f719.orig",logname[]="A7CUSDEL.LOG";
+#elif NMR_REVISION == 21
+static const char temporary[]=".a7custfix.new",backup[]=".a7fl-fc25a8f9.orig",logname[]="A7CUSFIX.LOG";
+#elif NMR_REVISION == 20
+static const char temporary[]=".a7custom.new",backup[]=".a7fl-f40e4a64.orig",logname[]="A7CUSTOM.LOG";
+#elif NMR_REVISION == 2001
+static const char temporary[]=".a7custom-zh.new",backup[]=".a7custom-zh.orig",logname[]="A7CUSZH.LOG";
+#elif NMR_REVISION == 2002
+static const char temporary[]=".a7custom-en.new",backup[]=".a7custom-en.orig",logname[]="A7CUSEN.LOG";
+#elif NMR_REVISION == 19
+static const char temporary[]=".a7sd.new",backup[]=".a7fl-e5a530c3.orig",logname[]="A7SDUP.LOG";
+#elif NMR_REVISION == 1901
+static const char temporary[]=".a7sd-zh.new",backup[]=".a7sd-zh.orig",logname[]="A7SDZH.LOG";
+#elif NMR_REVISION == 1902
+static const char temporary[]=".a7sd-en.new",backup[]=".a7sd-en.orig",logname[]="A7SDEN.LOG";
 #elif NMR_REVISION == 1701
 static const char temporary[]=".a7six-zh.new",backup[]=".a7six-zh.orig",logname[]="A7SIXZH.LOG";
 #elif NMR_REVISION == 1702
@@ -75,9 +95,9 @@ static const char temporary[]=".a7curve-en.new",backup[]=".a7curve-en.orig",logn
 #else
 #error Unsupported module replacement revision
 #endif
-#if NMR_REVISION == 1101 || NMR_REVISION == 1201 || NMR_REVISION == 1301 || NMR_REVISION == 1501 || NMR_REVISION == 15101 || NMR_REVISION == 1701 || NMR_REVISION == 1601
+#if NMR_REVISION == 2001 || NMR_REVISION == 1901 || NMR_REVISION == 1101 || NMR_REVISION == 1201 || NMR_REVISION == 1301 || NMR_REVISION == 1501 || NMR_REVISION == 15101 || NMR_REVISION == 1701 || NMR_REVISION == 1601
 static const char current[]="string_simplifiedchinese.uxc",directory[]="/usr/share/app";
-#elif NMR_REVISION == 1102 || NMR_REVISION == 1202 || NMR_REVISION == 1302 || NMR_REVISION == 1502 || NMR_REVISION == 15102 || NMR_REVISION == 1702 || NMR_REVISION == 1602
+#elif NMR_REVISION == 2002 || NMR_REVISION == 1902 || NMR_REVISION == 1102 || NMR_REVISION == 1202 || NMR_REVISION == 1302 || NMR_REVISION == 1502 || NMR_REVISION == 15102 || NMR_REVISION == 1702 || NMR_REVISION == 1602
 static const char current[]="string_english.uxc",directory[]="/usr/share/app";
 #else
 static const char current[]="a7fl.so",directory[]="/usr/lib";
@@ -171,7 +191,7 @@ int nmr_run(const NMRBundle*b,const unsigned char expected[32],NMRCall call,void
     b->view_size<4096||b->view_size>16*1048576||!same(expected,r->binding,32)||same(b->old_sha,b->new_sha,32)||!any(b->new_proof_sha,32))goto done;
  sha_update(&h,b->new_bytes,b->new_size);sha_finish(&h,sum);
  if(!same(sum,b->new_sha,32))goto done;
-#if NMR_REVISION == 1101 || NMR_REVISION == 1102 || NMR_REVISION == 1201 || NMR_REVISION == 1202 || NMR_REVISION == 1301 || NMR_REVISION == 1302 || NMR_REVISION == 1501 || NMR_REVISION == 1502 || NMR_REVISION == 15101 || NMR_REVISION == 15102 || NMR_REVISION == 1701 || NMR_REVISION == 1601 || NMR_REVISION == 1702 || NMR_REVISION == 1602
+#if NMR_REVISION == 2001 || NMR_REVISION == 1901 || NMR_REVISION == 2002 || NMR_REVISION == 1902 || NMR_REVISION == 1101 || NMR_REVISION == 1102 || NMR_REVISION == 1201 || NMR_REVISION == 1202 || NMR_REVISION == 1301 || NMR_REVISION == 1302 || NMR_REVISION == 1501 || NMR_REVISION == 1502 || NMR_REVISION == 15101 || NMR_REVISION == 15102 || NMR_REVISION == 1701 || NMR_REVISION == 1601 || NMR_REVISION == 1702 || NMR_REVISION == 1602
  if(!same(b->new_bytes,"uxc\7\0\0\0\0\17\0\47\0",12))goto done;
 #else
  if(!same(b->new_bytes,"\177ELF\1\1\1",7)||!same(b->new_bytes+16,"\3\0\50\0",4))goto done;

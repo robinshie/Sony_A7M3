@@ -11,6 +11,14 @@ static unsigned loader_refs;
 static void check(int ok,const char*s);
 static uint32_t menu[0x248/4],list[0x12500/4],node_vt[66],root[1],page[1],rows[4];
 static uint32_t save_title=0x0204eaab,painted_title[7],menu_draws,menu_ends,row_updates;
+static uint32_t *custom_label,*popup_label;
+static unsigned custom_paints,stock_label_sets;
+static const char*painted_name;
+void *widget_child(void*w){(void)w;check(0,"must not traverse heterogeneous native widgets");return 0;}
+void *widget_next(void*w){(void)w;check(0,"must not traverse heterogeneous native widgets");return 0;}
+#ifdef A7_FL_CUSTOM_LOOKS
+static const char*resolve_name(uint32_t id){return id==0x0204fdb9?"人像颗粒":0;}
+#endif
 static int owns_root(const void*p){return p==root;}
 void stock_menu_draw(void*v,int reason){check(v==menu&&reason==0,"native menu draw forwarded");menu_draws++;}
 void stock_menu_terminate(void*v){check(v==menu,"native menu termination forwarded");menu_ends++;}
@@ -51,7 +59,10 @@ void *get_widget(void*v,unsigned id){if(id==0xdabd8bcb){check(v==menu,"refresh u
 void *cast_widget(void*w){return w;}
 void *cast_footer(void*w){return w;}
 void resource_text(void*w,unsigned id){check(w==title&&(id==0x0204e90f||id==0x0204fd94||id==0x0204e9e8),"original title method");}
-void direct_text(void*w,const char*s){if(w==(char*)title+0x1bc)message=s;else if(w==(char*)yes+0xe00)yes_text=s;else if(w==(char*)no+0xe00)no_text=s;else unexpected();}
+static unsigned stock_variants;
+void stock_label_variant(void*w,void*v){(void)w;(void)v;stock_variants++;painted_name="stock formatted";}
+void stock_label_text(void*w,uint32_t id){((uint32_t*)w)[0x2dc/4]=id;stock_label_sets++;}
+void direct_text(void*w,const char*s){if(w==custom_label||w==popup_label){painted_name=s;custom_paints++;return;}if(w==(char*)title+0x1bc)message=s;else if(w==(char*)yes+0xe00)yes_text=s;else if(w==(char*)no+0xe00)no_text=s;else unexpected();}
 void display(void*w,int visible){check(w==title||w==yes||w==no,"widget visibility ABI");if(w==no)no_visible=visible;}
 void redraw(void*v){(void)v;redraws++;}
 void close_view(void*v,const char*n){(void)v;check(same(n,"@V039"),"only owned view closes");closes++;}
@@ -73,6 +84,33 @@ static void draw(void*v){uintptr_t*vt=*(uintptr_t**)v;((void(*)(void*,int))vt[0x
 static void action(void*v,int a){uintptr_t*vt=*(uintptr_t**)v;((void(*)(void*,int))vt[0xf8/4])(v,a);}
 static void key(void*v,unsigned id,int expected){int state=-1,act=-1;event=id;((void(*)(void*,int*,int*))0x42043799)(v,&state,&act);check(act==expected,"original event maps expected action");if(act>=0)action(v,act);}
 static void *open_dialog(void){unsigned n=queued;check(a7_fl_dialog_open(0x40000000,manager,commit)==0&&queued==n+1,"Save queues native view");check(pending_id==74&&pending_token==0x41374644,"boot token carried by original open");void*v=create(pending_token);draw(v);check(same(message,"确认保存？")&&same(yes_text,"确认")&&same(no_text,"取消")&&no_visible,"confirmation widgets");return v;}
+#ifdef A7_FL_SD_IMPORT
+static unsigned selected,selects;static int reject_file;
+static const char *filename(unsigned i){return i==0?"A:/FL6-grain-1.a7look":"B:/自定义配方.A7LOOK";}
+static int select_file(unsigned i){selected=i;selects++;return reject_file?-1:0;}
+static void *open_files(void){
+ check(a7_fl_dialog_files(0x40000000,manager,2,filename,select_file,commit)==0,"file dialog queued");
+ void*v=create(pending_token);draw(v);
+ check(same(message,"左右选择配方：\nA:/FL6-grain-1.a7look"),"dynamic first filename");return v;
+}
+static void test_files(void){
+ unsigned saved=commits;void*v=open_files();
+ check(a7_fl_dialog_files(0x40000000,manager,2,filename,select_file,commit)<0,"busy picker rejected");
+ key(v,4,3);check(same(message,"左右选择配方：\nB:/自定义配方.A7LOOK"),"native next key changes filename");
+ key(v,3,2);check(same(message,"左右选择配方：\nA:/FL6-grain-1.a7look"),"native previous key changes filename");
+ key(v,3,2);key(v,2,1);
+ check(selected==1&&selects==1&&commits==saved&&same(message,"确认导入配方？\nB:/自定义配方.A7LOOK"),"selection stages without saving");
+ key(v,6,0);check(commits==saved,"cancel confirmation preserves settings");
+ v=open_files();key(v,2,1);key(v,2,1);
+ check(commits==saved+1&&same(message,"完成"),"confirmed import saves once");
+ key(v,2,1);check(commits==saved+1,"completion never repeats import");
+ reject_file=1;v=open_files();key(v,2,1);
+ check(commits==saved+1&&same(message,"保存未完成"),"failed read cannot save");key(v,2,1);reject_file=0;
+ v=open_files();key(v,6,0);check(commits==saved+1,"cancel picker never saves");
+ check(a7_fl_dialog_files(0x40000000,manager,0,filename,select_file,commit)<0,"empty list rejected");
+ put("SD_FILE_DIALOG_PASSED: native navigation, filenames, stage, confirm, cancel, read failure, single commit\n");
+}
+#endif
 void guest_main(void){
     menu[0]=0x4087b600;menu[9]=(uintptr_t)manager;menu[0x130/4]=3;menu[0x188/4]=(uintptr_t)root;
     list[0x124a8/4]=(uintptr_t)root;list[0x1c8/4]=4;list[0x1cc/4]=2;list[0x1d0/4]=3;
@@ -104,7 +142,37 @@ void guest_main(void){
     check(a7_fl_dialog_open(0x40000000,manager+1,commit)<0&&queued==1,"different manager rejected");
     for(unsigned i=0;i<sizeof saved_stubs/sizeof saved_stubs[0];i++)
         for(unsigned j=0;j<saved_stubs[i].size;j++)((unsigned char*)saved_stubs[i].address)[j]=saved_stubs[i].bytes[j];
+#ifdef A7_FL_CUSTOM_LOOKS
+    custom_label=(void*)((char*)list+0x3118+0xb18);
+    custom_label[0x2dc/4]=0x0204fdb9;
+    popup_label=(void*)((char*)list+0xbaa8+0x1050+5*0x370);popup_label[0x2dc/4]=0x0204fdb9;
+    check(!a7_fl_dialog_names(0x40000000,manager,resolve_name),"bind dynamic names to owned menu");
+#endif
     observe_menu();check(menu_draws==1,"existing native menu observed before dialog");
+#ifdef A7_FL_CUSTOM_LOOKS
+    check(custom_paints==2&&same(painted_name,"人像颗粒")&&custom_label[0x2dc/4]==0x0204fdb9,
+          "menu draw uses UTF-8 name while retaining resource identity");
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    unsigned paints_before=custom_paints;
+    ((void(*)(void*,uint32_t))(*(uintptr_t*)0x4521d6dc))(popup_label,0x0204fdb9);
+    check(stock_label_sets==1&&custom_paints==paints_before+1&&same(painted_name,"人像颗粒"),
+          "popup text setter resolves name without any view draw");
+    ((void(*)(void*,uint32_t))(*(uintptr_t*)0x4521d6dc))(popup_label,0x0204fd94);
+    check(stock_label_sets==2&&custom_paints==paints_before+1,"stock label falls through without replacement");
+    ((void(*)(void*,uint32_t))(*(uintptr_t*)0x4521d6dc))(popup_label,0x0204fdb9);
+    check(stock_label_sets==3&&custom_paints==paints_before+2,"popup recycled row restores dynamic name");
+    put("NATIVE_POPUP_TEXT_DISPATCH_PASSED\n");
+    paints_before=custom_paints;
+    ((void(*)(void*,uint32_t))(*(uintptr_t*)0x408e5ae8))(custom_label,0x0204fdb9);
+    check(custom_paints==paints_before+1&&same(painted_name,"人像颗粒"),"collapsed selected value direct import resolves name");
+    ((void(*)(void*,void*))(*(uintptr_t*)0x408e40f4))(custom_label,0);
+    check(stock_variants==1&&custom_paints==paints_before+2&&same(painted_name,"人像颗粒"),"variant refresh cannot overwrite selected name");
+    ((void(*)(void*,uint32_t))(*(uintptr_t*)0x408e5ae8))(custom_label,0x0204fd94);
+    ((void(*)(void*,void*))(*(uintptr_t*)0x408e40f4))(custom_label,0);
+    check(stock_variants==2&&custom_paints==paints_before+2&&same(painted_name,"stock formatted"),"builtin selected row is not given stale custom name");
+    put("NATIVE_SELECTED_TEXT_DISPATCH_PASSED\n");
+#endif
     draw(cached);check(same(message,"确认保存？")&&!commits,"previously cached instance uses guarded callbacks");
     action(cached,0);check(!commits&&closes==1&&!stock_writes,"cached instance cancellation isolated");closes=0;
     void*v=open_dialog();check(!commits,"opening does not save");
@@ -135,5 +203,20 @@ void guest_main(void){
     menu[0x188/4]=(uintptr_t)root;observe_menu();
     ((void(*)(void*))((uintptr_t*)menu[0])[0xe4/4])(menu);v=open_dialog();action(v,1);
     check(menu_ends==1&&row_updates==before,"terminated menu pointer never used");action(v,0);
+#ifdef A7_FL_SD_IMPORT
+    test_files();
+#endif
+#ifdef A7_FL_CUSTOM_LOOKS
+    unsigned deleted_before=commits;
+    check(!a7_fl_dialog_delete(0x40000000,manager,"人像颗粒",commit),"delete prompt queues");
+    void*del=create(pending_token);draw(del);
+    check(same(message,"确认删除外观？\n人像颗粒"),"delete prompt names exact look");
+    action(del,0);check(commits==deleted_before,"delete cancel changes nothing");
+    check(!a7_fl_dialog_delete(0x40000000,manager,"人像颗粒",commit),"delete retry queues");
+    del=create(pending_token);draw(del);action(del,1);
+    check(commits==deleted_before+1&&same(message,"完成"),"delete confirmation commits once");
+    action(del,1);check(commits==deleted_before+1,"delete completion cannot repeat");
+    put("NATIVE_DELETE_DIALOG_PASSED\n");
+#endif
     put("NATIVE_SAVE_DIALOG_PASSED: original factory, open event, state dispatch, navigation, cancel, success, failure, repeated confirm, lifecycle, stock isolation, native cached menu row refresh\n");exit_test(0);
 }

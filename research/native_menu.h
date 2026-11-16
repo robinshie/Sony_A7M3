@@ -40,6 +40,13 @@ typedef struct {
     void *opaque;
     a7_menu_action action;
     int action_id;
+#ifdef A7_FL_SD_IMPORT
+#ifdef A7_FL_CUSTOM_LOOKS
+    int delete_action_id;a7_menu_action delete_action;
+#endif
+    int import_action_id;
+    a7_menu_action import_action;
+#endif
 } a7_menu_model;
 
 /* Caller provides persistent storage for count+1 pointers, never a stack array.

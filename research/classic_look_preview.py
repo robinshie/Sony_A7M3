@@ -6,10 +6,6 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from PIL import Image, ImageDraw, ImageFont
-
-from native_fl import Codec
-
 ROOT = Path(__file__).resolve().parents[1]
 LABELS = ('原厂 4.04 · 创意外观关', 'FL · 实验版', 'FL2', 'FL3 · 徕卡胶片',
           'FL4 · 经典负片', 'FL5 · 经典纪实', 'FL6 · 自然人像')
@@ -32,11 +28,13 @@ EXTRACT = r'''
 #include "a7-fl-classic-looks.h"
 #include "a7-fl-fivepoint-preview.h"
 int main(void) {
-    const A7FLColorParams p = {0};
-    const int curve[5] = {0};
     uint8_t base[1280], table[1280];
     if (fwrite(a7_pkg_original[0], 1, sizeof table, stdout) != sizeof table) return 1;
     for (int i=1; i<=6; ++i) {
+        int v[10],curve[5];
+        for(int j=0;j<10;++j) if(scanf("%d",&v[j])!=1) return 4;
+        const A7FLColorParams p={v[0],v[1],v[2],v[3],v[4]};
+        for(int j=0;j<5;++j) curve[j]=v[5+j];
         if (i==1) memcpy(base,a7_pkg_base,sizeof base);
         else {
             int rc;
@@ -48,12 +46,20 @@ int main(void) {
         if (a7_fl_fivepoint_preview(base,a7_pkg_expand,a7_pkg_compress,&p,curve,table) ||
             fwrite(table,1,sizeof table,stdout) != sizeof table) return 3;
     }
+    /* Off stores the adjusted FL base CRC without applying its five-point curve. */
+    int v[5];
+    for(int j=0;j<5;++j) if(scanf("%d",&v[j])!=1) return 4;
+    const A7FLColorParams off={v[0],v[1],v[2],v[3],v[4]};
+    if(a7_fl_adjust_lut(a7_pkg_base,1280,a7_pkg_expand,a7_pkg_compress,&off,table,1280) ||
+       fwrite(table,1,sizeof table,stdout)!=sizeof table) return 5;
     return 0;
 }
 '''
 
 
-def extract_tables(build):
+def extract_tables(build, banks=None, include_off_crc=False):
+    banks = [[0]*16 for _ in range(6)] if banks is None else banks
+    values = [v for bank in banks for v in (*bank[:5], *bank[10:15])] + banks[0][:5]
     with tempfile.TemporaryDirectory() as tmp:
         source, exe = Path(tmp) / 'extract.c', Path(tmp) / 'extract'
         source.write_text(EXTRACT)
@@ -61,9 +67,11 @@ def extract_tables(build):
         subprocess.run(['cc', '-O2', '-I', str(build), '-I', str(ROOT/'payloads'),
                         *('-DA7_FL_'+flag for flag in flags), str(source),
                         str(ROOT/'payloads/a7-fl-fivepoint.c'), '-o', str(exe)], check=True)
-        data = subprocess.check_output([str(exe)])
-    if len(data) != 7*1280:
-        raise ValueError('Expected one original and six generated preview tables')
+        data = subprocess.check_output([str(exe)], input=' '.join(map(str, values)).encode())
+    if len(data) != 8*1280:
+        raise ValueError('Expected original, six generated preview tables and Off CRC input')
+    if not include_off_crc:
+        data = data[:7*1280]
     return [data[n:n+1280] for n in range(0, len(data), 1280)]
 
 
@@ -93,12 +101,13 @@ def sample(rgb, table, codec):
                  (y+1.5748*cr, y-.187324*cb-.468124*cr, y+1.8556*cb))
 
 
-def render(output, tables, codec, font):
+def render(output, tables, codec, font, caption='相同色卡、默认调节值｜预览色表模拟，非真机 JPEG'):
+    from PIL import Image, ImageDraw, ImageFont
     large, title, small = (ImageFont.truetype(str(font), n) for n in (29, 20, 16))
     image = Image.new('RGB', (1152, 470), '#171a1f')
     draw = ImageDraw.Draw(image)
     draw.text((24, 15), 'Sony A7 III｜原厂与六套创意外观', font=large, fill='#ffffff')
-    draw.text((24, 58), '相同色卡、默认调节值｜预览色表模拟，非真机 JPEG', font=small, fill='#c1c8d1')
+    draw.text((24, 58), caption, font=small, fill='#c1c8d1')
     for n, (label, table) in enumerate(zip((*LABELS, '输入色卡'), (*tables, None))):
         x, y = 24+280*(n % 4), 100+181*(n//4)
         draw.text((x, y), label, font=title, fill='#f4f5f7')
@@ -112,6 +121,7 @@ def render(output, tables, codec, font):
 
 
 def main():
+    from native_fl import Codec
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--build', required=True, type=Path)
     p.add_argument('--output', required=True, type=Path)
