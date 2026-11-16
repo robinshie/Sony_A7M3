@@ -54,7 +54,8 @@ def bundled_recipes():
 def card_root(path):
     card = Path(path).expanduser().resolve(strict=True)
     if ((sys.platform != 'win32' and card == Path(card.anchor)) or
-            (sys.platform == 'win32' and card.drive.casefold() == os.environ.get('SystemDrive', 'C:').casefold()) or
+            (sys.platform == 'win32' and card == Path(card.anchor) and
+             card.drive.casefold() == os.environ.get('SystemDrive', 'C:').casefold()) or
             card == Path('/System/Volumes/Data')):
         raise ValueError('不能选择电脑系统盘。请选择相机的 SD 存储卡。')
     if not card.is_dir() or not any((card / n).is_dir() for n in ('DCIM', 'AVF_INFO', 'PRIVATE')):
