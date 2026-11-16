@@ -1,6 +1,11 @@
 name: Build A7M3 GUI tool
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload tested GUI tool assets to existing v0.01 (does not change firmware)'
+        type: boolean
+        default: false
   push:
     paths: ['tool/**', 'tools/custom_look_recipes.py', 'tools/look_recipes.py', 'recipes/**', '.github/workflows/tool-gui.yml']
 permissions:
@@ -32,3 +37,19 @@ jobs:
           name: A7M3-Tool-${{ matrix.os }}
           path: tool-output/*
           if-no-files-found: error
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: tool-artifacts
+      - name: Publish tested tool packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tool/publish.py tool-artifacts
