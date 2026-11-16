@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sony A7M3 Tool</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div><span class="brand">α</span><strong>A7M3 <span class="thin">Tool</span></strong><span class="tag">v0.01</span></div><div class="top-right"><span id="connection">正在连接本地服务…</span><button id="quit" class="quiet">退出工具</button></div></header>
+<div class="shell">
+<aside><p class="eyebrow">工作区</p><nav aria-label="工具页面">
+<button data-page="recipes" class="nav active" aria-current="page">01　配方与 SD 卡</button>
+<button data-page="package" class="nav">02　完整包校验</button>
+<button data-page="install" class="nav">03　安装与使用指南</button>
+</nav><div class="aside-note"><span class="dot"></span>仅在本机运行<p>文件与配方不上传。<br>适用于 Windows / macOS / Linux。</p></div></aside>
+<main>
+<section id="recipes" class="page">
+<div class="heading"><div><p class="eyebrow">CREATIVE LOOK LIBRARY</p><h1>把喜欢的配色，带进相机。</h1><p class="subtitle">选配方 → 复制到 SD 卡 → 机内确认导入。需先装好项目的「创意外观」功能。</p></div></div>
+<div class="notice">本工具可管理配方、校验完整包；当前不具备固件刷写功能。纯原厂 4.04 请先看「安装与使用指南」。</div>
+<div class="card sd"><div><h2>01 / 选择 SD 卡</h2><p>相机大容量存储接电脑时，不要同时分配给 UTM。也可使用读卡器。</p></div>
+<div class="row"><label for="card-path" class="sr-only">SD 卡根目录</label><input id="card-path" list="card-options" placeholder="自动扫描，或填写 E:\ / /Volumes/Untitled"><datalist id="card-options"></datalist><button id="scan">扫描</button><button id="read-card">查看卡上配方</button></div><div id="card-list" class="card-list"></div></div>
+<div class="library-layout"><div class="card library"><div class="section-top"><h2>02 / 选择配方</h2><button id="add-files">添加 .a7look</button><input id="recipe-files" type="file" accept=".a7look" multiple hidden></div>
+<p class="muted">内置六套基础配方与六套胶片配方。点击名称查看或编辑参数。</p><div class="row"><button id="all" class="quiet">全选</button><button id="none" class="quiet">清空选择</button><span id="selection" class="muted">已选 0 个</span></div><div id="recipe-list"></div></div>
+<div class="card editor"><p class="eyebrow">RECIPE EDITOR</p><h2 id="editor-title">选择一份配方</h2><p id="editor-empty" class="muted">点击左侧配方名称，即可查看、编辑并另存为新的风格。这里是参数编辑，不是照片效果预览。</p>
+<form id="editor-form" hidden><div class="form-grid"><label>显示名称<input id="look-name" required maxlength="63"></label><label>文件名<input id="look-file" required></label><label>配方 ID<input id="look-id" required pattern="[a-z0-9][a-z0-9_-]{0,47}"></label><label>基础配色<select id="look-base"></select></label></div><p class="muted">另做新风格时，请使用新的 ID 和文件名；改名不会改变基础配色算法。</p><div id="parameters" class="parameters"></div>
+<p class="muted small">颗粒 / 光晕 / 暗角仅拍后 JPEG 生效；锐度、锐度范围、清晰度的画面效果尚未验证。</p>
+<div class="row"><button type="submit">应用到待复制列表</button><button type="button" id="download-recipe">另存配方</button></div><p class="muted small">编辑只影响当前工具会话。保存到电脑或复制到卡后才会保留。</p></form></div></div>
+<div class="copy-bar"><div><strong>03 / 复制并核对</strong><p>同名不同内容会停止；不删除卡上的照片或旧配方。</p></div><button id="copy" class="primary">复制所选到 SD 卡</button></div>
+</section>
+<section id="package" class="page" hidden><p class="eyebrow">PACKAGE INSPECTOR</p><h1>核对完整功能包。</h1><p class="subtitle">选择 Sony_A7M3-v0.01.zip，检查整个 ZIP、清单和模块内容。不执行包内脚本。</p>
+<div class="card"><h2>本地 ZIP</h2><input id="package-file" type="file" accept=".zip"><label class="block">发布页提供的 SHA-256（可选）<input id="expected-hash" placeholder="64 位十六进制；填写后同时验证 ZIP 外部校验值"></label><button id="verify-package" class="primary">校验完整包</button><p class="muted">包内校验只能证明内部一致性；请从项目 Release 下载并比对发布页校验值。</p></div>
+<div id="package-result" class="card" hidden></div></section>
+<section id="install" class="page" hidden><p class="eyebrow">SETUP GUIDE</p><h1>先安装功能，再自由导入。</h1><p class="subtitle">区分机身固件安装与 SD 配方导入，避免把复制完成误认为刷机完成。</p>
+<div class="card"><h2>纯原厂 ILCE-7M3 4.04</h2><p id="install-reason"></p><p>当前完整包包含模块、菜单增量与源码，但不能通过官方更新器安装，也不能仅复制到 SD 卡生效。</p><button disabled>首次安装 · 后端未接通</button><p class="muted">还需完成：通用机身检测 → 逐机备份与原厂前像核对 → 加载器、菜单和模块安装 → 回读 → 纯原厂机冷启动验收。现有开发机的升级记录不能替代首次安装验证。</p></div>
+<div class="card"><h2>机内已有「从 SD 卡导入」</h2><ol class="steps"><li>相机设为「大容量存储」，用 Micro-USB 接电脑；Mac 暂不分配给 UTM。</li><li>在「配方与 SD 卡」选卡根目录、选配方，点击「复制所选到 SD 卡」，等回读完成。</li><li>Windows 在资源管理器、Mac 在 Finder、Linux 在文件管理器中安全推出。等存取灯熄灭后拔 USB。</li><li>MENU → 拍摄设置 1 → 第 14 页 → 同级「从 SD 卡导入」。左右选文件，确认导入，等「完成」。</li><li>进入「创意外观」，选择新增风格；调整后保存 → 确认。拍 JPEG 并回放，重启检查保留。</li></ol><p class="muted">卡根目录最多列 32 份配方；机内最多 16 个自定义外观（满额实机尚未逐项验证）。重复 ID 不能直接覆盖；需要时从机内删除旧自定义项后重新导入。</p></div>
+<div class="card"><h2>找不到卡 / 连接失败</h2><p>先确认电脑能在文件管理器里打开 SD 卡。如果已把 USB 分配给 UTM，请先释放，再按需重新插线。只有 USB 设备名、没有存储卷时，本工具无法复制文件。</p><p>不要选择 PMHOME 或电脑系统盘。选择包含 DCIM 的存储卡根目录；扫描不到时可手动填路径。GUI 不会自动改 USB 驱动或接管虚拟机。</p></div></section>
+<section class="card activity"><div class="section-top"><h2>操作记录</h2><button id="export-log" class="quiet">导出记录</button></div><pre id="log" role="log" aria-live="polite">等待操作。</pre></section>
+</main></div><div id="busy" hidden role="status">正在处理，请保持连接…</div>
+<script src="/app.js"></script></body></html>

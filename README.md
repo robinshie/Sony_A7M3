@@ -14,6 +14,7 @@
 
 | 要做什么 | 从这里开始 |
 | --- | --- |
+| 使用 Windows／Mac／Linux 中文 GUI 编辑配方、复制 SD 卡、校验完整包（尚不刷固件） | [跨平台 A7M3 Tool 与小白步骤](tool/README.md) |
 | 在 QEMU 看菜单、调显示和试改标题 | [QEMU 菜单实验](docs/ui.md) |
 | 核对整合版、查看更新流程、打开 QEMU 与了解 Sony 官方更新步骤 | [操作步骤与流程图](docs/release-workflow.md) |
 | 比较原厂 4.04、当前 v0.01 和 FL1–FL6 整合版 | [功能与配色对照](docs/edition-comparison.md) |
