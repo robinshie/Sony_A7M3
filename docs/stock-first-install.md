@@ -98,6 +98,10 @@ USB 层使用固定上游提交 `a82f5baaa8e9c3d9f28f94699e860fb2e48cc8e0` 的�
 
 ## 发布稳定首次安装器前的剩余验收
 
+2026-11-16 的 [三平台构建记录](https://github.com/robinshie/Sony_A7M3/actions/runs/43866534385) 已通过：Windows x64、macOS arm64、Linux x64 均运行 34 项 GUI/会话模拟测试，构建原生程序，再从解压后的程序加载 libusb 动态库、认证模块和散列库，启动本地 GUI、复制/回读临时配方并退出。`--usb-runtime-check` 明确不枚举设备；CI 无相机，因此这个结果不代表 Windows 实物通信或原厂首装成功。Mac 本地含候选包的独立程序也完成相同启动检查。
+
+实验候选 SHA-256：`fdf9b39de2de1fa03b3b4c19907f1ee606b233b8e7399e7910d5206ac79373b6`。工具源码在 `codex/stock-404-installer` 开发分支；未替换 main 或 v0.01 稳定附件。
+
 1. Windows 实物 USB、驱动组合以及 Mac GUI 的 UTM 交接。
 2. Sony 内核中原厂各资源的实际映射/读者状态；当前严格检查可能拒绝执行，不能删掉检查强行刷入。断电中断后的整套恢复尚未完成。
 3. 纯原厂 4.04 → 安装 → 断电启动 → SD 导入 → 保存 → JPEG L/M/S → 再次断电保留。已有改装机的升级记录不能替代。

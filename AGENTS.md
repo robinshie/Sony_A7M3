@@ -1,5 +1,7 @@
 # A7M3 默认开发和发布流程
 
+**首装工具三平台构建通过。** 开发分支 `codex/stock-404-installer`，实现提交 `b45ecb2`；Actions `43866534385` 的 Windows x64/macOS arm64/Linux x64 均通过 34 测试、原生构建和解压后启动、libusb/认证依赖加载、临时配方回读。没有相机 USB 枚举或实机刷写。含候选的本地包目录 `.lab/stock-tool-dist`；main 与稳定 v0.01 未改，硬件验证仍空缺。不要混淆 Windows EXE 能加载驱动库与实际 Sony USB/原厂首次安装验收。
+
 **2026-11-16 首装实验 GUI 已接入真实后端，禁止连接当前相机。** 用户明确要求继续原厂 4.04 首装与 Windows USB，但先别动现有改装机；本轮未枚举/连接任何相机。`tool/first_install.py` 串联单一 USB 会话、逐机备份、单独确认、暂存、图标/配置/加载器激活、WBI 绑定和完整回读；`tool/usb_transport.py` 使用固定上游最小源码和 libusb，Windows 普通/服务两模式仍待实物测试。GUI 启动不枚举 USB，`--usb-runtime-check` 仅加载动态库及认证依赖，不枚举设备。
 
 最终候选 `.lab/stock-gui-package-final/Sony_A7M3-Stock404-Experimental.zip` SHA256 `fdf9b39de2de1fa03b3b4c19907f1ee606b233b8e7399e7910d5206ac79373b6`。绑定 `.lab/stock-first-install-final-20261116/arm-stage-v2` 与 `.lab/stock-activation-v3`；后者 ARM Linux 真实映射/VFS 测试 134 项通过，但挂载及故障由 shim 提供。GUI/USB 模拟 34 测试、差分 5 测试通过。前一段“尚未接通”是历史开发状态。新代码仍没有原厂 Sony 内核实机安装/冷启动、Windows 实物 USB 或完整断电恢复验收；不能据此覆盖 v0.01 稳定附件。真实写入候选不等于只读工具，必须保留实验标记与逐文件前像限制。当前改装机因已有模块/配置会被首装工具拒绝，不为测试将其恢复原厂。
