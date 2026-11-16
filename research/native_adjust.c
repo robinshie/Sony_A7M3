@@ -9,6 +9,17 @@ typedef NativeAdjustNode *(*Clone)(NativeAdjustNode *);
 typedef int (*DeepInit)(NativeAdjustNode *,NativeAdjustNode **,int,int);
 typedef int (*GetInt)(NativeAdjustNode *,int,int *);
 
+/* Stable engine IDs remain unchanged while the menu omits deleted built-ins. */
+static int mode_position(const NativeAdjustTree*t,int value){
+ if(!t||value<0||value>=NATIVE_ADJUST_MODES)return -1;
+ for(int i=0;i<t->mode.count;i++)if(t->mode_ptrs[i]==&t->mode_values[value])return i;
+ return -1;
+}
+static int mode_value(const NativeAdjustTree*t,int pos){
+ if(!t||pos<0||pos>=t->mode.count)return -1;
+ for(int i=0;i<NATIVE_ADJUST_MODES;i++)if(t->mode_ptrs[pos]==&t->mode_values[i])return i;
+ return -1;
+}
 static void zero(void *p, unsigned n) {
     unsigned char *b=p;
     while(n--) *b++=0;
@@ -26,11 +37,35 @@ static NativeAdjustNode *embedded_destroy(NativeAdjustNode *node) {
 static NativeAdjustTree *owner(NativeAdjustNode *node) {
     return (NativeAdjustTree *)node->vtable[65];
 }
+static void untrack(NativeAdjustTree*t,NativeAdjustNode*n){
+ for(unsigned i=0;i<32;i++)if(t->mode_clones[i]==n)t->mode_clones[i]=0;
+}
+static void preserve_embedded(NativeAdjustTree*t,NativeAdjustNode*n){
+ if(n->properties==&t->mode_properties)for(int i=0;i<n->count;i++)
+  if(n->children[i]&&n->children[i]->vtable==t->node_vtable+2)n->children[i]=0;
+}
+static NativeAdjustNode *clone_destroy(NativeAdjustNode*n){
+ NativeAdjustTree*t=owner(n);untrack(t,n);preserve_embedded(t,n);
+ const uintptr_t*vt=(const uintptr_t*)(t->caution_base+0x918ec0);
+ return ((NativeAdjustNode*(*)(NativeAdjustNode*))vt[2])(n);
+}
+static NativeAdjustNode *clone_delete(NativeAdjustNode*n){
+ NativeAdjustTree*t=owner(n);untrack(t,n);preserve_embedded(t,n);
+ const uintptr_t*vt=(const uintptr_t*)(t->caution_base+0x918ec0);
+ return ((NativeAdjustNode*(*)(NativeAdjustNode*))vt[3])(n);
+}
 static NativeAdjustNode *owned_clone(NativeAdjustNode *node) {
-    NativeAdjustTree *t=owner(node);
-    NativeAdjustNode *copy=((Clone)(t->caution_base+0x683369))(node);
-    if(copy) copy->vtable=t->clone_vtable+2;
-    return copy;
+ NativeAdjustTree *t=owner(node);
+ NativeAdjustNode *copy=((Clone)(t->caution_base+0x683369))(node);
+ if(copy){
+  copy->vtable=t->clone_vtable+2;
+  if(copy->properties==&t->mode_properties){
+   unsigned i=0;while(i<32&&t->mode_clones[i])i++;
+   if(i==32){clone_delete(copy);return 0;}
+   t->mode_clones[i]=copy;
+  }
+ }
+ return copy;
 }
 static int initialize(NativeAdjustNode *node,NativeAdjustNode **aliases,int count,int depth) {
     NativeAdjustTree *t=owner(node);
@@ -43,10 +78,10 @@ static int initialize(NativeAdjustNode *node,NativeAdjustNode **aliases,int coun
             if(rc)rc=((Select)(t->caution_base+0x682e59))(node,t->specs[field].maximum-t->current[field]+1);
         }
 #ifdef A7_FL_CUSTOM_LOOKS
-        else if(process_id==0x7013)rc=((Gray)(t->caution_base+0x682edb))(node,t->current_mode<7,0);
+        else if(process_id==0x7013)rc=((Gray)(t->caution_base+0x682edb))(node,t->current_mode==0,0);
 #endif
         else if(process_id==0x7000)
-            rc=((Select)(t->caution_base+0x682e59))(node,t->current_mode+1);
+            rc=((Select)(t->caution_base+0x682e59))(node,mode_position(t,t->current_mode)+1);
     }
     return rc;
 }
@@ -102,6 +137,7 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
     const uintptr_t *native_vtable=(const uintptr_t *)(base+0x918ec0);
     for(unsigned i=0;i<67;i++) t->node_vtable[i]=t->clone_vtable[i]=native_vtable[i];
     t->node_vtable[2]=t->node_vtable[3]=(uintptr_t)embedded_destroy;
+    t->clone_vtable[2]=(uintptr_t)clone_destroy;t->clone_vtable[3]=(uintptr_t)clone_delete;
     t->node_vtable[2+0xe4/4]=t->clone_vtable[2+0xe4/4]=(uintptr_t)owned_clone;
     t->node_vtable[2+0xf8/4]=t->clone_vtable[2+0xf8/4]=(uintptr_t)initialize;
     t->node_vtable[67]=t->clone_vtable[67]=(uintptr_t)t;
@@ -186,7 +222,7 @@ int native_adjust_add_save(NativeAdjustTree *t,uint32_t title) {
     t->field_ptrs[NATIVE_ADJUST_FIELDS+1]=&t->save;
     t->pages[NATIVE_ADJUST_PAGES-1].count++;
     if(!initialize(&t->root,0,0,t->root.depth)) return 0;
-    if(!((Select)(t->caution_base+0x682e59))(&t->mode,t->current_mode+1)) return 0;
+    if(!((Select)(t->caution_base+0x682e59))(&t->mode,mode_position(t,t->current_mode)+1)) return 0;
     for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++)
         if(!((Select)(t->caution_base+0x682e59))(&t->fields[f],
                                             t->specs[f].maximum-t->current[f]+1)) return 0;
@@ -219,7 +255,7 @@ int native_adjust_add_import(NativeAdjustTree *t,uint32_t title,int id) {
     t->root.count++;
     if(!initialize(&t->root,0,0,t->root.depth))return 0;
     Select select=(Select)(t->caution_base+0x682e59);
-    if(!select(&t->mode,t->current_mode+1))return 0;
+    if(!select(&t->mode,mode_position(t,t->current_mode)+1))return 0;
     for(unsigned f=0;f<NATIVE_ADJUST_FIELDS;f++)
         if(!select(&t->fields[f],t->specs[f].maximum-t->current[f]+1))return 0;
     return 1;
@@ -233,14 +269,14 @@ int native_adjust_save_title(NativeAdjustTree*t,uint32_t title) {
 }
 int native_adjust_encode(const NativeAdjustTree*t,int id,int value,int*out) {
     if(!t||!out)return 0;
-    if(id==0x7000) {if(value<0||value>=t->mode.count)return 0;*out=value;return 1;}
+    if(id==0x7000) {int pos=mode_position(t,value);if(pos<0)return 0;*out=pos;return 1;}
     unsigned f=native_adjust_field_index(id);if(f>=NATIVE_ADJUST_FIELDS)return 0;
     if(value<t->specs[f].minimum||value>t->specs[f].maximum)return 0;
     *out=value-t->specs[f].minimum;return 1;
 }
 int native_adjust_decode(const NativeAdjustTree*t,int id,int encoded,int*out) {
     if(!t||!out)return 0;
-    if(id==0x7000) {if(encoded<0||encoded>=t->mode.count)return 0;*out=encoded;return 1;}
+    if(id==0x7000) {int value=mode_value(t,encoded);if(value<0)return 0;*out=value;return 1;}
     unsigned f=native_adjust_field_index(id);if(f>=NATIVE_ADJUST_FIELDS)return 0;
     if(encoded<0||encoded>t->specs[f].maximum-t->specs[f].minimum)return 0;
     *out=encoded+t->specs[f].minimum;return 1;
@@ -254,15 +290,15 @@ int native_adjust_read(const NativeAdjustTree *t,int process_id,int *value) {
 int native_adjust_write(NativeAdjustTree *t,int process_id,int value,
                         int (*apply)(void *,unsigned,int),void *ctx) {
     if(process_id==0x7000) {
-        if(!t || !apply || value<0 || value>=t->mode.count) return 0;
+        if(!t || !apply || mode_position(t,value)<0) return 0;
         if(value==t->current_mode)
-            return ((Select)(t->caution_base+0x682e59))(&t->mode,value+1);
+            return ((Select)(t->caution_base+0x682e59))(&t->mode,mode_position(t,value)+1);
         if(!apply(ctx,NA_MODE,value)) return 0;
         t->current_mode=value;
 #ifdef A7_FL_CUSTOM_LOOKS
-        if(t->delete_row.vtable)((Gray)(t->caution_base+0x682edb))(&t->delete_row,value<7,0);
+        if(t->delete_row.vtable)((Gray)(t->caution_base+0x682edb))(&t->delete_row,value==0,0);
 #endif
-        return ((Select)(t->caution_base+0x682e59))(&t->mode,value+1);
+        return ((Select)(t->caution_base+0x682e59))(&t->mode,mode_position(t,value)+1);
     }
     unsigned f=native_adjust_field_index(process_id);
     if(!t || f>=NATIVE_ADJUST_FIELDS || !(t->enabled_mask&(1u<<f)) || !apply) return 0;
@@ -275,22 +311,43 @@ int native_adjust_write(NativeAdjustTree *t,int process_id,int value,
 }
 
 #ifdef A7_FL_CUSTOM_LOOKS
-int native_adjust_custom_count(NativeAdjustTree*t,unsigned count,uint32_t first){
- if(!t||count>16||t->mode.count<7||t->mode.count>NATIVE_ADJUST_MODES)return 0;
+/* Replace only the owned child array of surviving mode clones. The temporary
+ * stock clone takes ownership of the old array and destroys it normally. */
+static int refresh_mode_clones(NativeAdjustTree*t){
+ for(unsigned i=0;i<32;i++){
+  NativeAdjustNode*n=t->mode_clones[i];if(!n)continue;
+  NativeAdjustNode*fresh=((Clone)(t->caution_base+0x683369))(&t->mode);if(!fresh)return 0;
+  NativeAdjustNode**old=n->children;int old_count=n->count;
+  n->children=fresh->children;n->count=fresh->count;fresh->children=old;fresh->count=old_count;
+  n->selected_index=t->mode.selected_index;n->selectable_index=t->mode.selectable_index;
+  const uintptr_t*vt=(const uintptr_t*)(t->caution_base+0x918ec0);
+  preserve_embedded(t,fresh);
+  ((NativeAdjustNode*(*)(NativeAdjustNode*))vt[3])(fresh);
+  if(!((Select)(t->caution_base+0x682e59))(n,mode_position(t,t->current_mode)+1))return 0;
+ }
+ return 1;
+}
+int native_adjust_custom_visible(NativeAdjustTree*t,unsigned count,uint32_t first,unsigned hidden){
+ if(!t||count>16||hidden>63||t->mode.count<1||t->mode.count>NATIVE_ADJUST_MODES)return 0;
  NativeAdjustNode *parent=t->mode.parent;
- if(t->mode.count>(int)(7+count))t->mode.count=7+count;
- if(t->current_mode>=t->mode.count)t->current_mode=0;
- while(t->mode.count<(int)(7+count)){
-  unsigned index=(unsigned)t->mode.count;
+ for(unsigned index=7;index<7+count;index++){
   for(unsigned k=0;k<6;k++)t->mode_value_props[index][k]=t->mode_value_props[1][k];
   NativeAdjustProperty*p=t->mode_value_props[index];p[0].value=first+index-7;p[4].value=p[5].value=index;
   t->mode_value_properties[index]=(NativeAdjustProperties){p,5};
   construct(t,&t->mode_values[index],0,0,&t->mode_value_properties[index]);
-  t->mode_ptrs[index]=&t->mode_values[index];t->mode.count++;
  }
+ t->hidden_builtin=hidden;t->mode.count=0;
+ for(unsigned i=0;i<7+count;i++){
+  if(i>0&&i<7&&(hidden&(1u<<(i-1))))continue;
+  t->mode_value_props[i][4].value=t->mode_value_props[i][5].value=(unsigned)t->mode.count;
+  t->mode_ptrs[t->mode.count++]=&t->mode_values[i];
+ }
+ if(mode_position(t,t->current_mode)<0)t->current_mode=0;
  int ok=initialize(&t->mode,0,0,t->mode.depth);t->mode.parent=parent;
- return ok&&((Select)(t->caution_base+0x682e59))(&t->mode,t->current_mode+1);
+ return ok&&((Select)(t->caution_base+0x682e59))(&t->mode,mode_position(t,t->current_mode)+1)&&refresh_mode_clones(t);
 }
+int native_adjust_custom_count(NativeAdjustTree*t,unsigned count,uint32_t first){return native_adjust_custom_visible(t,count,first,0);}
+
 #endif
 
 #ifdef A7_FL_CUSTOM_LOOKS

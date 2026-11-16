@@ -34,9 +34,9 @@ class Factory:
   st,data=self.read(path,maximum);check(st==(0,0),'existing mock contents');return data
  def read(self,path,maximum=1048576):
   values={bundle.target:self.e.disk,host.VIEW:view,bundle.backup:self.e.backup,bundle.journal:self.e.log,bundle.temporary:None}
-  if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24):
+  if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24,25,26):
    for name in ('string_simplifiedchinese.uxc','string_english.uxc'):
-    value=(ROOT/('.lab/native-fl-custom-strings' if m['version'] in (20,21,22,23,24) else '.lab/native-fl-sd-strings' if m['version']==19 else '.lab/native-fl-classic-strings' if m['version'] in (17,18) else '.lab/native-fl-vignette-strings' if m['version']==16 else '.lab/native-fl-halation-strings' if m['version']==151 else '.lab/native-fl-grain-strings' if m['version']==15 else '.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
+    value=(ROOT/('.lab/native-fl-custom-strings' if m['version'] in (20,21,22,23,24,25,26) else '.lab/native-fl-sd-strings' if m['version']==19 else '.lab/native-fl-classic-strings' if m['version'] in (17,18) else '.lab/native-fl-vignette-strings' if m['version']==16 else '.lab/native-fl-halation-strings' if m['version']==151 else '.lab/native-fl-grain-strings' if m['version']==15 else '.lab/native-fl-curve-strings' if m['version'] in (13,14) else '.lab/native-fl3-strings' if m['version']==12 else '.lab/native-fl2-strings')/name).read_bytes()
     if self.e.bad_locale==name:value=value[:-1]+bytes([value[-1]^1])
     values['/usr/share/app/'+name]=value
   check(path in values,'bounded file read path');v=values[path]

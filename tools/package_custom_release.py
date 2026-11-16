@@ -11,39 +11,42 @@ import zipfile
 from apply_release_locales import apply
 
 ROOT=Path(__file__).resolve().parents[1]
-EXPECTED='b3d387dfb2dbfa3d58adbcb5bcc8a07df4bb80339c74fbf2ed38bdeb47c31fe3'
+EXPECTED='30474345352eaed6b1feb8f33e389278febaeb6c3fc493dc2355ab560ca591a4'
 KERNEL='707362fc67da61b834757849fa056a2bb4c6d80a09f9469743e0a02e19f7bc0f'
-BASELINE='a820f62cbea336e16b945f95278ed760a1b0190ca97e6576e23113ac2991cdf9'
+BASELINE='a6545d1306c78872b2b28acecb3640d139cd6919a5818e5aa3de4ecb4870e927'
 JPEG_SIZES={'L':[6000,4000],'M':[3936,2624],'S':[3008,2000]}
 
 def sha(data):return hashlib.sha256(data).hexdigest()
 
 def validate_acceptance(path,module):
     p=json.loads(path.read_text())
-    if not (p.get('verified') is True and p.get('module_sha256')==sha(module)==EXPECTED and len(module)==153740
-            and p.get('name_display_user_verified') is True and p.get('cold_boot_user_verified') is True
-            and p.get('original_six_slots_byte_identical') is True and p.get('status',[0,0,1])[:3]==[1,1,0]
+    if not (p.get('verified') is True and p.get('module_sha256')==sha(module)==EXPECTED and len(module)==155840
+            and p.get('user_confirmed_immediate_list') is True and p.get('user_confirmed_continuous_selection') is True
+            and p.get('original_banks_byte_identical') is True and p.get('status',[0,0,1])[:3]==[1,1,0]
             and p.get('status',[])[7]==0 and p.get('persistent_writes') is False):
-        raise ValueError('Accepted custom-name cold-boot readback required')
-    base=ROOT/'.lab/native-fl-releases/update-v001-custom-selected-hfjp6yjd'
-    proof=json.loads((base/'24/module-proof.json').read_text())
+        raise ValueError('Accepted live-list and continuous-selection device readback required')
+    base=ROOT/'.lab/native-fl-releases/update-v001-live-list-zp6tdr0i'
+    proof=json.loads((base/'26/module-proof.json').read_text())
     for name,digest in proof['source_sha256'].items():
         if sha((ROOT/name).read_bytes())!=digest:raise ValueError('Built module source changed: '+name)
-    evidence=base/'write-1794822281280608000'
+    evidence=base/'write-1794824541467165000'
     verified=json.loads((evidence/'verified.json').read_text())
     preserved=json.loads((evidence/'catalog-preserved.json').read_text())
     if not (verified['verified'] and verified['work_records_unchanged'] and preserved['unchanged']
             and verified['files'][0]['new_sha256']==EXPECTED and verified['files'][0]['readonly_confirmed']
-            and (evidence/'24/new-module-readback.so').read_bytes()==module):
+            and (evidence/'26/new-module-readback.so').read_bytes()==module):
         raise ValueError('Full installed-module readback/preservation missing')
     locales={}
     for name in ('string_simplifiedchinese.uxc','string_english.uxc'):
-        data=(evidence/'24'/('required-'+name)).read_bytes()
+        data=(evidence/'26'/('required-'+name)).read_bytes()
         if data!=(ROOT/'.lab/native-fl-custom-strings'/name).read_bytes():raise ValueError('Locale readback mismatch')
         locales[name]=dict(size=len(data),sha256=sha(data))
     p['locales']=locales
+    if not (p.get('hidden_builtin_mask')==14 and p.get('imported_bases')==[2,3,4] and p.get('catalog_generation')==14):
+        raise ValueError('Persisted built-in deletions and imported banks required')
     p['user_confirmation']={'sd_file_import':True,'independent_look_name_dropdown_and_selected':True,
-      'cold_boot_name_and_recipe_retained':True,'delete_cancel_confirm_and_restart':True}
+      'builtin_deletions_and_reimport_persisted':True,'import_visible_without_reboot':True,
+      'continuous_unsaved_selection':True,'final_selection_saved':False}
     # Prior L/M/S acceptance applies to the unchanged embedded capture kernel;
     # do not claim this menu-only candidate was reshot at all sizes.
     kernel=ROOT/'.lab/capture-kernel/1794741362254373000'
@@ -82,6 +85,8 @@ def main():
     for name,key in (('string_simplifiedchinese.uxc','string_simplifiedchinese.uxc'),('string_english.uxc','string_english.uxc')):
         files['locales/'+name+'.json']=locale_delta(name,acceptance['locales'][key])
     files['recipes/Portrait-grain-1.a7look']=(ROOT/'recipes/Portrait-grain-1.a7look').read_bytes()
+    for path in sorted((ROOT/'recipes/defaults').glob('*.a7look')):
+        files['recipes/defaults/'+path.name]=path.read_bytes()
     for name in ('custom-look-release.md','look-recipes.md','edition-comparison.md','release-workflow.md','vignette.md','grain-research.md',
                  'fl3-film-controls.md','updater.md','jpeg-size-adaptation.md','images/classic-look-comparison.png'):
         files['docs/'+name]=(ROOT/'docs'/name).read_bytes()
@@ -90,15 +95,15 @@ def main():
         for name in archive.namelist():
             if not name.endswith('/'):files['source/'+name]=archive.read(name)
     files['release-manifest.json']=(json.dumps(dict(
-        release='v0.01',edition='integrated-sd-custom-looks',source_commit=commit,
+        release='v0.01',edition='integrated-removable-looks-live-import',source_commit=commit,
         looks=['FL','FL2','FL3','FL4 经典负片','FL5 经典纪实','FL6 自然人像'],
         preference_schema=6,module=dict(file='a7fl.so',size=len(module),sha256=EXPECTED),
         kernel_sha256=KERNEL,device_write_and_full_readback_verified=True,
         user_verified=acceptance['user_confirmation'],
         required_module_sha256=BASELINE,
-        required_baseline='Latest validated module-only transition: a820f62c, matching custom locales and project loader; earlier releases require matching staged migration, not a universal direct installer'
-        ,custom_catalog_schema=1,custom_look_limit=16,recipe_format='A7FL-LOOK/1',recipe_extension='.a7look',
-        features=['SD file selection and confirmed import','independent custom looks','confirmed deletion','dynamic names in dropdown and selected row','original six banks preserved'],
+        required_baseline='Latest validated module-only transition: a6545d13, matching custom locales and project loader; earlier releases require matching staged migration, not a universal direct installer'
+        ,custom_catalog_schema=2,compatible_catalog_schemas=[1,2],custom_look_limit=16,recipe_format='A7FL-LOOK/1',recipe_extension='.a7look',
+        features=['built-in FL deletion','immediate imported list refresh','continuous unsaved look switching','SD file selection and confirmed import','independent custom looks','confirmed deletion','dynamic names in dropdown and selected row','original six banks preserved'],
         capture_acceptance='L/M/S verified on previous edition with the same embedded kernel; current acceptance covers menu/import/delete/name persistence',
         complete_source_included=True,locale_deltas_included=True,universal_installer=False,
         spatial_effect_scope='Post-capture only, full-frame 3:2 JPEG L/M/S',

@@ -223,3 +223,23 @@ FL6的16项参数并指定grain=1（原FL6已为1）；不以该值证明发生0
 ## 名称修复验收
 
 **2026-11-16 名称修正已验收。** 用户确认下拉和选定后均显示正确名称，重启正常；删除功能此前也已验收。只读证据 `.lab/custom-look-incident/1794822522384389000/name-acceptance.json`：当前模块 b3d387dfb2dbfa3d58adbcb5bcc8a07df4bb80339c74fbf2ed38bdeb47c31fe3 正常加载、fault0/last_error0，原六套双槽与安装前逐字节一致；独立库 generation7/count1，名称「人像颗粒 1」和全部配方参数保留。保存 active0、运行dirty1；用户已明确确认测试后又切换或未保存选中状态，属于预期操作，不将其当作恢复缺陷，也不宣称当前保存的选中项是自定义。只读过程中未修改设置。初版后验脚本误拒绝合法空旧槽，已修正；其 active7 特定测试条件本轮不满足，所以最终验收按用户实际状态另行记录，未绕过或伪造该条件。未提交或发布本轮改动。
+
+## 原六套删除候选（未发布）
+
+**2026-11-16 最新安装：原 FL～FL6 可删除候选，待真机验收。** 用户要求原六套也支持删除，并清理 SD 旧测试配方、放入六份供手动导入。已安装 `.lab/native-fl-releases/update-v001-builtin-delete-det1551f`，完整写入回读 `.lab/native-fl-releases/update-v001-builtin-delete-det1551f/write-1794823873424896000/verified.json`、`catalog-preserved.json`；模块 `a6545d1306c78872b2b28acecb3640d139cd6919a5818e5aa3de4ecb4870e927`（155148 字节），原四份设置与独立库安装时逐字节未变，view/WBI/语言不变、/usr只读。未自动删除任何风格。禁止重放包。
+
+删除原风格使用独立库的 hidden_builtin 位图移除其菜单项，保留基础配色算法及原银行参数以支持 SD 重新导入；删除当前项立即转关，重启继续过滤已删除项。稳定内部编号与可见下标分离，名称/拍摄选择不随列表缩短串位。原 A7CU schema1 兼容读取；首次删除内置项时写同长度2848字节 schema2（count低8位，hidden_builtin高位六位），旧模块不支持该格式，不直接回退而不处理配置。离线真实 ARM 菜单删除/重新导入/两处位置压缩、冷启动恢复、六套全部删除后导入配方、失败路径通过，更新核心51570项检查通过。尚未实际验收机内原 FL 删除。
+
+SD 卡120.6GB根目录已写入 FL.a7look、FL2.a7look 至 FL6.a7look，来自安装前 generation72 六套实际参数（不是重置默认）。本地 `.lab/sd-six-look-export/export-manifest.json` 记录散列。两份旧测试 FL6-grain-1.a7look、Portrait-grain-1.a7look 和对应 AppleDouble 元数据在 `.lab/sd-recipe-cleanup/1794823525354038000` 完整备份后移除；照片不动。六份新文件已回读校验、安全推出，用户接回UTM。Mac自动生成的 `._FL*.a7look` 已由原解析器明确过滤。用户准备自行导入，不代其执行。安装前较旧2e13c731副本归档校验后移出机身以腾空间，证据 `.lab/custom-old-backup-archive/1794823847948598000`；b3d387df和a820f62c回退副本仍在。此候选未提交或更新公开v0.01。
+
+## 即时列表及连续选择修正（未发布）
+
+**2026-11-16 最新安装：导入即时列表与连续选择修正，待用户验收。** 原可删除候选 a6545d13 验收失败：用户报告导入后需重启才能看到，导入后无法选择其它。只读 `.lab/custom-look-incident/1794824196048816000` 确认运行无fault、dirty1；独立库schema2/gen12/count2/hidden6（原FL2、FL3已删除），存在导入FL2和FL3。不得把该候选作为已验收版发布。
+
+现候选跟踪原厂模式节点副本，在列表变化时更换其独立指针数组、同步数量和选中位置；原厂克隆仅浅复制子指针，销毁旧数组时剔除借用的嵌入节点，避免清掉模板父关系，析构注销注册。取消切换时必须先保存的条件；未保存自定义参数保留在工作库，回到内置风格后保存也提交工作库；切入自定义前保留内置工作参数。真实ARM测试新增预先打开的列表副本经历导入/删除/再次导入、析构和连续未保存切换，NATIVE_LIVE_CLONE_SELECTION_PASSED；冷启动、拍摄源表、原菜单树回归通过。不是实机验收。
+
+已执行 `.lab/native-fl-releases/update-v001-live-list-zp6tdr0i`，证据 `.lab/native-fl-releases/update-v001-live-list-zp6tdr0i/write-1794824541467165000/verified.json` 与 `catalog-preserved.json`。新模块 `30474345352eaed6b1feb8f33e389278febaeb6c3fc493dc2355ab560ca591a4`（155840字节），完整回读通过，四份原配置和两份独立库字节不变，view/WBI/语言不变、/usr只读。禁止重放。较早a820f62c副本归档于 `.lab/custom-old-backup-archive/1794824518165258000` 后移出机身腾空间，当前前像a6545d13和b3d387df备份保留。等待冷启动后先连续选择FL/已导入FL2/FL3，再从卡导入FL4.a7look检查不重启立即可见、可切换。不擅自清除用户配方或参数。尚未提交或发布。
+
+## 即时列表真机验收
+
+**2026-11-16 即时列表与连续切换修正已获真机验收。** 用户确认导入后立即出现、连续切换正常。只读 `.lab/custom-look-incident/1794824744407403000/live-list-acceptance.json`：模块30474345正常加载，fault0/last_error0；独立库schema2/gen14/count3，FL2、FL3、FL4独立配方已保存；hidden_builtin=14，对应原FL2/3/4已移除。原六套A7FL双槽与本次安装前逐字节一致。当前运行base4、dirty1，保存active0，因此只确认配方内容与删除位图持久化，不宣称最后选中项已保存；无需为界面验收强制用户额外操作。此轮未写入相机，只读取记录；尚未提交或覆盖v0.01，公开包仍为0eab97e版。

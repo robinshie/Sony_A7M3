@@ -8,7 +8,7 @@ OUT=ROOT/'.lab/custom-look-native';OUT.mkdir(exist_ok=True)
 subprocess.run(['cc','-dynamiclib','-Wall','-Wextra','-Werror','-O1',str(ROOT/'payloads/a7-fl-custom.c'),'-o',str(OUT/'custom.dylib')],check=True)
 subprocess.run(['arm-none-eabi-gcc','-mcpu=cortex-a9','-marm','-mfloat-abi=soft','-Os','-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-c',str(ROOT/'payloads/a7-fl-custom.c'),'-o',str(OUT/'custom.o')],check=True)
 class Look(C.Structure):_fields_=[('slot',C.c_uint32),('id',C.c_char*49),('name',C.c_char*64),('base',C.c_uint8),('values',C.c_int8*16)]
-class Catalog(C.Structure):_fields_=[('generation',C.c_uint32),('next_slot',C.c_uint32),('active',C.c_uint32),('count',C.c_uint32),('looks',Look*16)]
+class Catalog(C.Structure):_fields_=[('generation',C.c_uint32),('next_slot',C.c_uint32),('active',C.c_uint32),('count',C.c_uint32),('hidden_builtin',C.c_uint32),('looks',Look*16)]
 a=C.CDLL(str(OUT/'custom.dylib'));a.a7_custom_parse.argtypes=[C.c_void_p,C.c_uint,C.POINTER(Look)]
 item=dict(format=FORMAT,id='portrait-grain',name='人像颗粒',base='FL6',parameters=dict(zip(FIELDS,[0,0,0,0,0,0,3,0,1,0,0,0,0,0,0,0])))
 raw=encode(item);look=Look();assert a.a7_custom_parse(raw,len(raw),C.byref(look))==0

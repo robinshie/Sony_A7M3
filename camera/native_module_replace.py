@@ -52,19 +52,23 @@ REVISIONS[21]=dict(old_sha='fc25a8f9f430c01f1f8c6f130ebf1d603d815c8041401712bec6
 REVISIONS[22]=dict(old_sha='87e8f719baeeaf3e391c3607557037b4bdf28f984fa604707732a78230d90c8d',old_size=149632,temporary='.a7custdel.new',backup='.a7fl-87e8f719.orig',journal='A7CUSDEL.LOG')
 REVISIONS[23]=dict(old_sha='2e13c731322960f5e46bd46f7112396ea5fa1ae78cff7e82d94819e5ea17c5c2',old_size=153104,temporary='.a7custtxt.new',backup='.a7fl-2e13c731.orig',journal='A7CUSTXT.LOG')
 REVISIONS[24]=dict(old_sha='a820f62cbea336e16b945f95278ed760a1b0190ca97e6576e23113ac2991cdf9',old_size=153424,temporary='.a7custsel.new',backup='.a7fl-a820f62c.orig',journal='A7CUSSEL.LOG')
+REVISIONS[25]=dict(old_sha='b3d387dfb2dbfa3d58adbcb5bcc8a07df4bb80339c74fbf2ed38bdeb47c31fe3',old_size=153740,temporary='.a7builtin.new',backup='.a7fl-b3d387df.orig',journal='A7BUILTIN.LOG')
+REVISIONS[26]=dict(old_sha='a6545d1306c78872b2b28acecb3640d139cd6919a5818e5aa3de4ecb4870e927',old_size=155148,temporary='.a7livelist.new',backup='.a7fl-a6545d13.orig',journal='A7LIVELIST.LOG')
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
- if revision in (20,21,22,23,24):
+ if revision in (20,21,22,23,24,25,26):
   require(proof.get('passed') is True and proof.get('normal_mode_verified') is False,'Expected independent-look candidate trial evidence.')
   for name,digest in proof['fixture_sha256'].items():require(file_sha(ROOT/name)==digest,'Custom fixture changed: '+name)
   directory=LAB/'native-module-custom-candidate'
   for name,digest in proof['artifact_sha256'].items():require(file_sha(directory/name)==digest,'Custom artifact changed: '+name)
   for name,marker in [('qemu.log',b'NATIVE_CUSTOM_FLOW_PASSED'),('qemu-boot.log',b'NATIVE_CUSTOM_BOOT_PASSED'),('dialog.log',b'SD_FILE_DIALOG_PASSED'),('posix.log',b'CUSTOM_POSIX_PASSED')]:
    raw=(directory/name).read_bytes();require(marker in raw and b'FAIL' not in raw,'Custom integration failed: '+name)
-  if revision in (22,23,24):
+  if revision in (22,23,24,25,26):
    require(b'NATIVE_CUSTOM_DELETE_PASSED' in (directory/'qemu.log').read_bytes() and b'NATIVE_DELETE_DIALOG_PASSED' in (directory/'dialog.log').read_bytes() and b'CUSTOM_DELETE_REBOOT_PASSED' in (directory/'session.log').read_bytes(),'Deletion integration evidence missing')
-  if revision in (23,24):require(b'NATIVE_POPUP_TEXT_DISPATCH_PASSED' in (directory/'dialog.log').read_bytes(),'Popup text dispatch evidence missing')
-  if revision==24:require(b'NATIVE_SELECTED_TEXT_DISPATCH_PASSED' in (directory/'dialog.log').read_bytes(),'Selected text dispatch evidence missing')
+  if revision in (23,24,25,26):require(b'NATIVE_POPUP_TEXT_DISPATCH_PASSED' in (directory/'dialog.log').read_bytes(),'Popup text dispatch evidence missing')
+  if revision in (24,25,26):require(b'NATIVE_SELECTED_TEXT_DISPATCH_PASSED' in (directory/'dialog.log').read_bytes(),'Selected text dispatch evidence missing')
+  if revision in (25,26):require(b'NATIVE_BUILTIN_DELETE_REIMPORT_PASSED' in (directory/'qemu.log').read_bytes() and b'BUILTIN_DELETE_REBOOT_REIMPORT_PASSED' in (directory/'session.log').read_bytes(),'Built-in delete evidence missing')
+  if revision==26:require(b'NATIVE_LIVE_CLONE_SELECTION_PASSED' in (directory/'qemu.log').read_bytes(),'Cached clone and repeated selection evidence missing')
   return
  if revision==19:
   require(proof.get('passed') is True and proof.get('normal_mode_verified') is False,'Expected SD candidate trial evidence.')
@@ -270,8 +274,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24):
-  resource_set='fl-custom' if m['version'] in (20,21,22,23,24) else 'fl-sd' if m['version']==19 else 'fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24,25,26):
+  resource_set='fl-custom' if m['version'] in (20,21,22,23,24,25,26) else 'fl-sd' if m['version']==19 else 'fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))

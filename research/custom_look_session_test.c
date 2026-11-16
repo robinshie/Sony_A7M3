@@ -44,6 +44,22 @@ int main(void){
  assert(!a7_custom_session_select(&reboot,7)&&!a7_custom_session_delete(&reboot,7));
  assert(!a7_custom_session_open(&s,&io,&engine,&builtin)&&!s.saved.count&&s.saved.next_slot==7);
  assert(!a7_custom_session_import(&s,recipe,sizeof recipe-1)&&s.saved.looks[0].slot==7);
+
+ unsigned built_writes=writes;
+ fail_apply=1;assert(a7_custom_session_delete_builtin(&s,1)<0&&writes==built_writes&&!s.saved.hidden_builtin);fail_apply=0;
+ assert(!a7_custom_session_delete_builtin(&s,1)&&s.saved.hidden_builtin==1&&s.effective.enabled==0);
+ assert(!memcmp(&builtin,&original,sizeof original));
+ assert(!a7_custom_session_open(&reboot,&io,&engine,&builtin)&&reboot.saved.hidden_builtin==1&&applied.enabled==0);
+ for(unsigned mode=2;mode<=6;mode++){
+  builtin.enabled=mode;
+  assert(!a7_custom_session_open(&s,&io,&engine,&builtin));
+  assert(!a7_custom_session_delete_builtin(&s,mode));
+ }
+ assert(!a7_custom_session_open(&reboot,&io,&engine,&builtin)&&reboot.saved.hidden_builtin==63&&applied.enabled==0);
+ assert(!a7_custom_session_select(&reboot,7)&&applied.enabled==6);
+ assert(!a7_custom_session_save(&reboot));
+ assert(!a7_custom_session_open(&s,&io,&engine,&builtin)&&s.saved.active==7&&s.saved.hidden_builtin==63&&applied.enabled==6);
+ puts("BUILTIN_DELETE_REBOOT_REIMPORT_PASSED");
  puts("CUSTOM_DELETE_REBOOT_PASSED");
  puts("CUSTOM_SESSION_FLOW_PASSED: import/name/select/edit/save/reopen/cancel/restore; original six banks unchanged; capture callback modeled");
 }

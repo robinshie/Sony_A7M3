@@ -91,7 +91,7 @@ int a7_custom_parse(const unsigned char*data,unsigned n,struct a7_custom_look*ou
 }
 void a7_custom_empty(struct a7_custom_catalog*c){zero(c,sizeof*c);c->next_slot=7;}
 static int valid(const struct a7_custom_catalog*c){
- if(!c||c->count>A7_CUSTOM_MAX||c->next_slot!=7+c->count||c->generation==0xffffffffu)return 0;
+ if(!c||c->hidden_builtin>63||c->count>A7_CUSTOM_MAX||c->next_slot!=7+c->count||c->generation==0xffffffffu)return 0;
  unsigned active=!c->active;
  for(unsigned i=0;i<c->count;i++){
   const struct a7_custom_look*l=c->looks+i;
@@ -112,7 +112,7 @@ int a7_custom_encode(const struct a7_custom_catalog*c,unsigned char out[A7_CUSTO
  if(!out||!valid(c))return -1;
  zero(out,A7_CUSTOM_RECORD_BYTES);const char*magic="A7CUSTOM";
  for(unsigned i=0;i<8;i++)out[i]=(unsigned char)magic[i];
- put(out+8,1);put(out+12,c->generation);put(out+16,c->next_slot);put(out+20,c->active);put(out+24,c->count);
+ put(out+8,c->hidden_builtin?2:1);put(out+12,c->generation);put(out+16,c->next_slot);put(out+20,c->active);put(out+24,c->count|(c->hidden_builtin<<8));
  for(unsigned i=0;i<c->count;i++){
   unsigned char*p=out+28+i*176;const struct a7_custom_look*l=c->looks+i;put(p,l->slot);p[4]=l->base;
   for(unsigned j=0;l->id[j];j++)p[8+j]=(unsigned char)l->id[j];
@@ -122,9 +122,10 @@ int a7_custom_encode(const struct a7_custom_catalog*c,unsigned char out[A7_CUSTO
  put(out+A7_CUSTOM_RECORD_BYTES-4,crc(out,A7_CUSTOM_RECORD_BYTES-4));return 0;
 }
 int a7_custom_decode(const unsigned char*data,unsigned n,struct a7_custom_catalog*out){
- if(!data||!out||n!=A7_CUSTOM_RECORD_BYTES||get(data+8)!=1||get(data+n-4)!=crc(data,n-4))return -1;
+ if(!data||!out||n!=A7_CUSTOM_RECORD_BYTES||(get(data+8)!=1&&get(data+8)!=2)||get(data+n-4)!=crc(data,n-4))return -1;
  const char*magic="A7CUSTOM";for(unsigned i=0;i<8;i++)if(data[i]!=(unsigned char)magic[i])return -1;
- struct a7_custom_catalog c;zero(&c,sizeof c);c.generation=get(data+12);c.next_slot=get(data+16);c.active=get(data+20);c.count=get(data+24);
+ struct a7_custom_catalog c;zero(&c,sizeof c);c.generation=get(data+12);c.next_slot=get(data+16);c.active=get(data+20);c.count=get(data+24)&255;c.hidden_builtin=get(data+24)>>8;
+ if(get(data+8)==1&&c.hidden_builtin)return -1;
  if(c.count>A7_CUSTOM_MAX)return -1;
  for(unsigned i=0;i<c.count;i++){
   const unsigned char*p=data+28+i*176;struct a7_custom_look*l=c.looks+i;l->slot=get(p);l->base=p[4];

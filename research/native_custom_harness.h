@@ -26,12 +26,14 @@ int a7_fl_dialog_delete(uintptr_t view,void*manager,const char*name,int(*commit)
 static void test_custom_flow(a7_menu_node*look){
  (void)sd_read;(void)sd_eof;(void)sd_error;
  struct a7_sd_api fs={sd_first,sd_next,sd_open,custom_file_read,sd_close,custom_file_eof,custom_file_error,sd_drive,sd_mounted};a7_fl_sd_test_api(&fs);
+ a7_menu_node*cached_mode=((a7_menu_node*(*)(a7_menu_node*))look_row(look,0)->vtable[0xe4/4])(look_row(look,0));
+ check(cached_mode&&cached_mode->count==7,"existing native mode clone before import");
  unsigned initial=slot_writes;unsigned char original[2][128];bytes(original,slot_bytes,sizeof original);
  check(parent.count==8&&parent.children[3]==look&&look->count==4,"same-level import follows Creative Look");
  action_selected=parent.children[4];original_action(action_view);
  check(dialog_commit&&sd_file_count==1&&!custom_writes,"same-level action opens native file picker");
  check(!sd_select_callback(0)&&!confirm_dialog()&&custom_writes==1,"new recipe stored through confirm");
- check(look_row(look,0)->count==8,"native mode list grows to eight including Off");
+ check(look_row(look,0)->count==8&&cached_mode->count==8,"both live and previously cloned list grow on import without reboot");
  const char*name=custom_names(A7_FL_CUSTOM_TITLE_FIRST);check(name&&name[0]&&custom_names(A7_FL_CUSTOM_TITLE_FIRST+1)==0,"dynamic name belongs to imported slot only");
  check(slot_writes==initial&&same(original,slot_bytes,sizeof original),"import never overwrites original FL slots");
  check(set_value(0x7000,7),"select new mode via original process manager");
@@ -52,9 +54,29 @@ static void test_custom_flow(a7_menu_node*look){
  unsigned before_delete=custom_writes;
  action_selected=look->children[3]->children[0];original_action(action_view);
  check(custom_writes==before_delete,"opening delete never saves");
- check(!confirm_dialog()&&custom_writes==before_delete+1,"confirmed delete persists once");
+ check(!confirm_dialog(),"confirmed delete returns success with cached clone");check(custom_writes==before_delete+1,"confirmed delete persists once");
  check(look_row(look,0)->count==7&&custom_names(A7_FL_CUSTOM_TITLE_FIRST)==0,"delete removes selector and dynamic name");
  check(a7_fl_status()->parameters[0]==-3&&!a7_fl_status()->dirty,"delete returns unchanged built-in processing");
  put("NATIVE_CUSTOM_DELETE_PASSED\n");
+ unsigned builtin_writes=slot_writes;
+ action_selected=look->children[3]->children[0];original_action(action_view);
+ before_delete=custom_writes;check(!confirm_dialog()&&custom_writes==before_delete+1,"delete selected built-in through actual action dispatch");
+ check(look_row(look,0)->count==6&&get_value(0x7000,&mode)&&mode==0,"deleted FL6 absent; selection falls back Off");
+ check(!set_value(0x7000,6)&&slot_writes==builtin_writes,"deleted builtin cannot be selected and original banks untouched");
+ action_selected=parent.children[4];original_action(action_view);
+ check(!sd_select_callback(0)&&!confirm_dialog(),"reimport same base after built-in removal");
+ check(look_row(look,0)->count==7&&set_value(0x7000,6),"compact index selects independent base-six look");
+ check(get_value(0x7000,&mode)&&mode==6&&capture_matches(6)&&a7_fl_status()->parameters[0]==4,"compressed index preserves selected name and true capture base");
+ check(!a7_fl_confirm(),"save reimported look after builtin deletion");
+ check(set_value(0x7000,1)&&!a7_fl_confirm(),"select first builtin after list compression");
+ action_selected=look->children[3]->children[0];original_action(action_view);check(!confirm_dialog(),"delete first builtin");
+ check(look_row(look,0)->count==6&&set_value(0x7000,5)&&get_value(0x7000,&mode)&&mode==5&&capture_matches(6),"middle shift preserves independent stable slot");
+ check(cached_mode->count==6,"previously cloned list follows both deletions and reimport");
+ check(set_value(0x7000,1)&&set_value(0x7000,5)&&set_value(0x7000,2)&&set_value(0x7000,5),"repeated unsaved builtin/custom selection remains available");
+ check(get_value(0x7000,&mode)&&mode==5&&capture_matches(6),"unsaved repeat leaves real capture on selected custom base");
+ ((a7_menu_node*(*)(a7_menu_node*))cached_mode->vtable[1])(cached_mode);
+ check(!a7_fl_confirm(),"save after repeated selection and cloned view destruction");
+ put("NATIVE_LIVE_CLONE_SELECTION_PASSED\n");
+ put("NATIVE_BUILTIN_DELETE_REIMPORT_PASSED\n");
  put("NATIVE_CUSTOM_FLOW_PASSED\n");
 }

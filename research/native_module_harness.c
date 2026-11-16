@@ -169,7 +169,7 @@ int a7_fl_preview_request(uintptr_t base,const struct a7_fl_api *backup,
     test(a7_fl_status()->installed,"no model request during early color boot");
     int enabled,values[5];test(get_value(0x7000,&enabled)==1,"current accepted mode readable");
 #ifdef A7_FL_CUSTOM_LOOKS
-    if(enabled>=7)enabled=(int)a7_fl_status()->mode; /* UI slot and processing base are distinct. */
+    enabled=(int)a7_fl_status()->mode; /* Compact UI position is distinct from processing base. */
 #endif
     for(unsigned i=0;i<5;i++){test(get_value(0x7001+i,values+i)==1,"current accepted scalar readable");values[i]-=i==3?0:9;}
     A7FLColorParams p={values[0],values[1],values[2],values[3],values[4]};uint8_t expected[1280];
@@ -527,7 +527,7 @@ void guest_main(void) {
     empty.next_slot=7;
     test(!a7_custom_parse((const unsigned char*)custom_recipe,sizeof custom_recipe-1,&imported)&&
          !a7_custom_append(&empty,&imported,&catalog),"build saved independent catalog");
-    catalog.active=7;
+    catalog.active=7;catalog.hidden_builtin=1;
     test(!a7_custom_encode(&catalog,custom_disk[0]),"persist selected independent catalog");
     custom_sizes[0]=A7_CUSTOM_RECORD_BYTES;custom_exists[0]=1;
     unsigned char preserved[128];bytes(preserved,slot_bytes[0],128);
@@ -538,15 +538,15 @@ void guest_main(void) {
     platform.view_manager=process_element;
     test(!a7_fl_configure_menu(&platform)&&!a7_fl_install(0x40000000,process_element),"attach dynamic menu after early color boot");
     a7_menu_node *restored_custom=parent.children[3];int enum_mode=-1;
-    test(parent.count==8&&look_row(restored_custom,0)->count==8&&get_value(0x7000,&enum_mode)&&enum_mode==7,
+    test(parent.count==8&&look_row(restored_custom,0)->count==7&&get_value(0x7000,&enum_mode)&&enum_mode==6,
          "boot menu restores independent selected slot");
     a7_menu_node *selected_custom=0;int selected_value=-1;
     test(((int(*)(void*,a7_menu_node**))0x40682951)(look_row(restored_custom,0),&selected_custom)&&
-         ((int(*)(void*,int,int*))0x40683297)(selected_custom,0x10,&selected_value)&&selected_value==7,
+         ((int(*)(void*,int,int*))0x40683297)(selected_custom,0x10,&selected_value)&&selected_value==6,
          "original native graph cursor points to imported choice");
     test(custom_names(A7_FL_CUSTOM_TITLE_FIRST)&&same(preserved,slot_bytes[0],128)&&!custom_writes&&!slot_writes,
          "boot keeps native name and all original settings unchanged");
-    test(set_value(0x7000,6)&&a7_fl_status()->parameters[0]==2&&grain_selection==22,
+    test(set_value(0x7000,5)&&a7_fl_status()->parameters[0]==2&&grain_selection==22,
          "original FL6 survives imported cold boot");
     put("NATIVE_CUSTOM_BOOT_PASSED\n");finish();
 #endif

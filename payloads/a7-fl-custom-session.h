@@ -19,6 +19,7 @@ int a7_custom_session_open(struct a7_custom_session*,const struct a7_custom_io*,
 int a7_custom_session_import(struct a7_custom_session*,const unsigned char*,unsigned);
 int a7_custom_session_select(struct a7_custom_session*,uint32_t);
 int a7_custom_session_edit(struct a7_custom_session*,unsigned,int);
+int a7_custom_session_delete_builtin(struct a7_custom_session*,unsigned);
 int a7_custom_session_delete(struct a7_custom_session*,uint32_t);
 int a7_custom_session_save(struct a7_custom_session*);
 int a7_custom_session_cancel(struct a7_custom_session*);

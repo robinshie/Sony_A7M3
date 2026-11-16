@@ -78,6 +78,8 @@ typedef struct {
     NativeAdjustNode *value_ptrs[NATIVE_ADJUST_FIELDS][NATIVE_ADJUST_VALUES];
     NativeAdjustProperty root_props[4], field_props[NATIVE_ADJUST_FIELDS][5];
     NativeAdjustProperty mode_props[5], mode_value_props[NATIVE_ADJUST_MODES][6];
+    unsigned hidden_builtin;
+    NativeAdjustNode *mode_clones[32];
     NativeAdjustProperty save_props[5];
     NativeAdjustProperty value_props[NATIVE_ADJUST_FIELDS][NATIVE_ADJUST_VALUES][6];
     NativeAdjustProperties root_properties, field_properties[NATIVE_ADJUST_FIELDS];
@@ -174,6 +176,7 @@ int native_adjust_curve_specs(NativeAdjustSpec specs[NATIVE_ADJUST_FIELDS],const
 #endif
 #ifdef A7_FL_CUSTOM_LOOKS
 int native_adjust_add_delete(NativeAdjustTree*,uint32_t,int);
+int native_adjust_custom_visible(NativeAdjustTree*,unsigned,uint32_t,unsigned);
 int native_adjust_custom_count(NativeAdjustTree*,unsigned,uint32_t);
 #endif
 #endif

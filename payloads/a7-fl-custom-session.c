@@ -2,6 +2,7 @@
 static int usable(const struct a7_custom_session*s){return s&&s->ready&&!s->fault&&s->engine.apply;}
 static int apply(struct a7_custom_session*s,const struct a7_custom_catalog*c){
  struct a7_fl_preference next=s->builtin;
+ if(!c->active&&next.enabled>0&&(c->hidden_builtin&(1u<<(next.enabled-1))))a7_fl_preference_switch(&next,0);
  if(c->active&&a7_custom_effective(c,c->active,&s->builtin,&next))return -1;
  if(s->engine.apply(s->engine.opaque,&s->effective,&next))return -2;
  s->effective=next;return 0;
@@ -24,7 +25,7 @@ int a7_custom_session_import(struct a7_custom_session*s,const unsigned char*raw,
  s->working=s->saved=next;return 0;
 }
 int a7_custom_session_select(struct a7_custom_session*s,uint32_t slot){
- if(!usable(s)||s->dirty)return -1;
+ if(!usable(s))return -1;
  struct a7_custom_catalog next=s->working;struct a7_custom_look l;
  if(slot&&a7_custom_resolve(&next,slot,&l))return -2;
  if(slot==next.active)return 0;
@@ -76,4 +77,18 @@ int a7_custom_session_delete(struct a7_custom_session*s,uint32_t slot){
   s->fault=1;return -4;
  }
  s->saved=s->working=next;s->dirty=0;return 0;
+}
+
+int a7_custom_session_delete_builtin(struct a7_custom_session*s,unsigned mode){
+ if(!usable(s)||!s->store.ready||mode<1||mode>6||s->working.active||s->effective.enabled!=(int)mode||s->saved.generation>=0xfffffffeu)return -1;
+ struct a7_custom_catalog next=s->saved;
+ if(next.hidden_builtin&(1u<<(mode-1)))return -2;
+ next.hidden_builtin|=1u<<(mode-1);next.active=0;next.generation++;
+ struct a7_fl_preference before=s->effective,off=before;
+ a7_fl_preference_switch(&off,0);
+ if(s->engine.apply(s->engine.opaque,&before,&off))return -3;
+ if(a7_custom_store_save(&s->store,&next)){
+  (void)s->engine.apply(s->engine.opaque,&off,&before);s->fault=1;return -4;
+ }
+ s->effective=off;s->saved=s->working=next;s->dirty=0;return 0;
 }

@@ -194,7 +194,7 @@ static const char *custom_name(uint32_t id){
 }
 static int custom_refresh_nodes(void){
  for(unsigned j=0;j<module.platform.parent_count;j++)
-  if(!native_adjust_custom_count(&module.trees[j],custom.working.count,A7_FL_CUSTOM_TITLE_FIRST))return -1;
+  if(!native_adjust_custom_visible(&module.trees[j],custom.working.count,A7_FL_CUSTOM_TITLE_FIRST,custom.working.hidden_builtin))return -1;
  return 0;
 }
 #endif
@@ -210,6 +210,7 @@ static int enter(void) {return __atomic_exchange_n(&module.lock,1,__ATOMIC_ACQUI
 const struct a7_fl_module_status *a7_fl_status(void) {return &module.status;}
 static int readable(uintptr_t p,unsigned n) {return module.platform.readable(module.platform.opaque,p,n)==1;}
 static int refresh_preview(void) {
+    snapshot(module.status.last_error);
 #ifdef A7_FL_PREVIEW_REFRESH
     int rc=a7_fl_preview_request(module.platform.view_base,&module.platform.backup,
                                 module.platform.readable,module.platform.opaque);
@@ -248,7 +249,7 @@ static int capture_check(int mode) {
 #endif
 static int commit_checked(void) {
 #ifdef A7_FL_CUSTOM_LOOKS
- if(custom.ready&&(custom.working.active||custom.saved.active)){
+ if(custom.ready&&(custom.working.active||custom.saved.active||custom.dirty)){
   if(a7_fl_curve_verify(&film_io,&module.control.preference))return A7_FL_VERIFY;
   if(a7_custom_session_save(&custom))return A7_FL_CONTROL_PERSIST;
   if(custom.working.active){module.control.committed=module.control.preference;module.control.dirty=0;return 0;}
@@ -399,7 +400,7 @@ static int model_write(void *unused,int id,int value) {
     if(custom.ready&&((decoded>=7&&id==0x7000) || custom.working.active)){
         unsigned field=native_adjust_field_index(id);int rc;
         if(id==0x7000){
-            if(module.control.dirty)return leave(A7_FL_MODULE_EVENT)==0;
+            if(!custom.working.active)custom.builtin=module.control.preference;
             rc=a7_custom_session_select(&custom,decoded>=7?(unsigned)decoded:0);
         }else{
             unsigned index=field<8?field:8+native_adjust_film_index(field);
@@ -580,8 +581,8 @@ static int sd_action(void *unused,int id) {
 static unsigned delete_slot;
 static int delete_confirm(void){
  if(!enter())return A7_FL_MODULE_BUSY;
- if(!custom.ready||custom.working.active!=delete_slot||module.status.fault)return leave(A7_FL_MODULE_EVENT);
- int rc=a7_custom_session_delete(&custom,delete_slot);
+ if(!custom.ready||custom_mode()!=(int)delete_slot||module.status.fault)return leave(A7_FL_MODULE_EVENT);
+ int rc=delete_slot<7?a7_custom_session_delete_builtin(&custom,delete_slot):a7_custom_session_delete(&custom,delete_slot);
  if(!rc){
   module.control.preference=module.control.committed=custom.effective;module.control.dirty=0;
   rc=custom_refresh_nodes();
@@ -593,8 +594,14 @@ static int delete_confirm(void){
 }
 static int delete_action(void*unused,int id){
  (void)unused;if(id!=0x7013||!enter())return 0;
- if(!custom.ready||!custom.working.active||module.status.fault)return leave(A7_FL_MODULE_EVENT)==0;
- delete_slot=custom.working.active;unsigned index=delete_slot-7;
+ if(!custom.ready||custom_mode()<=0||module.status.fault)return leave(A7_FL_MODULE_EVENT)==0;
+ delete_slot=(unsigned)custom_mode();
+ if(delete_slot<7){
+  static const char*names[]={"FL","FL2","FL3","FL4","FL5","FL6"};
+  custom.effective=module.control.preference;
+  return leave(a7_fl_dialog_delete(module.platform.view_base,module.platform.view_manager,names[delete_slot-1],delete_confirm))==0;
+ }
+ unsigned index=delete_slot-7;
  if(index>=custom.working.count)return leave(A7_FL_MODULE_EVENT)==0;
  return leave(a7_fl_dialog_delete(module.platform.view_base,module.platform.view_manager,
     custom.working.looks[index].name,delete_confirm))==0;

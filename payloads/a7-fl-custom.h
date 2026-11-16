@@ -4,7 +4,7 @@
 #define A7_CUSTOM_MAX 16
 #define A7_CUSTOM_RECORD_BYTES (32+176*A7_CUSTOM_MAX)
 struct a7_custom_look { uint32_t slot; char id[49],name[64]; uint8_t base; int8_t values[16]; };
-struct a7_custom_catalog { uint32_t generation,next_slot,active,count; struct a7_custom_look looks[A7_CUSTOM_MAX]; };
+struct a7_custom_catalog { uint32_t generation,next_slot,active,count,hidden_builtin; struct a7_custom_look looks[A7_CUSTOM_MAX]; };
 /* Prototype capacity; hardware menu capacity remains to be validated. */
 int a7_custom_parse(const unsigned char*,unsigned,struct a7_custom_look*);
 void a7_custom_empty(struct a7_custom_catalog*);
