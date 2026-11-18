@@ -1,4 +1,8 @@
 #define A7_AUTO_SIZE 1
+#ifdef TEST_WET
+#define A7_WET_PLATE 1
+static unsigned frame_wet;
+#endif
 #include <stdint.h>
 #include <stddef.h>
 #include <errno.h>
@@ -156,5 +160,29 @@ void guest_main(void){
         for(unsigned at=stride*4000;at<0x3000000;at++)check(pixels[at]==0xc7);
         print("AUTO_SIZE_FRAME ");number(w);print("x4000 output_height=");number(dest[i]);print(" passed\n");
     }
+#ifdef TEST_WET
+    for(unsigned i=0;i<3;i++){
+        reset();completed=i;diagnostic=1;frame_grain=0;frame_halation=0;frame_vignette=0;frame_wet=1;
+        unsigned w=widths[i],stride=canvas[i]*2;
+        report[40+0x90/4]=report[40+0x9c/4]=report[40+0xa4/4]=(4000u<<16)|w;
+        report[40+0x94/4]=(4000u<<16)|canvas[i];
+        report[40+0x74/4]=report[40+0x78/4]=dest[i];
+        unsigned char*pixels=(void*)0x7a000000;
+        memset(pixels,0xc7,0x3000000);
+        for(unsigned y=0;y<4000;y++)for(unsigned x=0;x<w;x++){
+            pixels[y*stride+160+2*x]=(x&1)?180:80;
+            pixels[y*stride+161+2*x]=x<w/2?50:200;
+        }
+        check(!take_lease_test());
+        check(opens==1&&closes==1&&!held_lock&&!report[345]&&report[349]==w*4000);
+        for(unsigned y=0;y<4000;y++){
+            for(unsigned x=0;x<160;x++)check(pixels[y*stride+x]==0xc7);
+            for(unsigned x=0;x<w;x++)check(pixels[y*stride+160+2*x]==128);
+            for(unsigned x=160+w*2;x<stride;x++)check(pixels[y*stride+x]==0xc7);
+        }
+        check(pixels[161]<60&&pixels[161+w]>pixels[161]+100);
+    }
+    print("WET_AUTO_LMS_PIXELS_PASSED\n");
+#endif
     grain_remove();print("AUTO_LEASE_PASSED checks=");number(checks);print("\n");stop();
 }

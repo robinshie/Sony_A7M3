@@ -7,6 +7,7 @@ struct a7_custom_engine {
   * Must leave the old state intact on failure or explicitly fault the caller. */
  int (*apply)(void*,const struct a7_fl_preference*,struct a7_fl_preference*);
  void *opaque;
+ int (*apply_catalog)(void*,const struct a7_fl_preference*,struct a7_fl_preference*,const struct a7_custom_catalog*);
 };
 struct a7_custom_session {
  struct a7_custom_store store;
@@ -24,4 +25,7 @@ int a7_custom_session_delete(struct a7_custom_session*,uint32_t);
 int a7_custom_session_save(struct a7_custom_session*);
 int a7_custom_session_cancel(struct a7_custom_session*);
 const char *a7_custom_session_name(const struct a7_custom_session*,unsigned,uint32_t*);
+int a7_custom_wet_value(const struct a7_custom_catalog*,unsigned);
+int a7_custom_wet_edit(struct a7_custom_session*,unsigned,int);
+int a7_custom_wet_install(struct a7_custom_session*);
 #endif

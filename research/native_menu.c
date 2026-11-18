@@ -16,6 +16,9 @@ static int custom(int id) {
 #endif
 #ifdef A7_FL_CAPTURE_VIGNETTE
     if(id==0x7011)return 1;
+#ifdef A7_FL_CAPTURE_WET
+    if(id==0x7014)return 1;
+#endif
 #endif
 #endif
     return id >= A7_MENU_PROCESS_FIRST && id <= A7_MENU_PROCESS_LAST;

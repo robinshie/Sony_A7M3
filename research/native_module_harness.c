@@ -51,6 +51,13 @@ int a7_fl_vignette_apply(unsigned preset,unsigned strength,int halation,int vign
 #endif
 #endif
 #endif
+#ifdef A7_FL_CAPTURE_WET
+static unsigned wet_selection;
+int a7_fl_wet_apply(unsigned p,unsigned g,int h,int v,unsigned w){
+ check(w<=1,"wet capture flag bounded");
+ int rc=a7_fl_vignette_apply(p,g,h,v);if(!rc)wet_selection=p?w:0;return rc;
+}
+#endif
 extern int stock_get(void *,int,int *);
 extern int stock_set(void *,int,int);
 extern void original_action(void *);
@@ -275,6 +282,9 @@ static void test_sd_import(a7_menu_node *look){
 #endif
 #ifdef A7_FL_CUSTOM_LOOKS
 #include "native_custom_harness.h"
+#ifdef A7_FL_CAPTURE_WET
+#include "native_wet_harness.h"
+#endif
 #endif
 void guest_main(void) {
     /* Genuine kernel writer reads current thread_info based on this stack. */
@@ -334,7 +344,7 @@ void guest_main(void) {
 #endif
 #ifdef A7_FL_CAPTURE_HALATION
     int halo_id=native_adjust_field_id(NATIVE_ADJUST_HALATION_FIELD);
-    test(halo_id==0x7010&&film_look->children[2]->count==NATIVE_ADJUST_FIELDS-10,"signed halo before Save on page 3");
+    test(halo_id==0x7010&&film_look->children[2]->count==(NATIVE_ADJUST_FIELDS-10>6?6:NATIVE_ADJUST_FIELDS-10),"signed halo before Save on page 3");
     test(!set_value(halo_id,-1)&&!set_value(halo_id,19)&&
          get_value(halo_id,&enum_value)&&enum_value==9,"new halo starts at zero; invalid enum rejected");
     test(set_value(halo_id,8)&&get_value(halo_id,&enum_value)&&enum_value==8,"native enum 8 represents -1");
@@ -449,7 +459,13 @@ void guest_main(void) {
 #endif
 #ifdef A7_FL_SIX_LOOKS
     a7_menu_node *selector=look_row(film_look,0);
-    test(selector->count==7,"Off and six native mode leaves");
+    test(selector->count==
+#ifdef A7_FL_CAPTURE_WET
+    8
+#else
+    7
+#endif
+    ,"Off and preserved six native mode leaves plus optional FL7");
     const int expected_labels[]={0x0204fdb2,0x0204fdb3,0x0204fdb4};
     uint32_t look_crc[3][3];
     for(int m=4;m<=6;m++){
@@ -494,7 +510,11 @@ void guest_main(void) {
     test_sd_import(film_look);
 #endif
 #ifdef A7_FL_CUSTOM_LOOKS
+#ifdef A7_FL_CAPTURE_WET
+    (void)test_custom_flow;test_wet_flow(film_look);
+#else
     test_custom_flow(film_look);
+#endif
 #endif
     put("NATIVE_FL_ALL_CURVE_BANKS_PASSED\n");
     test(!film->fault,"no resident fault after curve flow");
@@ -525,6 +545,28 @@ void guest_main(void) {
     (void)test_custom_flow;
     struct a7_custom_look imported;struct a7_custom_catalog empty={0},catalog;
     empty.next_slot=7;
+#ifdef A7_FL_CAPTURE_WET
+    test(!a7_custom_parse((const unsigned char*)custom_recipe,sizeof custom_recipe-1,&imported),"parse saved look");
+    (void)test_wet_flow;
+    const char *wetid="wet-plate-hard-bw-v1",*wetname="FL7 湿版黑白";
+    for(unsigned i=0;i<sizeof imported.id;i++)imported.id[i]=0;
+    for(unsigned i=0;i<sizeof imported.name;i++)imported.name[i]=0;
+    for(unsigned i=0;wetid[i];i++)imported.id[i]=wetid[i];
+    for(unsigned i=0;wetname[i];i++)imported.name[i]=wetname[i];
+    imported.wet=1;
+    test(!a7_custom_append(&empty,&imported,&catalog),"saved FL7 catalog");
+    catalog.active=7;catalog.wet_initialized=1;catalog.wet_builtin=5;catalog.hidden_builtin=2;
+    test(!a7_custom_encode(&catalog,custom_disk[0]),"encode wet flags and selected FL7");
+    custom_sizes[0]=A7_CUSTOM_RECORD_BYTES;custom_exists[0]=1;
+    test(!a7_fl_prepare(&platform)&&!a7_fl_initialize_color_prepared()&&!slot_writes&&!custom_writes,"wet startup read-only restore");
+    test(wet_selection==1&&!a7_fl_status()->fault,"boot restores FL7 capture flag");
+    test(!a7_fl_install_prepared(0x40000000,process_element),"attach restored wet menu");
+    int restored_wet=-1;
+    test(get_value(native_adjust_field_id(NATIVE_ADJUST_WET_FIELD),&restored_wet)&&restored_wet==1,"wet menu restores on");
+    test(custom_names(A7_FL_CUSTOM_TITLE_FIRST)&&wet_same_text(custom_names(A7_FL_CUSTOM_TITLE_FIRST),wetname),"FL7 boot name correct");
+    test(!custom_writes&&!slot_writes,"boot leaves preference and custom files unchanged");
+    put("NATIVE_WET_BOOT_PASSED\n");finish();
+#endif
     test(!a7_custom_parse((const unsigned char*)custom_recipe,sizeof custom_recipe-1,&imported)&&
          !a7_custom_append(&empty,&imported,&catalog),"build saved independent catalog");
     catalog.active=7;catalog.hidden_builtin=1;

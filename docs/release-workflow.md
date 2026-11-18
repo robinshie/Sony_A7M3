@@ -1,3 +1,11 @@
+# 当前 v0.01：FL7 湿版黑白完整整合包
+
+下载和安装范围以 [当前完整包说明](wet-plate-release.md) 为准；构建、同内核 L/M/S 实拍验证和更新步骤见 [湿版流程](wet-plate-jpeg.md)。本次保持 v0.01，同名 ZIP 覆盖旧包，更新 main 和标签，不单独发布 r。下方内容保留为历史版本记录，不能套用其旧散列、旧页码或旧前像执行本次更新。
+
+公开打包使用 `tools/package_wet_release.py --acceptance <本地用户验收记录> --out <输出目录>/Sony_A7M3-v0.01.zip`。工具校验实际安装回读、配置保留、同内核 JPEG 证据、用户菜单／开关／冷启动确认，要求源码已提交且工作区干净。最终重启状态回读仍暂缓，清单和正文明确记录，不伪造机器验收。上传后重新下载核对 ZIP 散列，并核对 main、v0.01 与清单提交一致。
+
+---
+
 # v0.01 六风格整合版 · JPEG L／M／S
 
 [v0.01](https://github.com/robinshie/Sony_A7M3/releases/tag/v0.01) 的同名完整 ZIP 包含自动尺寸模块、菜单增量补丁、源码和说明。当前已验收的升级从上一版六风格和 schema 6 配置出发，只更新模块；[安装条件](six-look-release.md)和[真机验收](jpeg-size-adaptation.md)见对应章节。下方三风格版流程保留为历史记录。

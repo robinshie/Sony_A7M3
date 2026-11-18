@@ -88,3 +88,8 @@ int a7_fl_vignette_apply(unsigned preset,unsigned grain,int halation,int vignett
     if(preset>3||grain>9||halation<-9||halation>9||vignette<-9||vignette>9)return -22;
     return apply_selection(preset?(preset<<14)|((unsigned)(vignette+9)<<9)|((unsigned)(halation+9)<<4)|grain:0);
 }
+
+int a7_fl_wet_apply(unsigned preset,unsigned grain,int halation,int vignette,unsigned wet){
+ if(preset>3||grain>9||halation<-9||halation>9||vignette<-9||vignette>9||wet>1)return -22;
+ return apply_selection(preset?(wet<<16)|(preset<<14)|((unsigned)(vignette+9)<<9)|((unsigned)(halation+9)<<4)|grain:0);
+}

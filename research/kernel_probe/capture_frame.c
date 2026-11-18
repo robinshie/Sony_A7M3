@@ -11,7 +11,10 @@
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
 #include "capture-pins.h"
-#if defined(A7_AUTO_SIZE)
+#if defined(A7_WET_PLATE)
+#define UDF_WORD 0xaa87f7f0U
+#define TEST_RETURN 0x7a87
+#elif defined(A7_AUTO_SIZE)
 #define UDF_WORD 0xaa86f7f0U
 #define TEST_RETURN 0x7a86
 #elif defined(A7_CAPTURE_LAYOUT)
@@ -116,12 +119,21 @@ void a7_multi_record(unsigned index,const unsigned int *regs)
 #ifdef A7_VIGNETTE_BANKS
     frame_grain=frame_selection&15;frame_halation=(int)((frame_selection>>4)&31)-9;
     frame_vignette=(int)((frame_selection>>9)&31)-9;
-#ifdef A7_AUTO_SIZE
+#ifdef A7_WET_PLATE
+    frame_wet=(frame_selection>>16)&1;
+#endif
+#if defined(A7_WET_PLATE)
+    if(diagnostic){frame_grain=0;frame_halation=0;frame_vignette=0;}
+#elif defined(A7_AUTO_SIZE)
     if(diagnostic){frame_grain=9;frame_halation=9;frame_vignette=-9;}
 #else
     if(diagnostic){frame_grain=0;frame_halation=0;frame_vignette=completed==0?-9:completed==1?0:9;}
 #endif
-    if(diagnostic?(!frame_selection||completed>=3):(!(frame_selection>>14)||(!frame_grain&&!frame_halation&&!frame_vignette))){
+    if(diagnostic?(!frame_selection||completed>=3):(!(frame_selection>>14)||(!frame_grain&&!frame_halation&&!frame_vignette
+#ifdef A7_WET_PLATE
+      &&!frame_wet
+#endif
+      ))){
 #elif defined(A7_FILM_BANKS)
     frame_grain=frame_selection&15;frame_halation=(int)((frame_selection>>4)&31)-9;
     if(!(frame_selection>>9)||(!frame_grain&&!frame_halation)){

@@ -36,8 +36,9 @@ def main():
     p.add_argument('--classic-looks',action='store_true')
     p.add_argument('--sd-import',action='store_true')
     p.add_argument('--custom-looks',action='store_true')
+    p.add_argument('--capture-wet',action='store_true')
     args=p.parse_args()
-    extension=(args.fl2,args.fl3,args.fl3_curves,args.capture_grain,args.capture_halation,args.capture_vignette,args.classic_looks,args.sd_import,args.custom_looks)
+    extension=(args.fl2,args.fl3,args.fl3_curves,args.capture_grain,args.capture_halation,args.capture_vignette,args.classic_looks,args.sd_import,args.custom_looks,args.capture_wet)
     if sum(extension)>1:p.error("Select one resource extension")
     elf=ELF(args.usr/'lib/libObj.so')
     if sha(elf.data)!=OBJ_SHA:p.error('Unexpected libObj.so SHA-256')
@@ -71,10 +72,13 @@ def main():
     if args.custom_looks:
         from native_fl_custom_strings import LABELS
         expected=LABELS
-    first=7609 if args.custom_looks else 7605 if args.sd_import else 7602 if args.classic_looks else 7601 if args.capture_vignette else 7600 if args.capture_halation else 7599 if args.capture_grain else 7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
+    if args.capture_wet:
+        from native_fl_wet_strings import LABELS
+        expected=LABELS
+    first=7625 if args.capture_wet else 7609 if args.custom_looks else 7605 if args.sd_import else 7602 if args.classic_looks else 7601 if args.capture_vignette else 7600 if args.capture_halation else 7599 if args.capture_grain else 7594 if args.fl3_curves else 7593 if args.fl3 else 7592 if args.fl2 else 7582
     if proof['resources']!={name:0x0204e000+first+i for i,(name,_,_) in enumerate(expected)}:
         p.error('Unexpected resource assignment')
-    suffix=next((n for on,n in zip(extension,('-fl2','-fl3','-fl3-curves','-grain','-halation','-vignette','-classic','-sd','-custom')) if on),'')
+    suffix=next((n for on,n in zip(extension,('-fl2','-fl3','-fl3-curves','-grain','-halation','-vignette','-classic','-sd','-custom','-wet')) if on),'')
     out=ROOT/('.lab/native-resource'+suffix);out.mkdir(parents=True,exist_ok=True)
     (out/'report.json').unlink(missing_ok=True)
     asm='.syntax unified\n';sections=[];parts=[]

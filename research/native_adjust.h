@@ -10,7 +10,13 @@
 #define NATIVE_ADJUST_GRAIN_TITLE 0x0204fdafu
 #ifdef A7_FL_CAPTURE_HALATION
 #ifdef A7_FL_CAPTURE_VIGNETTE
+#ifdef A7_FL_CAPTURE_WET
+#define NATIVE_ADJUST_FIELDS 17
+#define NATIVE_ADJUST_WET_FIELD 16
+#define NATIVE_ADJUST_WET_TITLE 0x0204fdc9u
+#else
 #define NATIVE_ADJUST_FIELDS 16
+#endif
 #define NATIVE_ADJUST_VIGNETTE_FIELD 15
 #define NATIVE_ADJUST_VIGNETTE_TITLE 0x0204fdb1u
 #else
@@ -24,7 +30,11 @@
 #else
 #define NATIVE_ADJUST_FIELDS 13
 #endif
+#ifdef A7_FL_CAPTURE_WET
+#define NATIVE_ADJUST_PAGES 4
+#else
 #define NATIVE_ADJUST_PAGES 3
+#endif
 #else
 #define NATIVE_ADJUST_FIELDS NATIVE_ADJUST_BASE_FIELDS
 #define NATIVE_ADJUST_PAGES 2
@@ -42,10 +52,12 @@
 #define NATIVE_ADJUST_CURVE_TITLE_FIRST 0x0204fdaau
 /* Keep the historical mode and Save dispatch IDs stable. */
 static inline int native_adjust_field_id(unsigned f) {
+    if(f==16)return 0x7014; /* 0x7012/13 are import/delete actions. */
     return NATIVE_ADJUST_ID_FIRST+(int)f+(f>=NATIVE_ADJUST_BASE_FIELDS);
 }
 static inline unsigned native_adjust_field_index(int id) {
-    if(id==NATIVE_ADJUST_SAVE_ID)return NATIVE_ADJUST_FIELDS;
+    if(id==0x7014)return 16;
+    if(id==NATIVE_ADJUST_SAVE_ID||id==0x7012||id==0x7013)return NATIVE_ADJUST_FIELDS;
     return (unsigned)id-NATIVE_ADJUST_ID_FIRST-(id>NATIVE_ADJUST_SAVE_ID);
 }
 enum NativeAdjustField {

@@ -45,7 +45,7 @@ static int number(struct reader*r,int*out){
  *out=sign*v;return 1;
 }
 static int valid_look(const struct a7_custom_look*l){
- if(!l||l->base<1||l->base>6)return 0;
+ if(!l||l->base<1||l->base>6||l->wet>1)return 0;
  unsigned n=0;
  while(n<49&&l->id[n]){unsigned c=(unsigned char)l->id[n];if(!((c>='a'&&c<='z')||(c>='0'&&c<='9')||(n&&(c=='_'||c=='-'))))return 0;n++;}
  if(!n||n>=49)return 0;
@@ -91,7 +91,7 @@ int a7_custom_parse(const unsigned char*data,unsigned n,struct a7_custom_look*ou
 }
 void a7_custom_empty(struct a7_custom_catalog*c){zero(c,sizeof*c);c->next_slot=7;}
 static int valid(const struct a7_custom_catalog*c){
- if(!c||c->hidden_builtin>63||c->count>A7_CUSTOM_MAX||c->next_slot!=7+c->count||c->generation==0xffffffffu)return 0;
+ if(!c||c->wet_builtin>63||c->wet_initialized>1||c->hidden_builtin>63||c->count>A7_CUSTOM_MAX||c->next_slot!=7+c->count||c->generation==0xffffffffu)return 0;
  unsigned active=!c->active;
  for(unsigned i=0;i<c->count;i++){
   const struct a7_custom_look*l=c->looks+i;
@@ -112,9 +112,11 @@ int a7_custom_encode(const struct a7_custom_catalog*c,unsigned char out[A7_CUSTO
  if(!out||!valid(c))return -1;
  zero(out,A7_CUSTOM_RECORD_BYTES);const char*magic="A7CUSTOM";
  for(unsigned i=0;i<8;i++)out[i]=(unsigned char)magic[i];
- put(out+8,c->hidden_builtin?2:1);put(out+12,c->generation);put(out+16,c->next_slot);put(out+20,c->active);put(out+24,c->count|(c->hidden_builtin<<8));
+ unsigned extended=c->wet_builtin||c->wet_initialized;
+ for(unsigned i=0;i<c->count;i++)extended|=c->looks[i].wet;
+ put(out+8,extended?3:c->hidden_builtin?2:1);put(out+12,c->generation);put(out+16,c->next_slot);put(out+20,c->active);put(out+24,c->count|(c->hidden_builtin<<8)|(c->wet_builtin<<16)|(c->wet_initialized<<22));
  for(unsigned i=0;i<c->count;i++){
-  unsigned char*p=out+28+i*176;const struct a7_custom_look*l=c->looks+i;put(p,l->slot);p[4]=l->base;
+  unsigned char*p=out+28+i*176;const struct a7_custom_look*l=c->looks+i;put(p,l->slot);p[4]=l->base;p[5]=l->wet;
   for(unsigned j=0;l->id[j];j++)p[8+j]=(unsigned char)l->id[j];
   for(unsigned j=0;l->name[j];j++)p[57+j]=(unsigned char)l->name[j];
   for(unsigned j=0;j<16;j++)p[121+j]=(unsigned char)l->values[j];
@@ -122,13 +124,15 @@ int a7_custom_encode(const struct a7_custom_catalog*c,unsigned char out[A7_CUSTO
  put(out+A7_CUSTOM_RECORD_BYTES-4,crc(out,A7_CUSTOM_RECORD_BYTES-4));return 0;
 }
 int a7_custom_decode(const unsigned char*data,unsigned n,struct a7_custom_catalog*out){
- if(!data||!out||n!=A7_CUSTOM_RECORD_BYTES||(get(data+8)!=1&&get(data+8)!=2)||get(data+n-4)!=crc(data,n-4))return -1;
+ if(!data||!out||n!=A7_CUSTOM_RECORD_BYTES||(get(data+8)<1||get(data+8)>3)||get(data+n-4)!=crc(data,n-4))return -1;
  const char*magic="A7CUSTOM";for(unsigned i=0;i<8;i++)if(data[i]!=(unsigned char)magic[i])return -1;
- struct a7_custom_catalog c;zero(&c,sizeof c);c.generation=get(data+12);c.next_slot=get(data+16);c.active=get(data+20);c.count=get(data+24)&255;c.hidden_builtin=get(data+24)>>8;
+ struct a7_custom_catalog c;zero(&c,sizeof c);c.generation=get(data+12);c.next_slot=get(data+16);c.active=get(data+20);c.count=get(data+24)&255;c.hidden_builtin=(get(data+24)>>8)&255;c.wet_builtin=(get(data+24)>>16)&63;c.wet_initialized=(get(data+24)>>22)&1;
+ if(get(data+24)>>23 || (get(data+8)<3&&(c.wet_builtin||c.wet_initialized)))return -1;
  if(get(data+8)==1&&c.hidden_builtin)return -1;
  if(c.count>A7_CUSTOM_MAX)return -1;
  for(unsigned i=0;i<c.count;i++){
-  const unsigned char*p=data+28+i*176;struct a7_custom_look*l=c.looks+i;l->slot=get(p);l->base=p[4];
+  const unsigned char*p=data+28+i*176;struct a7_custom_look*l=c.looks+i;l->slot=get(p);l->base=p[4];l->wet=p[5];
+  if(get(data+8)<3&&l->wet)return -1;
   for(unsigned j=0;j<49;j++)l->id[j]=(char)p[8+j];
   for(unsigned j=0;j<64;j++)l->name[j]=(char)p[57+j];
   for(unsigned j=0;j<16;j++)l->values[j]=(int8_t)p[121+j];

@@ -32,7 +32,7 @@ long a7_grain_test_syscall(long nr,long a,long b,long c){
   if(n>(unsigned)c)n=(unsigned)c;if(n>13)n=13;memcpy((void*)b,s+position,n);position+=n;return n;}
  if(nr==122){memset((void*)a,0,390);strcpy((char*)a+130,bad_release?"wrong":"3.0.27_nl-rt106+");return 0;}
  if(nr==128){assert(b==16&&!strcmp((const char*)c,"arm=1 selection=0"));loads++;if(load_error)return load_error;installed=1;selection=0;return 0;}
- if(nr==4){assert(a==11&&c<=6);writes++;if(write_error)return write_error;if(short_write)return c-1;
+ if(nr==4){assert(a==11&&c<=7);writes++;if(write_error)return write_error;if(short_write)return c-1;
   const char*p=(const char*)b;selection=0;for(long i=0;i<c&&p[i]!='\n';i++){assert(p[i]>='0'&&p[i]<='9');selection=selection*10+p[i]-'0';}return c;}
  assert(!"unexpected syscall");return -1;
 }
@@ -49,6 +49,10 @@ int main(void){
  for(unsigned p=1;p<=3;p++)for(unsigned g=0;g<=9;g++)for(int h=-9;h<=9;h++)for(int v=-9;v<=9;v++)
   assert(!a7_fl_vignette_apply(p,g,h,v)&&selection==((p<<14)|((unsigned)(v+9)<<9)|((unsigned)(h+9)<<4)|g)&&loads==1);
  assert(!a7_fl_vignette_apply(0,9,-9,9)&&selection==0);
+ for(unsigned p=1;p<=3;p++)for(unsigned g=0;g<=9;g++)for(int h=-9;h<=9;h++)for(int v=-9;v<=9;v++)for(unsigned w=0;w<2;w++)
+  assert(!a7_fl_wet_apply(p,g,h,v,w)&&selection==((w<<16)|(p<<14)|((unsigned)(v+9)<<9)|((unsigned)(h+9)<<4)|g));
+ assert(a7_fl_wet_apply(1,0,0,0,2)==-22);
+ assert(!a7_fl_wet_apply(0,9,9,9,1)&&selection==0);
  reset();installed=1;bad_identity=1;assert(a7_fl_grain_apply(3,9)==-116&&!loads&&!writes);
  reset();installed=1;bad_parse=1;assert(a7_fl_grain_apply(3,9)==-71&&!loads&&!writes);
  reset();bad_release=1;assert(a7_fl_grain_apply(3,9)==-19&&!loads&&!writes);

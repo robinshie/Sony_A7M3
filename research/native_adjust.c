@@ -162,7 +162,11 @@ int native_adjust_build(NativeAdjustTree *t,uintptr_t base,uint32_t title,uint32
             /* Original PP lists descend from positive to negative. */
             int value=s->maximum-(int)j;
             NativeAdjustProperty *p=t->value_props[f][j];
-            prop(p+0,0,0,native_adjust_number_resid(value));prop(p+1,6,0,s->help);
+            prop(p+0,0,0,
+#ifdef A7_FL_CAPTURE_WET
+                f==NATIVE_ADJUST_WET_FIELD?(value?0x0204fdcbu:0x0204fdcau):
+#endif
+                native_adjust_number_resid(value));prop(p+1,6,0,s->help);
             prop(p+2,0xb,1,0);prop(p+3,0xc,1,1);
             /* Signed -1 is a missing-value sentinel in SettingMenu. Labels
              * retain signed numbers; process values use nonnegative enums. */

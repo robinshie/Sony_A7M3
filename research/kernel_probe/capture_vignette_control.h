@@ -2,11 +2,19 @@
 static unsigned selection,frame_selection,frame_seed,completed,skipped,failed;
 static unsigned frame_grain;
 static int frame_halation,frame_vignette;
+#ifdef A7_WET_PLATE
+static unsigned frame_wet;
+#endif
 static unsigned diagnostic;
 /* Read-only after loading; normal resident boot leaves this disabled. */
 module_param(diagnostic,uint,0400);
 static int selection_valid(unsigned n)
 {
+#ifdef A7_WET_PLATE
+    if(n>=131072)return 0;
+    if((n&65536)&&!((n>>14)&3))return 0;
+    n&=65535;
+#endif
     return n==0||(n<65536&&(n>>14)>=1&&(n>>14)<=3&&(n&15)<=9&&((n>>4)&31)<=18&&((n>>9)&31)<=18);
 }
 static int selection_set(const char *val,const struct kernel_param *kp)

@@ -1,3 +1,6 @@
+#ifdef A7_WET_PLATE
+#include "a7-wet-plate.h"
+#endif
 #ifndef A7_GRAIN_FIXTURE
 #include <linux/jiffies.h>
 #endif
@@ -62,11 +65,21 @@ static int grain_patch(unsigned handle)
     err=a7_film_frame_apply(&frame,&params,film_workspace,sizeof(film_workspace));
     if(!err&&film)sample_auto(film,&frame);
     if(!err)err=a7_film_vignette_apply(&frame,frame_vignette,film_workspace,sizeof(film_workspace));
+#ifdef A7_WET_PLATE
+    if(!err&&frame_wet){
+        int rendered=a7_wet_render(frame.plane[0].data,frame.plane[0].bytes,
+            frame.plane[0].stride,frame.width,frame.height,0);
+        if(rendered!=1)err=-EINVAL;
+    }
+#endif
     mb();
     if(!err&&sample)sample_auto(sample+166,&frame);
     report[362]=(unsigned)frame_vignette;
     report[344]=3;report[345]=err;report[348]=jiffies-start;
     report[349]=(frame_grain||frame_halation||frame_vignette)?frame.width*frame.height:0;report[350]=err?2:0;
+#ifdef A7_WET_PLATE
+    if(!err&&frame_wet)report[349]=frame.width*frame.height;
+#endif
     report[359]=physical;report[360]=va;report[361]=frame_grain;
     report[364]=geometry.width;report[365]=geometry.height;report[366]=geometry.stride;report[367]=geometry.offset;
     if(sample)sample[333]=(unsigned)(jiffies-start);
@@ -95,6 +108,12 @@ static int grain_publish(void)
         if((strength==0&&memcmp(pixels,original,64))||
            (strength<0&&pixels[1]>=105)||(strength>0&&pixels[1]<=105))return -EINVAL;
     }
+#ifdef A7_WET_PLATE
+    for(i=0;i<64;i++)pixels[i]=(i&1)?((i/2)%8<4?50:200):((i&2)?180:80);
+    if(a7_wet_render(pixels,64,16,8,4,0)!=1)return -EINVAL;
+    for(i=0;i<64;i+=2)if(pixels[i]!=128)return -EINVAL;
+    if(pixels[1]>=60||pixels[9]<=pixels[1]+100)return -EINVAL;
+#endif
     report[352]=1;return 0;
 }
 static void grain_remove(void){}

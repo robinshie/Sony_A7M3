@@ -11,7 +11,7 @@ static int apply(void*c,const struct a7_fl_preference*before,struct a7_fl_prefer
 }
 static const unsigned char recipe[]="{\"format\":\"A7FL-LOOK/1\",\"id\":\"portrait-grain\",\"name\":\"人像颗粒\",\"base\":\"FL6\",\"parameters\":{\"contrast\":4,\"highlights\":2,\"shadows\":-3,\"fade\":1,\"saturation\":2,\"sharpness\":1,\"sharpness_range\":4,\"clarity\":2,\"grain\":7,\"halation\":-2,\"black\":1,\"curve_shadow\":2,\"midtone\":3,\"curve_highlight\":4,\"white\":5,\"vignette\":-6}}";
 int main(void){
- struct a7_custom_io io={readslot,replace,0};struct a7_custom_engine engine={apply,0};
+ struct a7_custom_io io={readslot,replace,0};struct a7_custom_engine engine={apply,0,0};
  struct a7_fl_preference builtin={.schema=6,.enabled=1,.generation=72};builtin.parameters[0]=8;builtin.parameters[6]=3;builtin.film[5][0]=1;
  struct a7_fl_preference original=builtin;struct a7_custom_session s,reboot;
  assert(!a7_custom_session_open(&s,&io,&engine,&builtin));
@@ -62,4 +62,5 @@ int main(void){
  puts("BUILTIN_DELETE_REBOOT_REIMPORT_PASSED");
  puts("CUSTOM_DELETE_REBOOT_PASSED");
  puts("CUSTOM_SESSION_FLOW_PASSED: import/name/select/edit/save/reopen/cancel/restore; original six banks unchanged; capture callback modeled");
+ return 0;
 }

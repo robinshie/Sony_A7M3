@@ -1,5 +1,19 @@
 # A7M3 默认开发和发布流程
 
+**2026-11-18 用户授权发布 FL7 湿版黑白完整包。** 用户要求提交、同步 main、用完整包覆盖同一个 v0.01，不单独发 r；最后重启状态回读已明确选择稍后，不再联系相机。`tools/package_wet_release.py` 检查此前完整安装回读、原配置保留、同一内核 L/M/S JPEG 和用户冷启动／开关确认，清单明确 `post_boot_status_readback_verified=false`。当前模块 ece2cf2c、内核 a5ef0861；本次只发布读取验收过的模块和公开素材，不上传 .lab、照片、个人配方或机身备份。发布步骤：提交后生成同名 ZIP，同步 main／开发分支和 v0.01，覆盖固件附件并回下载校验；保留已有电脑工具附件及其独立版本说明。
+
+**2026-11-18 湿版黑白已获用户实机验收，最后只读状态核对待 USB 重连。** 用户明确确认「FL7 黑白正常，原有风格开关正常，重启保留」。验收记录 `.lab/wet-plate-acceptance/1795004610806491000/user-acceptance.json`。最后只读工具在正常USB接口初始查询时遇到 Pipe error，尚未进入服务模式、未回读新状态，无持久写入；不要将此错误当作黑白功能失败，也不要声称已读回重启后的错误计数。用户已选择「稍后再回读」，停止相机操作；后续用户愿意接回时再运行下方 wet_plate_acceptance 命令，无需重复拍照。安装本身此前已经全文件回读通过，本轮不再次刷写。未提交或发布。
+
+**2026-11-18 湿版黑白完整菜单候选已写入，等待用户冷启动验收。** 用户刚完成同一内核临时 L→M→S 实拍，三张均为黑白、拍摄回放正常；实际源帧样本与三张 JPEG 核对通过，completed3/failed0，三图 RGB 通道差均0。内核 `.lab/capture-kernel/1795003342232639000/a7capwet.ko` SHA `a5ef08615a085f3c33940ad0f5081a5910498e58534fe9dfcae27b4bfa8f54fa`。临时回调在采集后已停用，新持久模块需彻底断电后加载。不要把临时拍照通过等同完整菜单冷启动通过。
+
+已执行 `.lab/native-fl-releases/update-v001-wet-plate-6pocs7rl`；证据 `write-1795004322417930000/verified.json`、`catalog-preserved.json`。模块 SHA `ece2cf2c868ddb66cc3c18265abcdc398909e4796cc3c7836e63c47eac99ae31`（159528字节），简中 `1753d4bb32a1def8ba58b58804bf51224249f2191bdf30619fe31889c9b39be0`、英文 `9ac34660932e91e8af98cc0e690180b26a522aed085e42fbf076e81d6a82bb4b` 完整回读一致。原A7FL、A7FW四槽及A7CU两槽安装时逐字节未变，view/WBI不变、/usr恢复只读。禁止重放这个包，也不得再使用旧30474345前像写入。
+
+功能：新增独立 FL7 湿版黑白，原六个FL及已导入风格各自新增默认关的「湿版黑白（拍后）」；第三页末尾开关、第四页保存、第五页删除，同级SD导入保留。FL7固定开启，既有16项参数不改。A7CU在首次启动迁移schema3/同长度2848字节，追加一次FL7，不复活已删除内置风格；旧模块不能直接读取新schema，回退需配套备份。实际安装前独立库gen41/count9/active14/hidden_builtin63，含9套用户配方；迁移测试保留9套和删除位图，只追加FL7成为10套，所有旧开关默认0。原六套A7FL仍schema6/gen72。
+
+本轮3文件原子替换核心故障测试、主机保护测试、原厂ARM菜单/保存/冷启动模拟、当前真实配方迁移测试通过。完整候选 `.lab/native-module-wet-candidate/proof.json`；`normal_mode_verified=false`，需用户冷启动验证。用户已收到FL7拍照、原有风格黑白开关、保存重启步骤。未提交或发布，不覆盖稳定v0.01。
+
+安装空间不足时，仅将四个更旧语言备份 `.a7six-zh/en.orig`、`.a7sd-zh/en.orig` 完整归档校验后移出机身，证据 `.lab/wet-old-locale-archive/1795004194875080000/verified.json`。当前及最近模块备份、最近语言备份保留。安装前配置快照 `.lab/custom-look-incident/1795003175402079000` 与候选包catalog-backup目录均在。后续研究见 `docs/wet-plate-jpeg.md`。冷启动只读核对用 `research/wet_plate_acceptance.py --package .lab/native-fl-releases/update-v001-wet-plate-6pocs7rl --before .lab/custom-look-incident/1795003175402079000 --live`；当前用户操作尚待反馈，不提前运行或重写。
+
 **首装工具三平台构建通过。** 开发分支 `codex/stock-404-installer`，实现提交 `b45ecb2`；Actions `43866534385` 的 Windows x64/macOS arm64/Linux x64 均通过 34 测试、原生构建和解压后启动、libusb/认证依赖加载、临时配方回读。没有相机 USB 枚举或实机刷写。含候选的本地包目录 `.lab/stock-tool-dist`；main 与稳定 v0.01 未改，硬件验证仍空缺。不要混淆 Windows EXE 能加载驱动库与实际 Sony USB/原厂首次安装验收。
 
 **2026-11-16 首装实验 GUI 已接入真实后端，禁止连接当前相机。** 用户明确要求继续原厂 4.04 首装与 Windows USB，但先别动现有改装机；本轮未枚举/连接任何相机。`tool/first_install.py` 串联单一 USB 会话、逐机备份、单独确认、暂存、图标/配置/加载器激活、WBI 绑定和完整回读；`tool/usb_transport.py` 使用固定上游最小源码和 libusb，Windows 普通/服务两模式仍待实物测试。GUI 启动不枚举 USB，`--usb-runtime-check` 仅加载动态库及认证依赖，不枚举设备。

@@ -136,6 +136,9 @@ static int film_crc(struct a7_fl_preference *p){
     p->candidate_crc=a7_fl_crc(table,1280);return 0;
 }
 #ifdef A7_FL_CAPTURE_GRAIN_BACKEND
+#ifdef A7_FL_CAPTURE_WET
+static const struct a7_custom_catalog *wet_transition;
+#endif
 static int grain_sync(const struct a7_fl_preference *p){
 #ifdef A7_FL_CAPTURE_VIGNETTE
     unsigned wire_mode=(unsigned)p->enabled;
@@ -143,8 +146,14 @@ static int grain_sync(const struct a7_fl_preference *p){
     /* Kernel only needs Off/On and the three strengths. Keep r16's wire format. */
     if(wire_mode>=A7_FL_EXTENDED_FIRST)wire_mode=A7_FL_PRESET_FL;
 #endif
+#ifdef A7_FL_CAPTURE_WET
+    return a7_fl_wet_apply(wire_mode,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
+        p->enabled?p->film[p->enabled-1][1]:0,p->enabled?p->vignette[p->enabled-1]:0,
+        a7_custom_wet_value(wet_transition?wet_transition:&custom.working,(unsigned)p->enabled));
+#else
     return a7_fl_vignette_apply(wire_mode,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
                                p->enabled?p->film[p->enabled-1][1]:0,p->enabled?p->vignette[p->enabled-1]:0);
+#endif
 #elif defined(A7_FL_CAPTURE_HALATION)
     return a7_fl_film_apply((unsigned)p->enabled,p->enabled?(unsigned)p->film[p->enabled-1][0]:0,
                            p->enabled?p->film[p->enabled-1][1]:0);
@@ -178,11 +187,26 @@ static int custom_apply(void*unused,const struct a7_fl_preference*before,struct 
  (void)unused;(void)before;
  int rc=film_crc(next);return rc?rc:film_change(next);
 }
+#ifdef A7_FL_CAPTURE_WET
+static int custom_apply_catalog(void*unused,const struct a7_fl_preference*before,struct a7_fl_preference*next,const struct a7_custom_catalog*c){
+ wet_transition=c;
+ int rc=custom_apply(unused,before,next);
+ wet_transition=0;
+ if(rc&&grain_sync(before))module.status.fault=1;
+ return rc;
+}
+#endif
 static int custom_start(void){
  struct a7_custom_io io;a7_custom_posix_io(&io);
- struct a7_custom_engine engine={custom_apply,0};
+ struct a7_custom_engine engine={custom_apply,0,0};
+#ifdef A7_FL_CAPTURE_WET
+ engine.apply_catalog=custom_apply_catalog;
+#endif
  int rc=a7_custom_session_open(&custom,&io,&engine,&module.control.preference);
  if(rc<0)return rc;
+#ifdef A7_FL_CAPTURE_WET
+ if(a7_custom_wet_install(&custom))return A7_FL_CONTROL_PERSIST;
+#endif
  module.control.committed=module.control.preference=custom.effective;
  module.control.dirty=0;return 0;
 }
@@ -367,6 +391,9 @@ static int synchronize(void) {
 #ifdef A7_FL_FILM_CONTROLS
         for(unsigned f=8;f<NATIVE_ADJUST_FIELDS;f++)
             if(!native_adjust_write(&module.trees[j],native_adjust_field_id(f),
+#ifdef A7_FL_CAPTURE_WET
+                f==NATIVE_ADJUST_WET_FIELD?a7_custom_wet_value(&custom.working,(unsigned)module.control.preference.enabled):
+#endif
                 a7_fl_film_get(&module.control.preference,module.control.preference.enabled?module.control.preference.enabled-1:0,native_adjust_film_index(f)),accept_applied,0))return 0;
 #endif
     }
@@ -382,6 +409,9 @@ static int model_read(void *unused,int id,int *value) {
 #endif
       value);
     unsigned f=native_adjust_field_index(id);
+#ifdef A7_FL_CAPTURE_WET
+    if(f==NATIVE_ADJUST_WET_FIELD)return native_adjust_encode(&module.trees[0],id,a7_custom_wet_value(&custom.working,(unsigned)module.control.preference.enabled),value);
+#endif
 #ifdef A7_FL_FILM_CONTROLS
     if(f>=8&&f<NATIVE_ADJUST_FIELDS)
         return native_adjust_encode(&module.trees[0],id,a7_fl_film_get(&module.control.preference,module.control.preference.enabled?module.control.preference.enabled-1:0,native_adjust_film_index(f)),value);
@@ -397,6 +427,17 @@ static int model_write(void *unused,int id,int value) {
     int decoded;
     if(!native_adjust_decode(&module.trees[0],id,value,&decoded)) {leave(A7_FL_CONTROL_ARGUMENT);return 0;}
 #ifdef A7_FL_CUSTOM_LOOKS
+#ifdef A7_FL_CAPTURE_WET
+    if(native_adjust_field_index(id)==NATIVE_ADJUST_WET_FIELD){
+        if(!custom.ready||!module.control.preference.enabled)return leave(A7_FL_CONTROL_UNSUPPORTED)==0;
+        if(!custom.working.active)custom.builtin=module.control.preference;
+        custom.effective=module.control.preference;
+        if(a7_custom_wet_edit(&custom,(unsigned)module.control.preference.enabled,decoded))return leave(A7_FL_MODULE_EVENT)==0;
+        module.control.dirty=module.control.dirty||custom.dirty;
+        if(!synchronize())return leave(A7_FL_MODULE_NODES)==0;
+        save_feedback(0x0204eaab);return leave(0)==0;
+    }
+#endif
     if(custom.ready&&((decoded>=7&&id==0x7000) || custom.working.active)){
         unsigned field=native_adjust_field_index(id);int rc;
         if(id==0x7000){
@@ -838,6 +879,10 @@ int a7_fl_install_prepared(uintptr_t view_base,void *view_manager) {
     editable|=1u<<NATIVE_ADJUST_VIGNETTE_FIELD;
 #endif
 #endif
+#ifdef A7_FL_CAPTURE_WET
+    specs[NATIVE_ADJUST_WET_FIELD]=(NativeAdjustSpec){NATIVE_ADJUST_WET_TITLE,0,0,1,a7_custom_wet_value(&custom.working,(unsigned)preference.enabled)};
+    editable|=1u<<NATIVE_ADJUST_WET_FIELD;
+#endif
     for(unsigned j=0;j<module.platform.parent_count;j++) {
         if(!native_adjust_build(&module.trees[j],module.platform.caution_base,0x0204fd9e,0x0204fd9f,0x0204fd9f,specs,editable)) {
             rollback();return leave(A7_FL_MODULE_NODES);
@@ -944,6 +989,9 @@ int a7_fl_cancel(void) {
     int rc=0;
 #ifdef A7_FL_CUSTOM_LOOKS
     if(custom.ready&&custom.dirty){
+#ifdef A7_FL_CAPTURE_WET
+        if(!custom.working.active&&!custom.saved.active)custom.builtin=module.control.committed;
+#endif
         rc=a7_custom_session_cancel(&custom);
         if(!rc){module.control.preference=custom.effective;module.control.dirty=0;}
     }else

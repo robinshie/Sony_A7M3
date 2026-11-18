@@ -54,8 +54,14 @@ REVISIONS[23]=dict(old_sha='2e13c731322960f5e46bd46f7112396ea5fa1ae78cff7e82d948
 REVISIONS[24]=dict(old_sha='a820f62cbea336e16b945f95278ed760a1b0190ca97e6576e23113ac2991cdf9',old_size=153424,temporary='.a7custsel.new',backup='.a7fl-a820f62c.orig',journal='A7CUSSEL.LOG')
 REVISIONS[25]=dict(old_sha='b3d387dfb2dbfa3d58adbcb5bcc8a07df4bb80339c74fbf2ed38bdeb47c31fe3',old_size=153740,temporary='.a7builtin.new',backup='.a7fl-b3d387df.orig',journal='A7BUILTIN.LOG')
 REVISIONS[26]=dict(old_sha='a6545d1306c78872b2b28acecb3640d139cd6919a5818e5aa3de4ecb4870e927',old_size=155148,temporary='.a7livelist.new',backup='.a7fl-a6545d13.orig',journal='A7LIVELIST.LOG')
+REVISIONS[27]=dict(old_sha='30474345352eaed6b1feb8f33e389278febaeb6c3fc493dc2355ab560ca591a4',old_size=155840,temporary='.a7wet.new',backup='.a7fl-30474345.orig',journal='A7WETUP.LOG')
+REVISIONS[2701]=dict(old_sha='abd89f064761b234623e603a461588f7433dbf1a282e669d413866ac26a7d33b',old_size=351056,temporary='.a7wet-zh.new',backup='.a7wet-zh.orig',journal='A7WETZH.LOG',locale='string_simplifiedchinese.uxc',resource_set='wet')
+REVISIONS[2702]=dict(old_sha='36bed3b1be93c6fc1ecea704ea487d4baec315543a599e7d01846e87b59feb42',old_size=393712,temporary='.a7wet-en.new',backup='.a7wet-en.orig',journal='A7WETEN.LOG',locale='string_english.uxc',resource_set='wet')
 FORWARD=((1,0,0,0),(2,0,0,0),(10,0,0,0),(20,1,0,0),(30,1,0,0),(31,1,1,0),(40,1,1,0),(41,0,1,1),(60,0,1,1),(100,0,1,1))
 def require_capture_release(revision,proof):
+ if revision==27:
+  from camera.native_wet_release import require_wet_release
+  require_wet_release(proof);return
  if revision in (20,21,22,23,24,25,26):
   require(proof.get('passed') is True and proof.get('normal_mode_verified') is False,'Expected independent-look candidate trial evidence.')
   for name,digest in proof['fixture_sha256'].items():require(file_sha(ROOT/name)==digest,'Custom fixture changed: '+name)
@@ -274,8 +280,8 @@ def operate(camera,b,operation,evidence,write_device=False):
  save_json(e/'binding.json',m);zero_wbi(camera,e/'wbi-before')
  for path in (b.temporary,b.backup,b.journal):require(f.read(path)[0]==f.missing,'Existing transaction/backup is never resumed or overwritten: '+path)
  require_file(f,getattr(b,'target',MODULE),m['old'],e/'old-module.so');require_file(f,VIEW,m['view'],e/'view-before.so')
- if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24,25,26):
-  resource_set='fl-custom' if m['version'] in (20,21,22,23,24,25,26) else 'fl-sd' if m['version']==19 else 'fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
+ if m['version'] in (11,12,13,14,15,151,16,17,18,19,20,21,22,23,24,25,26,27):
+  resource_set='fl-wet' if m['version']==27 else 'fl-custom' if m['version'] in (20,21,22,23,24,25,26) else 'fl-sd' if m['version']==19 else 'fl-classic' if m['version'] in (17,18) else 'fl-vignette' if m['version']==16 else 'fl-halation' if m['version']==151 else 'fl-grain' if m['version']==15 else 'fl-curve' if m['version'] in (13,14) else 'fl3' if m['version']==12 else 'fl2'
   resource=json.loads((LAB/f'native-{resource_set}-strings/proof.json').read_text())
   for name,record in resource['files'].items():
    require_file(f,'/usr/share/app/'+name,dict(size=record['after_bytes'],sha256=record['after_sha256']),e/('required-'+name))
